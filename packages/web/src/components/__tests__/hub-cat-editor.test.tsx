@@ -215,6 +215,179 @@ describe('HubCatEditor', () => {
     expect(payload.mcpSupport).toBe(true);
   });
 
+  it('buildCatPayload clears stale accountRef and enables MCP when switching to Kiro', () => {
+    const form: HubCatEditorFormState = {
+      catId: 'runtime-codex',
+      name: '运行时 Kiro 猫',
+      displayName: '运行时 Kiro 猫',
+      variantLabel: '',
+      nickname: '',
+      avatar: '/avatars/kiro.png',
+      colorPrimary: '#6750a4',
+      colorSecondary: '#eaddff',
+      mentionPatterns: '@runtime-kiro',
+      roleDescription: 'Kiro ACP',
+      personality: '',
+      teamStrengths: '',
+      caution: '',
+      strengths: '',
+      clientId: 'kiro',
+      accountRef: 'codex',
+      defaultModel: '',
+      toolPolicy: 'standard',
+      commandArgs: '',
+      cliConfigArgs: [],
+      cliEffort: '',
+      provider: '',
+      sessionChain: 'true',
+      maxPromptTokens: '',
+      maxContextTokens: '',
+      maxMessages: '',
+      maxContentLengthPerMsg: '',
+      voiceVoice: '',
+      voiceLangCode: '',
+      voiceSpeed: '',
+      voiceRefAudio: '',
+      voiceRefText: '',
+      voiceInstruct: '',
+      voiceTemperature: '',
+    };
+    const existingCat = {
+      id: 'runtime-codex',
+      name: 'runtime-codex',
+      displayName: '运行时 Codex 猫',
+      clientId: 'openai',
+      accountRef: 'codex',
+      defaultModel: 'gpt-5.4',
+      color: { primary: '#16a34a', secondary: '#bbf7d0' },
+      mentionPatterns: ['@runtime-codex'],
+      avatar: '/avatars/codex.png',
+      roleDescription: '审查',
+    } as CatData;
+
+    const payload = buildCatPayload(form, existingCat) as Record<string, unknown>;
+    expect(payload.clientId).toBe('kiro');
+    expect(payload.accountRef).toBeNull();
+    expect(payload.defaultModel).toBe('');
+    expect(payload.mcpSupport).toBe(true);
+  });
+
+  it('adopts Kiro CLI without an account selector and permits an empty model', async () => {
+    const onSaved = vi.fn(() => Promise.resolve());
+    mockApiFetch.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === '/api/accounts') {
+        return Promise.resolve(
+          jsonResponse({
+            projectPath: '/tmp/project',
+            providers: [
+              {
+                id: 'codex-sponsor',
+                provider: 'codex-sponsor',
+                displayName: 'Codex Sponsor',
+                name: 'Codex Sponsor',
+                authType: 'api_key',
+                mode: 'api_key',
+                models: ['gpt-5.4'],
+                hasApiKey: true,
+                createdAt: '2026-07-16T00:00:00.000Z',
+                updatedAt: '2026-07-16T00:00:00.000Z',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cat-model-options') {
+        return Promise.resolve(
+          jsonResponse({
+            source: 'local-cli-scan-v1',
+            clients: {
+              kiro: {
+                defaultModel: 'gpt-5.6-sol',
+                models: ['gpt-5.6-sol'],
+                modelsSource: 'cli',
+              },
+            },
+          }),
+        );
+      }
+      if (path === '/api/cat-templates') return Promise.resolve(jsonResponse({ templates: [] }));
+      if (path === '/api/local-cli-probes') {
+        return Promise.resolve(
+          jsonResponse({
+            clis: [
+              {
+                id: 'kiro',
+                label: 'Kiro CLI',
+                command: 'kiro-cli',
+                clientId: 'kiro',
+                defaultModel: 'gpt-5.6-sol',
+                models: [{ id: 'gpt-5.6-sol', source: 'cli', isDefault: true }],
+                modelsStatus: 'ok',
+                installed: true,
+                resolvedPath: 'C:/Users/test/AppData/Local/Kiro-Cli/kiro-cli.exe',
+                version: 'kiro-cli-chat 2.12.2',
+                versionStatus: 'ok',
+                authStatus: 'unknown',
+                authStatusReason: '认证由本机 Kiro CLI 管理。',
+                installHint: '按 Kiro CLI 官方安装文档安装',
+              },
+            ],
+          }),
+        );
+      }
+      if (path === '/api/cats' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ cat: { id: 'runtime-kiro' } }, 201));
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(React.createElement(HubCatEditor, { open: true, onClose: vi.fn(), onSaved }));
+    });
+    await flushEffects();
+
+    const scanButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '扫描本机 CLI 与模型',
+    );
+    await act(async () => scanButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushEffects();
+
+    const adoptButton = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === '用 Kiro CLI',
+    );
+    expect(adoptButton).toBeTruthy();
+    await act(async () => adoptButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushEffects();
+
+    const clientSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="Client"]');
+    expect(Array.from(clientSelect.options).some((option) => option.value === 'kiro')).toBe(true);
+    expect(clientSelect.value).toBe('kiro');
+    expect(container.querySelector('select[aria-label="认证信息"]')).toBeNull();
+    expect(container.textContent).toContain('认证由本机 Kiro CLI 管理');
+
+    const modelInput = queryField<HTMLInputElement>(container, 'input[aria-label="Model"]');
+    expect(modelInput.required).toBe(false);
+    await changeField(modelInput, '');
+    await flushEffects();
+    expect(modelInput.value).toBe('');
+
+    await changeField(queryField(container, 'input[aria-label="Name"]'), '本地 Kiro');
+    await changeField(queryField(container, 'input[aria-label="Description"]'), 'Kiro ACP 执行');
+    await changeField(queryField(container, 'textarea[aria-label="Aliases"]'), '@runtime-kiro');
+    const saveButton = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === '保存');
+    await act(async () => saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await flushEffects();
+
+    const postCall = mockApiFetch.mock.calls.find(([path, init]) => path === '/api/cats' && init?.method === 'POST');
+    expect(postCall).toBeTruthy();
+    const payload = JSON.parse(String(postCall?.[1]?.body));
+    expect(payload.clientId).toBe('kiro');
+    expect(payload.accountRef).toBeUndefined();
+    expect(payload.defaultModel).toBe('');
+    expect(payload.mcpSupport).toBe(true);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
   it('buildCatPayload seeds default Antigravity command args when the field is still blank', () => {
     const form: HubCatEditorFormState = {
       catId: 'runtime-bridge',

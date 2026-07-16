@@ -49,9 +49,9 @@ export interface AcpPoolClient {
   close(): Promise<void>;
 }
 
-/** Factory that creates fresh AcpClient instances. */
+/** Factory that creates fresh AcpClient instances for a concrete pool key. */
 // biome-ignore lint: AcpClient extends this but has more methods — pool doesn't care
-export type AcpClientFactory = () => AcpPoolClient; // eslint-disable-line @typescript-eslint/no-explicit-any
+export type AcpClientFactory = (poolKey: PoolKey) => AcpPoolClient; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 // ── Internal ──────────────────────────────────────────────────
 
@@ -74,6 +74,7 @@ export class AcpProcessPool {
   private readonly entries = new Map<string, PoolEntry[]>();
   private readonly clientFactory: AcpClientFactory;
   private readonly pendingSpawns = new Map<string, Promise<PoolEntry>>();
+  private readonly supportsMultiplexing: boolean;
   private healthTimer: ReturnType<typeof setInterval> | null = null;
   private closed = false;
 
@@ -89,7 +90,7 @@ export class AcpProcessPool {
 
   constructor(
     config: Partial<AcpPoolConfig> & Pick<AcpPoolConfig, 'maxLiveProcesses'>,
-    _variantConfig: unknown,
+    variantConfig: { supportsMultiplexing?: boolean },
     clientFactory: AcpClientFactory,
   ) {
     this.config = {
@@ -98,6 +99,7 @@ export class AcpProcessPool {
       evictionPolicy: config.evictionPolicy ?? 'lru',
       healthCheckIntervalMs: config.healthCheckIntervalMs ?? 30_000,
     };
+    this.supportsMultiplexing = variantConfig.supportsMultiplexing !== false;
     this.clientFactory = clientFactory;
     this.startHealthCheck();
   }
@@ -110,8 +112,10 @@ export class AcpProcessPool {
     const key = serializeKey(poolKey);
     const entries = this.entries.get(key) ?? [];
 
-    // 1. Try warm reuse (multiplexing: any ready entry)
-    const warm = entries.find((e) => e.state === 'ready' && e.client.isAlive);
+    // 1. Try warm reuse. Non-multiplex carriers may only lease an idle process.
+    const warm = entries.find(
+      (e) => e.state === 'ready' && e.client.isAlive && (this.supportsMultiplexing || e.leaseCount === 0),
+    );
     if (warm) {
       if (warm.leaseCount === 0) {
         this._metrics.idleProcessCount--;
@@ -124,8 +128,8 @@ export class AcpProcessPool {
       return this.createLease(warm, poolKey);
     }
 
-    // 2. Coalesce with in-flight spawn for same key (prevents concurrent duplicate cold starts)
-    const pending = this.pendingSpawns.get(key);
+    // 2. Multiplex carriers coalesce an in-flight spawn for the same key.
+    const pending = this.supportsMultiplexing ? this.pendingSpawns.get(key) : undefined;
     if (pending) {
       const entry = await pending;
       entry.leaseCount++;
@@ -146,7 +150,9 @@ export class AcpProcessPool {
     this._metrics.liveProcessCount++;
 
     const spawnPromise = this.doSpawn(poolKey, key);
-    this.pendingSpawns.set(key, spawnPromise);
+    if (this.supportsMultiplexing) {
+      this.pendingSpawns.set(key, spawnPromise);
+    }
 
     const entry = await spawnPromise;
     entry.leaseCount++;
@@ -224,7 +230,7 @@ export class AcpProcessPool {
   }
 
   private async spawnEntry(poolKey: PoolKey): Promise<PoolEntry> {
-    const client = this.clientFactory();
+    const client = this.clientFactory(poolKey);
     const entry: PoolEntry = {
       client,
       leaseCount: 0, // caller manages lease count after spawn

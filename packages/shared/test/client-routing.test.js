@@ -19,3 +19,9 @@ test('grok has its own builtin account family and xAI protocol', () => {
   assert.equal(builtinAccountIdForClient('grok'), 'grok');
   assert.equal(protocolForClient('grok'), 'xai');
 });
+
+test('kiro uses CLI-managed auth and has no builtin account protocol', () => {
+  assert.equal(builtinAccountFamilyForClient('kiro'), null);
+  assert.equal(builtinAccountIdForClient('kiro'), null);
+  assert.equal(protocolForClient('kiro'), null);
+});

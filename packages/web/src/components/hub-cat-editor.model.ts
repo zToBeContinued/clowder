@@ -14,6 +14,7 @@ export type ClientId =
   | 'anthropic'
   | 'openai'
   | 'google'
+  | 'kiro'
   | 'kimi'
   | 'grok'
   | 'dare'
@@ -104,6 +105,7 @@ export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
   { value: 'anthropic', label: 'Claude' },
   { value: 'openai', label: 'Codex' },
   { value: 'google', label: 'Gemini' },
+  { value: 'kiro', label: 'Kiro' },
   { value: 'kimi', label: 'Kimi' },
   { value: 'grok', label: 'Grok' },
   { value: 'dare', label: 'Dare' },

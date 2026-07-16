@@ -117,6 +117,13 @@ export function resolveCliCommand(command: string): string | null {
     // were installed by the bundled npm during post-install.
     const appData = process.env.APPDATA;
     const localAppData = process.env.LOCALAPPDATA;
+    if (command === 'kiro-cli' && localAppData) {
+      const kiroCandidate = resolve(localAppData, 'Kiro-Cli', 'kiro-cli.exe');
+      if (existsSync(kiroCandidate)) {
+        resolvedCache.set(command, kiroCandidate);
+        return kiroCandidate;
+      }
+    }
     const winDirs: string[] = [];
     if (appData) winDirs.push(resolve(appData, 'npm'));
     if (localAppData) winDirs.push(resolve(localAppData, 'npm'));
@@ -170,6 +177,7 @@ export function formatCliNotFoundError(command: string): string {
     claude: 'npm install -g @anthropic-ai/claude-code',
     codex: 'npm install -g @openai/codex',
     gemini: 'npm install -g @google/gemini-cli',
+    'kiro-cli': '按 Kiro CLI 官方安装文档完成安装',
     kimi: 'uv tool install --python 3.13 kimi-cli',
     grok: 'follow the official xAI Grok CLI installation guide',
     opencode: 'npm install -g opencode',

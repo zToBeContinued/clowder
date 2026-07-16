@@ -15,6 +15,7 @@ export type ClientId =
   | 'anthropic'
   | 'openai'
   | 'google'
+  | 'kiro'
   | 'kimi'
   | 'grok'
   | 'dare'

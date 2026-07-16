@@ -993,7 +993,7 @@
     {
       "id": "F161",
       "name": "ACP Carrier Generalization — 多载体复用同一 Runtime Policy",
-      "status": "spec | **Owner**: TBD | **Priority**: P2",
+      "status": "done | **Owner**: Kiro | **Priority**: P2",
       "file": "F161-acp-carrier-generalization.md"
     },
     {

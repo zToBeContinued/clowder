@@ -60,6 +60,12 @@ const defaultVariantConfig = {
   supportsMultiplexing: true,
 };
 
+const nonMultiplexVariantConfig = {
+  command: 'kiro-cli',
+  startupArgs: ['acp'],
+  supportsMultiplexing: false,
+};
+
 const key1 = { projectPath: '/tmp/a', providerProfile: 'gemini-default' };
 const key2 = { projectPath: '/tmp/b', providerProfile: 'gemini-default' };
 const key3 = { projectPath: '/tmp/c', providerProfile: 'gemini-default' };
@@ -101,6 +107,63 @@ describe('AcpProcessPool', () => {
       assert.strictEqual(m.coldStartCount, 1);
       lease1.release();
       lease2.release();
+    });
+
+    test('non-multiplex carrier does not share an active process for the same key', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexVariantConfig, createMockClient);
+      const lease1 = await pool.acquire(key1);
+      const lease2 = await pool.acquire(key1);
+
+      assert.notStrictEqual(lease1.client, lease2.client);
+      assert.strictEqual(pool.getMetrics().coldStartCount, 2);
+      lease1.release();
+      lease2.release();
+    });
+
+    test('non-multiplex carrier does not coalesce concurrent cold starts', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexVariantConfig, createMockClient);
+      const [lease1, lease2] = await Promise.all([pool.acquire(key1), pool.acquire(key1)]);
+
+      assert.notStrictEqual(lease1.client, lease2.client);
+      assert.strictEqual(pool.getMetrics().coldStartCount, 2);
+      lease1.release();
+      lease2.release();
+    });
+
+    test('non-multiplex carrier reuses a released idle process', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexVariantConfig, createMockClient);
+      const lease1 = await pool.acquire(key1);
+      const firstClient = lease1.client;
+      lease1.release();
+      const lease2 = await pool.acquire(key1);
+
+      assert.strictEqual(lease2.client, firstClient);
+      assert.strictEqual(pool.getMetrics().warmHitCount, 1);
+      lease2.release();
+    });
+
+    test('passes the requested pool key to the client factory', async () => {
+      const { AcpProcessPool } = await import(
+        '../../dist/domains/cats/services/agents/providers/acp/AcpProcessPool.js'
+      );
+      let factoryKey;
+      pool = new AcpProcessPool(defaultPoolConfig, nonMultiplexVariantConfig, (poolKey) => {
+        factoryKey = poolKey;
+        return createMockClient();
+      });
+
+      const lease = await pool.acquire(key2);
+      assert.deepEqual(factoryKey, key2);
+      lease.release();
     });
 
     test('release decrements active lease count', async () => {

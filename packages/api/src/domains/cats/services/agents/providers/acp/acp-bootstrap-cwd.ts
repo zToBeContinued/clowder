@@ -32,7 +32,7 @@ function bootstrapOwnerSegment(): string {
 }
 
 export function resolveAcpBootstrapRoot(): string {
-  return join(tmpdir(), `cat-cafe-gemini-acp-${bootstrapOwnerSegment()}`);
+  return join(tmpdir(), `cat-cafe-acp-${bootstrapOwnerSegment()}`);
 }
 
 export function isPathWithinRoot(
@@ -66,9 +66,9 @@ function enforceOwnerOnlyPermissions(path: string): void {
 }
 
 /**
- * Gemini ACP initialize is sensitive to project-level .gemini/settings.json when
- * launched directly from repo cwd. Bootstrap from an isolated tmp dir, then pass
- * the real project cwd + MCP servers later via session/new.
+ * ACP carriers may inspect project-level settings when launched directly from
+ * a repository cwd. Bootstrap from an isolated temp dir, then pass the real
+ * project cwd and MCP servers through session/new or session/load.
  */
 export function resolveAcpBootstrapCwd(projectRoot: string, providerProfile: string): string {
   const normalizedProjectRoot = resolve(projectRoot);

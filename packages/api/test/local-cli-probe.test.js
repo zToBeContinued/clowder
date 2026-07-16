@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { describe, it } from 'node:test';
 
 import { LOCAL_CLI_ALLOWLIST, probeLocalAgentClis } from '../dist/utils/local-cli-probe.js';
@@ -172,7 +173,7 @@ describe('probeLocalAgentClis', () => {
     });
 
     const codex = results.find((item) => item.id === 'codex');
-    assert.deepEqual(reads, ['/tmp/home/.codex/models_cache.json']);
+    assert.deepEqual(reads, [join('/tmp/home', '.codex/models_cache.json')]);
     assert.equal(codex?.modelsStatus, 'config_only');
     assert.deepEqual(codex?.models, [
       { id: 'gpt-5.6-sol', source: 'config', isDefault: true },
@@ -299,4 +300,57 @@ describe('probeLocalAgentClis', () => {
     assert.doesNotMatch(parserInput, /secret123/);
     assert.equal(results[0]?.models[1]?.id, 'sk_agent_<redacted>');
   });
+});
+
+it('parses only allowlisted Kiro chat model settings and ignores unrelated model-shaped fields', async () => {
+  const { parseKiroSettingsModels } = await import('../dist/utils/local-cli-model-probes.js');
+  const models = parseKiroSettingsModels(
+    JSON.stringify({
+      model: 'root-secret-model',
+      auth: { model: 'credential-model', token: 'sk_agent_secret1234567890' },
+      chat: {
+        defaultModel: 'gpt-5.6-sol',
+        unrelated: { model: 'nested-unrelated-model' },
+        modelDefaults: {
+          'gpt-5.6-terra': { temperature: 0.2 },
+          fast: { modelId: 'gpt-5.6-luna', apiKey: 'do-not-read' },
+          unsafe: { model: 'gpt-5.6-mini', credentialModel: 'must-not-read' },
+        },
+      },
+    }),
+  );
+
+  assert.deepEqual(models, ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.6-mini']);
+});
+
+it('detects Kiro via kiro-cli and derives its default model from the safe settings command', async () => {
+  const executed = [];
+  const results = await probeWithIsolatedHome({
+    resolveCommand(command) {
+      return command === 'kiro-cli' ? 'C:/Users/test/AppData/Local/Kiro-Cli/kiro-cli.exe' : null;
+    },
+    async runCommand(file, args) {
+      executed.push({ file, args: [...args] });
+      if (args[0] === '--version') return { stdout: 'kiro-cli-chat 2.12.2', stderr: '' };
+      assert.deepEqual(args, ['settings', 'list', '--format', 'json']);
+      return {
+        stdout: JSON.stringify({ chat: { defaultModel: 'gpt-5.6-sol', modelDefaults: {} } }),
+        stderr: '',
+      };
+    },
+  });
+
+  const kiro = results.find((item) => item.id === 'kiro');
+  assert.equal(kiro?.installed, true);
+  assert.equal(kiro?.command, 'kiro-cli');
+  assert.equal(kiro?.clientId, 'kiro');
+  assert.equal(kiro?.defaultModel, 'gpt-5.6-sol');
+  assert.deepEqual(kiro?.models, [{ id: 'gpt-5.6-sol', source: 'cli', isDefault: true }]);
+  assert.deepEqual(executed, [
+    { file: 'C:/Users/test/AppData/Local/Kiro-Cli/kiro-cli.exe', args: ['--version'] },
+    {
+      file: 'C:/Users/test/AppData/Local/Kiro-Cli/kiro-cli.exe',
+      args: ['settings', 'list', '--format', 'json'],
+    },
+  ]);
 });

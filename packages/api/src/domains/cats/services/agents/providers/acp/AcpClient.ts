@@ -205,6 +205,10 @@ export class AcpClient {
     return resp.result as unknown as AcpNewSessionResult;
   }
 
+  async setSessionModel(sessionId: string, modelId: string): Promise<void> {
+    await this.sendRequest(ACP_METHODS.sessionSetModel, { sessionId, modelId });
+  }
+
   /**
    * Send a prompt, collect all streaming events, return { events, stopReason }.
    *
@@ -253,7 +257,7 @@ export class AcpClient {
   async *promptStream(
     sessionId: string,
     text: string,
-    options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number },
+    options?: { timeoutMs?: number; idleWarningMs?: number; idleStallMs?: number; signal?: AbortSignal },
   ): AsyncGenerator<AcpSessionUpdate, AcpStopReason> {
     // KD-12: Activity-based turn budget — resets on each event.
     // If agent produces events continuously, budget never fires. Only triggers
@@ -277,8 +281,35 @@ export class AcpClient {
     let lastEventAt = 0;
     let idleWarningFired = false;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    let pendingTool = false; // true while Gemini is waiting for MCP tool result
+    let pendingTool = false; // true while the agent is waiting for an MCP tool result
     let budgetTimer: ReturnType<typeof setTimeout> | null = null;
+    const promptRequestController = new AbortController();
+    let cancelSent = false;
+
+    const wakeConsumer = () => {
+      if (!waitResolve) return;
+      const resolve = waitResolve;
+      waitResolve = null;
+      resolve();
+    };
+
+    /** Cancel this prompt exactly once and detach its pending JSON-RPC request. */
+    const cancelPromptOnce = () => {
+      if (cancelSent) return;
+      cancelSent = true;
+      try {
+        this.cancelSession(sessionId);
+      } finally {
+        promptRequestController.abort();
+      }
+    };
+
+    const onAbort = () => {
+      stopReason = 'cancelled';
+      cancelPromptOnce();
+      done = true;
+      wakeConsumer();
+    };
 
     /** Reset (or start) the activity-based turn budget timer.
      *  Called once at prompt start and again on every incoming event. */
@@ -288,14 +319,10 @@ export class AcpClient {
       budgetTimer = setTimeout(() => {
         if (done) return;
         log.error({ sessionId, eventCount, timeoutMs }, 'Turn budget exceeded — no activity for %dms', timeoutMs);
-        this.cancelSession(sessionId);
         promptError = new AcpTimeoutError('session/prompt', timeoutMs);
         done = true;
-        if (waitResolve) {
-          const r = waitResolve;
-          waitResolve = null;
-          r();
-        }
+        cancelPromptOnce();
+        wakeConsumer();
       }, timeoutMs);
     };
 
@@ -347,14 +374,10 @@ export class AcpClient {
         } else {
           // Stall — terminate the stream and cancel the upstream session
           log.error({ sessionId, idleSinceMs, eventCount }, 'Stream idle watchdog: stall — terminating');
-          this.cancelSession(sessionId); // P1-fix: actually cancel the upstream session
           promptError = new AcpStreamIdleError(sessionId, idleSinceMs, eventCount);
           done = true;
-          if (waitResolve) {
-            const r = waitResolve;
-            waitResolve = null;
-            r();
-          }
+          cancelPromptOnce();
+          wakeConsumer();
         }
       }, nextMs);
     };
@@ -416,27 +439,36 @@ export class AcpClient {
     };
     this.capacityListeners.add(capacityInjector);
 
-    // Start activity-based budget timer — resets on each event from listener
-    resetBudget();
+    if (options?.signal) {
+      options.signal.addEventListener('abort', onAbort, { once: true });
+      if (options.signal.aborted) onAbort();
+    }
 
-    // Fire prompt request — don't await, we'll drain the queue concurrently.
-    // sendRequest uses hard ceiling (1h); actual budget is managed by resetBudget().
-    this.sendRequest(ACP_METHODS.sessionPrompt, { sessionId, prompt: [{ type: 'text', text }] }, HARD_CEILING_MS)
-      .then((resp) => {
-        const result = resp.result as unknown as AcpPromptResult;
-        stopReason = result.stopReason;
-      })
-      .catch((err: Error) => {
-        promptError = err;
-      })
-      .finally(() => {
-        done = true;
-        if (waitResolve) {
-          const r = waitResolve;
-          waitResolve = null;
-          r();
-        }
-      });
+    if (!done) {
+      // Start activity-based budget timer — resets on each standard session update.
+      resetBudget();
+
+      // Fire prompt request — don't await, we'll drain the queue concurrently.
+      // The private abort controller removes the pending request when a watchdog,
+      // consumer cancellation, or caller AbortSignal terminates this prompt.
+      this.sendRequest(
+        ACP_METHODS.sessionPrompt,
+        { sessionId, prompt: [{ type: 'text', text }] },
+        HARD_CEILING_MS,
+        promptRequestController.signal,
+      )
+        .then((resp) => {
+          const result = resp.result as unknown as AcpPromptResult;
+          stopReason = result.stopReason;
+        })
+        .catch((err: Error) => {
+          if (!promptRequestController.signal.aborted) promptError = err;
+        })
+        .finally(() => {
+          done = true;
+          wakeConsumer();
+        });
+    }
 
     try {
       while (true) {
@@ -456,6 +488,12 @@ export class AcpClient {
       if (promptError) throw promptError;
       return stopReason;
     } finally {
+      if (!done) {
+        stopReason = 'cancelled';
+        done = true;
+        cancelPromptOnce();
+      }
+      options?.signal?.removeEventListener('abort', onAbort);
       if (idleTimer) clearTimeout(idleTimer);
       if (budgetTimer) clearTimeout(budgetTimer);
       this.capacityListeners.delete(capacityInjector);
@@ -545,26 +583,26 @@ export class AcpClient {
         return;
       }
 
-      const id = msg.id as string | undefined;
+      const hasId = Object.hasOwn(msg, 'id') && msg.id !== null;
+      const id = hasId ? (msg.id as string | number) : undefined;
       const method = msg.method as string | undefined;
 
-      if (id && this.pending.has(id) && !method) {
-        // Response to one of our requests
+      if (typeof id === 'string' && this.pending.has(id) && !method) {
+        // Response to one of our requests (outgoing request IDs are UUID strings)
         const { resolve } = this.pending.get(id)!;
         this.pending.delete(id);
         resolve(msg as unknown as AcpResponse);
-      } else if (method && !id) {
+      } else if (method && !hasId) {
         if (method === ACP_METHODS.requestPermission) {
-          // Gemini CLI sends request_permission as notification (no id) when not in yolo mode.
-          // Best-effort auto-approve with synthetic id (Gemini may ignore it).
-          // Also notify stream listeners so idle watchdog suppresses stall during permission wait.
+          // Some ACP agents send request_permission as a notification (no id).
+          // Best-effort handling with a synthetic id; also notify stream listeners
+          // so the idle watchdog suppresses stalls while permission is pending.
           const permParams = msg.params as Record<string, unknown>;
           log.info(
             { method, sessionId: permParams.sessionId },
-            'ACP: permission notification (no id) — auto-approve + suppress stall',
+            'ACP: permission notification (no id) — handle + suppress stall',
           );
           this.handleAgentRequest({ ...msg, id: `synth-perm-${Date.now()}` } as unknown as AcpAgentRequest);
-          // Inject synthetic event into stream so promptStream sets pendingTool=true
           for (const listener of this.notificationListeners) {
             listener({
               jsonrpc: '2.0',
@@ -572,22 +610,32 @@ export class AcpClient {
               params: { sessionId: permParams.sessionId, sessionUpdate: 'permission_pending' },
             } as unknown as AcpNotification);
           }
-        } else {
-          // Notification from agent (session/update)
+        } else if (method === ACP_METHODS.sessionUpdate) {
           for (const listener of this.notificationListeners) {
             listener(msg as unknown as AcpNotification);
           }
+        } else {
+          log.debug({ method }, 'ACP: ignored extension notification');
         }
-      } else if (method && id) {
-        // Request from agent (permission, fs, terminal) — needs our response
+      } else if (method && hasId) {
+        // Request from agent (permission, fs, terminal) — needs our response.
+        // JSON-RPC permits both string and numeric IDs, including numeric zero.
         this.handleAgentRequest(msg as unknown as AcpAgentRequest);
       }
     });
   }
 
-  private sendRequest(method: string, params: Record<string, unknown>, timeoutMs = 60_000): Promise<AcpResponse> {
+  private sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = 60_000,
+    signal?: AbortSignal,
+  ): Promise<AcpResponse> {
     if (!this.child?.stdin?.writable) {
       return Promise.reject(new Error('ACP process stdin not writable'));
+    }
+    if (signal?.aborted) {
+      return Promise.reject(new Error(`ACP request aborted before send: ${method}`));
     }
 
     const id = randomUUID();
@@ -595,9 +643,26 @@ export class AcpClient {
     this.child.stdin.write(JSON.stringify(msg) + '\n');
 
     return new Promise<AcpResponse>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout>;
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
         this.pending.delete(id);
-        // For prompt timeouts, send session/cancel to stop the agent's internal retry loop
+        cleanup();
+        reject(new Error(`ACP request aborted: ${method}`));
+      };
+
+      timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        this.pending.delete(id);
+        signal?.removeEventListener('abort', onAbort);
+        // For prompt timeouts, send session/cancel to stop the agent's internal retry loop.
         if (method === ACP_METHODS.sessionPrompt && params.sessionId) {
           this.cancelSession(params.sessionId as string);
         }
@@ -606,7 +671,9 @@ export class AcpClient {
 
       this.pending.set(id, {
         resolve: (resp) => {
-          clearTimeout(timer);
+          if (settled) return;
+          settled = true;
+          cleanup();
           if (resp.error) {
             reject(new AcpProtocolError(resp.error.code, resp.error.message, resp.error.data));
           } else {
@@ -614,10 +681,17 @@ export class AcpClient {
           }
         },
         reject: (err) => {
-          clearTimeout(timer);
+          if (settled) return;
+          settled = true;
+          cleanup();
           reject(err);
         },
       });
+
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      }
     });
   }
 
@@ -646,10 +720,22 @@ export class AcpClient {
           this.child?.stdin?.write(JSON.stringify(errResponse) + '\n');
         }
       } else {
-        // Default: auto-approve (allow_once)
         const params = req.params as unknown as AcpPermissionRequest;
-        const allowOption = params.options?.find((o) => o.kind === 'allow_once') ?? params.options?.[0];
-        respond({ optionId: allowOption?.optionId ?? 'allow_once' });
+        const safeOption =
+          params.options?.find((o) => o.kind === 'allow_once') ??
+          params.options?.find((o) => o.kind === 'reject_once') ??
+          params.options?.find((o) => o.kind === 'reject_always');
+        if (safeOption) {
+          respond({ optionId: safeOption.optionId });
+        } else {
+          const response = {
+            jsonrpc: '2.0' as const,
+            id: req.id,
+            result: { outcome: { outcome: 'cancelled' as const } },
+          };
+          this.child?.stdin?.write(JSON.stringify(response) + '\n');
+          log.warn('No safe default permission option for %s; cancelled request', req.id);
+        }
       }
     } else {
       // Unknown agent request — respond with method not found

@@ -12,14 +12,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-export type LocalCliId = 'claude' | 'codex' | 'gemini' | 'opencode' | 'kimi' | 'grok' | 'cursor' | 'opencli';
+export type LocalCliId = 'claude' | 'codex' | 'gemini' | 'kiro' | 'opencode' | 'kimi' | 'grok' | 'cursor' | 'opencli';
 
 export interface LocalCliProbeDefinition {
   readonly id: LocalCliId;
   readonly label: string;
-  readonly command: LocalCliId;
+  readonly command: string;
   readonly commandAliases?: readonly string[];
-  readonly clientId?: 'anthropic' | 'openai' | 'google' | 'opencode' | 'kimi' | 'grok';
+  readonly clientId?: 'anthropic' | 'openai' | 'google' | 'kiro' | 'opencode' | 'kimi' | 'grok';
   readonly defaultModel?: string;
   readonly modelsProbe?: LocalCliModelsProbeDefinition;
   readonly installHint: string;
@@ -29,7 +29,7 @@ export interface LocalCliProbeDefinition {
 export interface LocalCliProbeResult {
   readonly id: LocalCliId;
   readonly label: string;
-  readonly command: LocalCliId;
+  readonly command: string;
   readonly clientId?: LocalCliProbeDefinition['clientId'];
   readonly defaultModel?: string;
   readonly models: readonly LocalCliModelCandidate[];
@@ -72,6 +72,15 @@ export const LOCAL_CLI_ALLOWLIST: readonly LocalCliProbeDefinition[] = [
     defaultModel: 'gemini-3.1-pro-preview',
     modelsProbe: LOCAL_CLI_MODELS_PROBES.gemini,
     installHint: 'npm install -g @google/gemini-cli',
+    versionArgs: ['--version'],
+  },
+  {
+    id: 'kiro',
+    label: 'Kiro CLI',
+    command: 'kiro-cli',
+    clientId: 'kiro',
+    modelsProbe: LOCAL_CLI_MODELS_PROBES.kiro,
+    installHint: '按 Kiro CLI 官方安装文档安装，并确保 kiro-cli 可被后端进程访问',
     versionArgs: ['--version'],
   },
   {
@@ -188,12 +197,13 @@ export async function probeLocalAgentClis(options: ProbeLocalClisOptions = {}): 
       runCommand,
       readFile: options.readFile,
     });
+    const defaultModel = definition.defaultModel ?? modelProbe.models.find((model) => model.isDefault)?.id;
     results.push({
       id: definition.id,
       label: definition.label,
       command: definition.command,
       clientId: definition.clientId,
-      defaultModel: definition.defaultModel,
+      defaultModel,
       ...modelProbe,
       installed,
       ...(resolvedPath ? { resolvedPath } : {}),

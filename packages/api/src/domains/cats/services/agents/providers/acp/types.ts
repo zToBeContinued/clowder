@@ -13,7 +13,7 @@
 /** Outgoing request from client to agent */
 export interface AcpRequest {
   jsonrpc: '2.0';
-  id: string;
+  id: string | number;
   method: string;
   params: Record<string, unknown>;
 }
@@ -21,7 +21,7 @@ export interface AcpRequest {
 /** Incoming response from agent (correlates by id) */
 export interface AcpResponse {
   jsonrpc: '2.0';
-  id: string;
+  id: string | number;
   result?: Record<string, unknown>;
   error?: AcpError;
 }
@@ -36,7 +36,7 @@ export interface AcpNotification {
 /** Incoming request from agent that expects our response (has id + method) */
 export interface AcpAgentRequest {
   jsonrpc: '2.0';
-  id: string;
+  id: string | number;
   method: string;
   params: Record<string, unknown>;
 }

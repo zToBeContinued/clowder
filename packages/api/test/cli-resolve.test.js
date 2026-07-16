@@ -256,3 +256,37 @@ test(
     }
   },
 );
+
+test('formatCliNotFoundError returns the official Kiro CLI install hint', () => {
+  const msg = formatCliNotFoundError('kiro-cli');
+  assert.match(msg, /kiro-cli CLI 未找到/);
+  assert.match(msg, /Kiro CLI 官方安装/i);
+});
+
+test(
+  'resolveCliCommand finds kiro-cli in LOCALAPPDATA/Kiro-Cli (Windows)',
+  { skip: process.platform !== 'win32' && 'Windows-only (official Kiro CLI fallback)' },
+  () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'cli-resolve-kiro-localappdata-'));
+    const kiroDir = join(tempRoot, 'Kiro-Cli');
+    const fakeExe = join(kiroDir, 'kiro-cli.exe');
+    mkdirSync(kiroDir, { recursive: true });
+    writeFileSync(fakeExe, '', 'utf8');
+
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    const originalPath = process.env.PATH;
+    try {
+      process.env.LOCALAPPDATA = tempRoot;
+      process.env.PATH = '';
+      invalidateCliCommand('kiro-cli');
+      assert.equal(resolveCliCommand('kiro-cli'), fakeExe);
+    } finally {
+      invalidateCliCommand('kiro-cli');
+      if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = originalLocalAppData;
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  },
+);

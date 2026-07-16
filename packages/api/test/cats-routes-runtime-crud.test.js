@@ -2087,4 +2087,94 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       false,
     );
   });
+
+  it('treats Kiro as an accountless ACP provider across POST and PATCH', async () => {
+    const projectRoot = createProjectRoot();
+    process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
+
+    const Fastify = (await import('fastify')).default;
+    const { catsRoutes } = await import('../dist/routes/cats.js');
+    const app = Fastify();
+    await app.register(catsRoutes);
+
+    const baseKiro = {
+      name: 'Kiro 猫',
+      displayName: 'Kiro 猫',
+      avatar: '/avatars/kiro.png',
+      color: { primary: '#6750a4', secondary: '#eaddff' },
+      roleDescription: 'Kiro ACP runtime member',
+      clientId: 'kiro',
+      defaultModel: '',
+    };
+
+    const boundRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        ...baseKiro,
+        catId: 'runtime-kiro-bound',
+        mentionPatterns: ['@runtime-kiro-bound'],
+        accountRef: 'codex',
+      }),
+    });
+    assert.equal(boundRes.statusCode, 400);
+    assert.match(JSON.parse(boundRes.body).error, /kiro client does not support accountRef/i);
+
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        ...baseKiro,
+        catId: 'runtime-kiro',
+        mentionPatterns: ['@runtime-kiro'],
+      }),
+    });
+    assert.equal(createRes.statusCode, 201, createRes.body);
+    const created = JSON.parse(createRes.body).cat;
+    assert.equal(created.clientId, 'kiro');
+    assert.equal(created.accountRef, undefined);
+    assert.equal(created.defaultModel, '');
+    assert.equal(created.mcpSupport, true);
+    assert.deepEqual(created.cli, { command: 'kiro-cli', outputFormat: 'acp' });
+    assert.equal(created.adapterMode, 'acp');
+
+    const openaiRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-switch-kiro',
+        name: '切换猫',
+        displayName: '切换猫',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#334155', secondary: '#cbd5e1' },
+        mentionPatterns: ['@runtime-switch-kiro'],
+        roleDescription: 'provider switch fixture',
+        clientId: 'openai',
+        accountRef: 'codex',
+        defaultModel: 'gpt-5.4',
+      }),
+    });
+    assert.equal(openaiRes.statusCode, 201, openaiRes.body);
+
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-switch-kiro',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ clientId: 'kiro', accountRef: 'codex', defaultModel: '' }),
+    });
+    assert.equal(patchRes.statusCode, 200, patchRes.body);
+    const patched = JSON.parse(patchRes.body).cat;
+    assert.equal(patched.clientId, 'kiro');
+    assert.equal(patched.accountRef, undefined);
+    assert.deepEqual(patched.cli, { command: 'kiro-cli', outputFormat: 'acp' });
+    assert.equal(patched.adapterMode, 'acp');
+
+    const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    const switchedVariant = catalog.breeds.find((breed) => breed.catId === 'runtime-switch-kiro')?.variants?.[0];
+    assert.equal(switchedVariant.accountRef, undefined);
+    assert.deepEqual(switchedVariant.cli, { command: 'kiro-cli', outputFormat: 'acp' });
+  });
 });

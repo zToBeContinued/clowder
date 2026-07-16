@@ -285,7 +285,14 @@ function isCodexRuntimeCat(catId: string): boolean {
 function isAgentOutputGateRuntimeCat(catId: string): boolean {
   const config = catRegistry.tryGet(catId)?.config;
   const command = config?.cli?.command?.toLowerCase();
-  if (command === 'claude' || command === 'codex' || command === 'gemini' || command === 'kimi' || command === 'grok') {
+  if (
+    command === 'claude' ||
+    command === 'codex' ||
+    command === 'gemini' ||
+    command === 'kiro-cli' ||
+    command === 'kimi' ||
+    command === 'grok'
+  ) {
     return true;
   }
 
@@ -294,6 +301,7 @@ function isAgentOutputGateRuntimeCat(catId: string): boolean {
     clientId === 'anthropic' ||
     clientId === 'openai' ||
     clientId === 'google' ||
+    clientId === 'kiro' ||
     clientId === 'kimi' ||
     clientId === 'grok'
   ) {

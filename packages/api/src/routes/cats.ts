@@ -78,6 +78,7 @@ const clientSchema = z.enum([
   'anthropic',
   'openai',
   'google',
+  'kiro',
   'kimi',
   'grok',
   'dare',
@@ -335,6 +336,8 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
       return { command: 'codex', outputFormat: 'json' };
     case 'google':
       return { command: 'gemini', outputFormat: 'stream-json' };
+    case 'kiro':
+      return { command: 'kiro-cli', outputFormat: 'acp' };
     case 'kimi':
       return { command: 'kimi', outputFormat: 'stream-json' };
     case 'grok':
@@ -454,10 +457,10 @@ async function validateAccountBindingOrThrow(
   options?: { legacyCompat?: boolean },
 ): Promise<void> {
   const trimmedAccountRef = accountRef?.trim();
-  if (client === 'antigravity' && trimmedAccountRef) {
-    throw new Error('antigravity client does not support accountRef');
+  if ((client === 'antigravity' || client === 'kiro') && trimmedAccountRef) {
+    throw new Error(`${client} client does not support accountRef`);
   }
-  if (client !== 'antigravity' && client !== 'pi' && !trimmedAccountRef) {
+  if (client !== 'antigravity' && client !== 'pi' && client !== 'kiro' && !trimmedAccountRef) {
     throw new Error(`client "${client}" requires a provider binding`);
   }
   if (!trimmedAccountRef) return;
@@ -528,7 +531,14 @@ async function toCatResponse(
         }
       : null,
     voiceConfig: cat.voiceConfig ?? undefined,
-    adapterMode: cat.clientId === 'google' ? (getAcpConfig(cat.id as string) ? 'acp' : 'cli') : undefined,
+    adapterMode:
+      cat.clientId === 'kiro'
+        ? 'acp'
+        : cat.clientId === 'google'
+          ? getAcpConfig(cat.id as string)
+            ? 'acp'
+            : 'cli'
+          : undefined,
   };
 }
 
@@ -728,6 +738,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
             (body.clientId === 'anthropic' ||
               body.clientId === 'openai' ||
               body.clientId === 'google' ||
+              body.clientId === 'kiro' ||
               body.clientId === 'opencode'),
           cli: resolvedCli,
           ...(body.cliConfigArgs ? { cliConfigArgs: body.cliConfigArgs } : {}),
@@ -807,6 +818,10 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
     // When the editor sends the old client's builtin accountRef during a provider switch,
     // rebase to the new client's builtin so validation doesn't reject the stale ref.
     const isClientSwitch = body.clientId !== undefined && body.clientId !== currentCat.clientId;
+    if (isClientSwitch && effectiveClient === 'kiro') {
+      targetAccountRef = null;
+      effectiveAccountRef = undefined;
+    }
     if (isClientSwitch && effectiveAccountRef) {
       const oldBuiltin = resolveBuiltinClientForProvider(currentCat.clientId);
       if (oldBuiltin && builtinAccountIdForClient(oldBuiltin) === effectiveAccountRef) {

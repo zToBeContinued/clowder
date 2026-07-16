@@ -1,7 +1,7 @@
 import type { CatData } from '@/hooks/useCatData';
 import {
-  CODEX_FAST_MODE_ARG,
   type ClientId,
+  CODEX_FAST_MODE_ARG,
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   type HubCatEditorFormState,
   isCodexFastModeArg,
@@ -93,7 +93,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
   const displayName = trimText(form.displayName) || name;
   const createName = name || displayName;
   const updateName = name || displayName || cat?.name || cat?.displayName || '';
-  const trimmedAccountRef = resolveFormAccountRef(form);
+  const trimmedAccountRef = form.clientId === 'kiro' ? '' : resolveFormAccountRef(form);
   const accountRefPatch =
     trimmedAccountRef.length > 0
       ? { accountRef: trimmedAccountRef }
@@ -101,7 +101,11 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
         ? { accountRef: null as null }
         : {};
   const mcpSupportPatch =
-    cat && form.clientId !== cat.clientId ? { mcpSupport: defaultMcpSupportForClient(form.clientId) } : {};
+    cat && form.clientId !== cat.clientId
+      ? { mcpSupport: defaultMcpSupportForClient(form.clientId) }
+      : !cat && form.clientId === 'kiro'
+        ? { mcpSupport: true }
+        : {};
   const trimmedCliEffort = trimText(form.cliEffort);
   const cliPatch =
     trimmedCliEffort.length > 0

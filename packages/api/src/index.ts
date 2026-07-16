@@ -49,6 +49,11 @@ import { QueueProcessor } from './domains/cats/services/agents/invocation/QueueP
 import { RedisInvocationQueuePersistence } from './domains/cats/services/agents/invocation/RedisInvocationQueuePersistence.js';
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import {
+  AcpPoolRegistry,
+  createAcpPoolFingerprint,
+} from './domains/cats/services/agents/providers/acp/AcpPoolRegistry.js';
+import type { AcpProcessPool as AcpProcessPoolType } from './domains/cats/services/agents/providers/acp/AcpProcessPool.js';
+import {
   resolveAcpBootstrapArgs,
   resolveAcpBootstrapCommand,
   resolveAcpBootstrapCwd,
@@ -1070,10 +1075,8 @@ async function main(): Promise<void> {
     throw err;
   }
 
-  // ── F149 Phase C: ACP process pool registry (variantId → AcpProcessPool) ──
-  // Using Map<string, any> because AcpProcessPool is dynamically imported only when acp config present.
-  // biome-ignore lint: dynamic import bridge
-  const acpPoolRegistry = new Map<string, any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+  // ── F149/F161: provider profile → current ACP process pool ──
+  const acpPoolRegistry = new AcpPoolRegistry<AcpProcessPoolType>();
 
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
@@ -1081,6 +1084,7 @@ async function main(): Promise<void> {
   let router!: AgentRouter;
   const syncAgentRegistry = async (configs: Record<string, CatConfig>) => {
     agentRegistry.reset();
+    const activeAcpPoolIds = new Set<string>();
     for (const [id, config] of Object.entries(configs)) {
       const catId = config.id;
       // F32-b P1 fix: do NOT pass model here — let constructors resolve via
@@ -1105,31 +1109,42 @@ async function main(): Promise<void> {
             const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, acpConfig.command);
             const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, acpConfig.startupArgs);
             const poolKey = { projectPath: acpProjectRoot, providerProfile: id };
-            // Shared pool per variant — reused across cats with same variant
-            if (!acpPoolRegistry.has(id)) {
-              const pool = new AcpProcessPool(
-                {
-                  maxLiveProcesses: acpConfig.pool?.maxLiveProcesses ?? 3,
-                  idleTtlMs: acpConfig.pool?.idleTtlMs ?? 5 * 60 * 1000,
-                  healthCheckIntervalMs: 30_000,
-                },
-                acpConfig,
-                () =>
-                  new AcpClient({
-                    command: acpCommand,
-                    args: acpArgs,
-                    cwd: resolveAcpBootstrapCwd(acpProjectRoot, id),
-                  }),
-              );
-              acpPoolRegistry.set(id, pool);
-            }
+            const maxLiveProcesses = acpConfig.pool?.maxLiveProcesses ?? 3;
+            const idleTtlMs = acpConfig.pool?.idleTtlMs ?? 5 * 60 * 1000;
+            const healthCheckIntervalMs = 30_000;
+            const poolFingerprint = createAcpPoolFingerprint({
+              carrier: 'google-acp',
+              projectRoot: acpProjectRoot,
+              command: acpCommand,
+              startupArgs: acpArgs,
+              supportsMultiplexing: acpConfig.supportsMultiplexing !== false,
+              maxLiveProcesses,
+              idleTtlMs,
+              healthCheckIntervalMs,
+            });
+            const pool = await acpPoolRegistry.getOrCreate(
+              id,
+              poolFingerprint,
+              () =>
+                new AcpProcessPool(
+                  { maxLiveProcesses, idleTtlMs, healthCheckIntervalMs },
+                  acpConfig,
+                  () =>
+                    new AcpClient({
+                      command: acpCommand,
+                      args: acpArgs,
+                      cwd: resolveAcpBootstrapCwd(acpProjectRoot, id),
+                    }),
+                ),
+            );
+            activeAcpPoolIds.add(id);
             const { resolveAcpMcpServers } = await import(
               './domains/cats/services/agents/providers/acp/acp-mcp-resolver.js'
             );
             const mcpServers = resolveAcpMcpServers(acpProjectRoot, acpConfig.mcpWhitelist ?? []);
             service = new GeminiAcpAdapter({
               catId,
-              pool: acpPoolRegistry.get(id)!,
+              pool,
               poolKey,
               projectRoot: acpProjectRoot,
               mcpServers,
@@ -1137,6 +1152,62 @@ async function main(): Promise<void> {
           } else {
             service = new GeminiAgentService({ catId });
           }
+          break;
+        }
+        case 'kiro': {
+          const { KiroAcpAdapter } = await import('./domains/cats/services/agents/providers/acp/KiroAcpAdapter.js');
+          const { AcpProcessPool } = await import('./domains/cats/services/agents/providers/acp/AcpProcessPool.js');
+          const { AcpClient } = await import('./domains/cats/services/agents/providers/acp/AcpClient.js');
+          const { createKiroAcpProfile, KIRO_MCP_WHITELIST } = await import(
+            './domains/cats/services/agents/providers/acp/kiro-acp-profile.js'
+          );
+          const acpProjectRoot = findMonorepoRoot();
+          const profile = createKiroAcpProfile(config);
+          const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, profile.command);
+          const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, profile.startupArgs);
+          const maxLiveProcesses = 3;
+          const idleTtlMs = 5 * 60 * 1000;
+          const healthCheckIntervalMs = 30_000;
+          const poolFingerprint = createAcpPoolFingerprint({
+            carrier: 'kiro-acp',
+            projectRoot: acpProjectRoot,
+            command: acpCommand,
+            startupArgs: acpArgs,
+            supportsMultiplexing: profile.supportsMultiplexing,
+            maxLiveProcesses,
+            idleTtlMs,
+            healthCheckIntervalMs,
+          });
+          const pool = await acpPoolRegistry.getOrCreate(
+            id,
+            poolFingerprint,
+            () =>
+              new AcpProcessPool(
+                { maxLiveProcesses, idleTtlMs, healthCheckIntervalMs },
+                profile,
+                (poolKey) =>
+                  new AcpClient({
+                    command: acpCommand,
+                    args: acpArgs,
+                    cwd: resolveAcpBootstrapCwd(poolKey.projectPath, id),
+                  }),
+              ),
+          );
+          activeAcpPoolIds.add(id);
+          const { resolveAcpMcpServers } = await import(
+            './domains/cats/services/agents/providers/acp/acp-mcp-resolver.js'
+          );
+          const mcpSupport = config.mcpSupport ?? true;
+          const mcpServers = mcpSupport ? resolveAcpMcpServers(acpProjectRoot, [...KIRO_MCP_WHITELIST]) : [];
+          service = new KiroAcpAdapter({
+            catId,
+            pool,
+            projectRoot: acpProjectRoot,
+            providerProfile: id,
+            model: profile.model,
+            mcpSupport,
+            mcpServers,
+          });
           break;
         }
         case 'kimi':
@@ -1183,6 +1254,7 @@ async function main(): Promise<void> {
       }
       agentRegistry.register(id, service);
     }
+    await acpPoolRegistry.retainOnly(activeAcpPoolIds);
     await catSupervisor.syncCats(configs, (catId) => isCatAvailable(catId));
     await catSupervisor.recoverStaleStatuses();
     if (router) router.refreshFromRegistry(agentRegistry);
@@ -1526,7 +1598,7 @@ async function main(): Promise<void> {
       return reply.code(403).send({ error: 'Diagnostics disabled' });
     }
     const pools: Record<string, unknown> = {};
-    for (const [variantId, pool] of acpPoolRegistry) {
+    for (const [variantId, pool] of acpPoolRegistry.entries()) {
       pools[variantId] = pool.getMetrics();
     }
     return { pools, poolCount: acpPoolRegistry.size };
@@ -2185,12 +2257,9 @@ async function main(): Promise<void> {
     );
   }
 
-  // F149 Phase C: graceful shutdown for ACP process pools
+  // F149/F161: graceful shutdown for current and retired ACP process pools
   app.addHook('onClose', async () => {
-    for (const pool of acpPoolRegistry.values()) {
-      await pool.closeAll();
-    }
-    acpPoolRegistry.clear();
+    await acpPoolRegistry.closeAll();
   });
 
   // F101: register onClose hook BEFORE listen (Fastify forbids addHook after listen).

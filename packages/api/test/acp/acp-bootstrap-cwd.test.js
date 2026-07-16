@@ -62,17 +62,21 @@ describe('acp bootstrap cwd', () => {
     assert.ok(existsSync(second), 'bootstrap dir should be recreated on demand');
   });
 
-  it('enforces owner-only permissions on the bootstrap cwd', () => {
-    const projectRoot = resolve('/tmp/cat-cafe-project');
-    const dir = resolveAcpBootstrapCwd(projectRoot, 'mode-guard');
-    createdDirs.add(dir);
-    createdDirs.add(resolveAcpBootstrapRoot());
+  it(
+    'enforces owner-only permissions on the bootstrap cwd',
+    { skip: process.platform === 'win32' && 'Windows does not preserve POSIX directory mode bits' },
+    () => {
+      const projectRoot = resolve('/tmp/cat-cafe-project');
+      const dir = resolveAcpBootstrapCwd(projectRoot, 'mode-guard');
+      createdDirs.add(dir);
+      createdDirs.add(resolveAcpBootstrapRoot());
 
-    chmodSync(dir, 0o755);
-    resolveAcpBootstrapCwd(projectRoot, 'mode-guard');
+      chmodSync(dir, 0o755);
+      resolveAcpBootstrapCwd(projectRoot, 'mode-guard');
 
-    assert.equal(statSync(dir).mode & 0o777, 0o700);
-  });
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+    },
+  );
 
   it('sanitizes provider profile so it cannot escape the bootstrap root', () => {
     const projectRoot = resolve('/tmp/cat-cafe-project');
@@ -108,12 +112,9 @@ describe('acp bootstrap cwd', () => {
   });
 
   it('uses platform-safe containment checks for Windows-style paths', () => {
-    assert.equal(isPathWithinRoot('C:\\tmp\\cat-cafe-gemini-acp', 'C:\\tmp\\cat-cafe-gemini-acp\\child', win32), true);
-    assert.equal(
-      isPathWithinRoot('C:\\tmp\\cat-cafe-gemini-acp', 'C:\\tmp\\cat-cafe-gemini-acp-evil\\child', win32),
-      false,
-    );
-    assert.equal(isPathWithinRoot('C:\\tmp\\cat-cafe-gemini-acp', 'D:\\tmp\\cat-cafe-gemini-acp\\child', win32), false);
+    assert.equal(isPathWithinRoot('C:\\tmp\\cat-cafe-acp', 'C:\\tmp\\cat-cafe-acp\\child', win32), true);
+    assert.equal(isPathWithinRoot('C:\\tmp\\cat-cafe-acp', 'C:\\tmp\\cat-cafe-acp-evil\\child', win32), false);
+    assert.equal(isPathWithinRoot('C:\\tmp\\cat-cafe-acp', 'D:\\tmp\\cat-cafe-acp\\child', win32), false);
   });
 
   it('resolves relative ACP commands against the project root', () => {
@@ -159,16 +160,16 @@ describe('acp bootstrap cwd', () => {
     const root = resolveAcpBootstrapRoot();
     assert.ok(root.startsWith(tmpdir()), `bootstrap root should stay under tmpdir(), got ${root}`);
     assert.ok(
-      /cat-cafe-gemini-acp-(uid|user)-/.test(root),
+      /cat-cafe-acp-(uid|user)-/.test(root),
       `bootstrap root should be namespaced per owner identity, got ${root}`,
     );
   });
 
-  it('guards index.ts against wiring Gemini ACP back to repo cwd', () => {
+  it('guards index.ts against wiring ACP carriers back to repo cwd', () => {
     const source = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf-8');
     assert.ok(
       source.includes('resolveAcpBootstrapCwd'),
-      'REGRESSION: index.ts must compute an isolated Gemini ACP bootstrap cwd.',
+      'REGRESSION: index.ts must compute an isolated ACP bootstrap cwd.',
     );
     assert.ok(
       source.includes('cwd: resolveAcpBootstrapCwd(acpProjectRoot, id)'),

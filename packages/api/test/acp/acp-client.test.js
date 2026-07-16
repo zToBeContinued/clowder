@@ -120,6 +120,29 @@ describe('AcpClient', () => {
     assert.equal(capturedCwd, '/my/project');
   });
 
+  it('setSessionModel sends session/set_model with the ACP modelId field', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedParams = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/set_model') {
+          capturedParams = msg.params;
+          agentRespond(agentStdout, msg.id, {});
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    await client.setSessionModel('sess-model', 'gpt-5.6-sol');
+
+    assert.deepEqual(capturedParams, { sessionId: 'sess-model', modelId: 'gpt-5.6-sol' });
+  });
+
   it('promptCollect collects events and returns stopReason', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
 
@@ -410,6 +433,201 @@ describe('AcpClient', () => {
     assert.ok(capturedResponse.outcome, 'response must have outcome wrapper');
     assert.equal(capturedResponse.outcome.outcome, 'selected');
     assert.equal(capturedResponse.outcome.optionId, 'allow_once');
+  });
+
+  it('handles numeric permission request id 0 without treating it as a notification', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let response = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 0 && msg.result) response = msg;
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    agentStdout.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        method: 'session/request_permission',
+        params: { options: [{ optionId: 'once', kind: 'allow_once', name: 'Allow once' }] },
+      })}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(response?.id, 0);
+    assert.equal(response?.result?.outcome?.optionId, 'once');
+  });
+
+  it('defaults to reject_once when allow_once is unavailable', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let selectedOption = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'perm-safe' && msg.result) selectedOption = msg.result.outcome?.optionId;
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    agentStdout.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'perm-safe',
+        method: 'session/request_permission',
+        params: {
+          options: [
+            { optionId: 'always', kind: 'allow_always', name: 'Always allow' },
+            { optionId: 'reject', kind: 'reject_once', name: 'Reject once' },
+          ],
+        },
+      })}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.equal(selectedOption, 'reject');
+  });
+
+  it('fails closed with cancelled when only persistent allow options are offered', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let permissionOutcome = null;
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+        if (msg.id === 'perm-unsafe' && msg.result) permissionOutcome = msg.result.outcome;
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    agentStdout.write(
+      `${JSON.stringify({
+        jsonrpc: '2.0',
+        id: 'perm-unsafe',
+        method: 'session/request_permission',
+        params: {
+          options: [{ optionId: 'always', kind: 'allow_always', name: 'Always allow' }],
+        },
+      })}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.deepEqual(permissionOutcome, { outcome: 'cancelled' });
+  });
+
+  it('aborts an active prompt with exactly one session-scoped cancel', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const controller = new AbortController();
+    const sentMessages = [];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        sentMessages.push(msg);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/prompt') {
+          setImmediate(() => controller.abort());
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    const events = [];
+    for await (const event of client.promptStream('kiro-abort-session', 'hello', {
+      timeoutMs: 5_000,
+      signal: controller.signal,
+    })) {
+      events.push(event);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    assert.deepEqual(events, []);
+    const cancelMessages = sentMessages.filter((msg) => msg.method === 'session/cancel');
+    assert.equal(cancelMessages.length, 1);
+    assert.equal(cancelMessages[0].params.sessionId, 'kiro-abort-session');
+  });
+
+  it('promptStream ignores non-session/update Kiro extension notifications', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/prompt') {
+          agentNotify(agentStdout, '_kiro.dev/commands/available', {
+            sessionId: 'kiro-session',
+            commands: [{ name: '/context' }],
+          });
+          agentNotify(agentStdout, 'session/update', {
+            sessionId: 'kiro-session',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'visible' } },
+          });
+          setTimeout(() => agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' }), 10);
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    const events = [];
+    for await (const event of client.promptStream('kiro-session', 'hello')) events.push(event);
+
+    assert.equal(events.length, 1);
+    assert.equal(events[0].update.content.text, 'visible');
+  });
+
+  it('does not let Kiro extension notifications refresh the idle watchdog', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/prompt') {
+          agentNotify(agentStdout, 'session/update', {
+            sessionId: 'kiro-watchdog-session',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'visible' } },
+          });
+          setTimeout(() => {
+            agentNotify(agentStdout, '_kiro.dev/commands/available', {
+              sessionId: 'kiro-watchdog-session',
+              commands: [{ name: '/context' }],
+            });
+          }, 80);
+          setTimeout(() => agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' }), 150);
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    const events = [];
+    for await (const event of client.promptStream('kiro-watchdog-session', 'hello', {
+      idleWarningMs: 100,
+      idleStallMs: 1_000,
+      timeoutMs: 5_000,
+    })) {
+      events.push(event);
+    }
+
+    assert.deepEqual(
+      events.map((event) => event.update.sessionUpdate),
+      ['agent_message_chunk', 'stream_idle_warning'],
+    );
   });
 
   it('promptStream yields events as they arrive and returns stopReason', async () => {

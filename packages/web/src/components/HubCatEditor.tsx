@@ -324,7 +324,7 @@ export function HubCatEditor({
   }, [cat, open, showCodexSettings]);
 
   useEffect(() => {
-    if (form.clientId === 'antigravity') {
+    if (form.clientId === 'antigravity' || form.clientId === 'kiro') {
       setForm((prev) => (prev.accountRef === '' ? prev : { ...prev, accountRef: '' }));
       return;
     }
@@ -346,10 +346,12 @@ export function HubCatEditor({
   }, [availableProfiles, cat, draft, form.clientId]);
 
   useEffect(() => {
-    if (form.clientId === 'antigravity' || modelOptions.length === 0) return;
+    if (form.clientId === 'antigravity' || form.clientId === 'kiro' || modelOptions.length === 0) return;
     if (form.defaultModel.trim().length > 0) return;
     setForm((prev) => {
-      if (prev.clientId === 'antigravity' || prev.defaultModel.trim().length > 0) return prev;
+      if (prev.clientId === 'antigravity' || prev.clientId === 'kiro' || prev.defaultModel.trim().length > 0) {
+        return prev;
+      }
       return { ...prev, defaultModel: modelOptions[0] ?? '' };
     });
   }, [form.clientId, form.defaultModel, modelOptions]);
@@ -537,9 +539,11 @@ export function HubCatEditor({
     const availableForClient = filterAccounts(probe.clientId, profiles);
     const preferredBuiltin = builtinAccountIdForClient(probe.clientId);
     const accountRef =
-      (preferredBuiltin ? availableForClient.find((profile) => profile.id === preferredBuiltin)?.id : undefined) ??
-      availableForClient[0]?.id ??
-      '';
+      probe.clientId === 'kiro'
+        ? ''
+        : ((preferredBuiltin ? availableForClient.find((profile) => profile.id === preferredBuiltin)?.id : undefined) ??
+          availableForClient[0]?.id ??
+          '');
     patchForm({
       clientId: probe.clientId,
       accountRef,

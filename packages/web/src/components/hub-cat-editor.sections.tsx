@@ -844,39 +844,47 @@ export function AccountSection({
           </>
         ) : (
           <>
-            <SelectField
-              label="认证信息"
-              value={form.accountRef}
-              options={[
-                { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
-                ...accountOptions
-                  .filter((profile) => {
-                    if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
-                    return true;
-                  })
-                  .map((profile) => ({
-                    value: profile.id,
-                    label:
-                      profile.authType === 'oauth'
-                        ? `${profile.displayName}（OAuth）`
-                        : `${profile.displayName}（API Key）`,
-                  })),
-              ]}
-              onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
-              disabled={loadingProfiles}
-              required
-            />
+            {form.clientId === 'kiro' ? (
+              <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-[12px] leading-5 text-cafe-secondary">
+                认证由本机 Kiro CLI 管理；Clowder 不读取或保存 Kiro 凭证。
+              </div>
+            ) : (
+              <SelectField
+                label="认证信息"
+                value={form.accountRef}
+                options={[
+                  { value: '', label: loadingProfiles ? '加载中…' : '请选择认证方式' },
+                  ...accountOptions
+                    .filter((profile) => {
+                      if (form.clientId === 'google' && profile.authType !== 'oauth') return false;
+                      return true;
+                    })
+                    .map((profile) => ({
+                      value: profile.id,
+                      label:
+                        profile.authType === 'oauth'
+                          ? `${profile.displayName}（OAuth）`
+                          : `${profile.displayName}（API Key）`,
+                    })),
+                ]}
+                onChange={(value) => onChange({ accountRef: value, defaultModel: '', provider: '' })}
+                disabled={loadingProfiles}
+                required
+              />
+            )}
             <ComboField
               label="Model"
               ariaLabel="Model"
               value={form.defaultModel}
               onChange={(value) => onChange({ defaultModel: value })}
               suggestions={modelOptions}
-              required
+              required={form.clientId !== 'kiro'}
               placeholder={
-                form.clientId === 'opencode'
-                  ? '例如 xiaomi-mimo/mimo-v2.5-pro 或 anthropic/claude-opus-4-6'
-                  : '模型标识符，如 claude-sonnet-4-5'
+                form.clientId === 'kiro'
+                  ? '可留空，使用 Kiro CLI 当前默认模型'
+                  : form.clientId === 'opencode'
+                    ? '例如 xiaomi-mimo/mimo-v2.5-pro 或 anthropic/claude-opus-4-6'
+                    : '模型标识符，如 claude-sonnet-4-5'
               }
             />
             {modelOptionsError ? (

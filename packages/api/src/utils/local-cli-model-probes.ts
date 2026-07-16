@@ -16,6 +16,8 @@ export interface LocalCliModelsProbeDefinition {
   readonly command?: { readonly args: readonly string[]; readonly parse: (stdout: string) => string[] };
   readonly configFile?: { readonly path: string; readonly extract: (content: string) => string[] };
   readonly static?: readonly string[];
+  /** The command parser deliberately returns the active default model first. */
+  readonly firstResultIsDefault?: boolean;
 }
 
 export interface ModelChainOptions {
@@ -112,6 +114,37 @@ export function extractJsonModelFields(content: string): string[] {
   return uniqueModelIds(models);
 }
 
+/**
+ * Parse the safe `kiro-cli settings list --format json` response.
+ * Deliberately ignores every root except `chat`, and inside `chat` only reads
+ * `defaultModel` plus explicit IDs under `modelDefaults`.
+ */
+export function parseKiroSettingsModels(content: string): string[] {
+  const parsed = parseJsonObject(content);
+  if (!parsed || !parsed.chat || typeof parsed.chat !== 'object' || Array.isArray(parsed.chat)) return [];
+
+  const chat = parsed.chat as Record<string, unknown>;
+  const models: string[] = typeof chat.defaultModel === 'string' ? [chat.defaultModel] : [];
+  const defaults = chat.modelDefaults;
+  if (!defaults || typeof defaults !== 'object' || Array.isArray(defaults)) return uniqueModelIds(models);
+
+  for (const [key, value] of Object.entries(defaults as Record<string, unknown>)) {
+    if (looksLikeModelId(key) && value && typeof value === 'object' && !Array.isArray(value)) {
+      models.push(key);
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const entry = value as Record<string, unknown>;
+    for (const field of ['modelId', 'model', 'id'] as const) {
+      if (typeof entry[field] === 'string') models.push(entry[field]);
+    }
+  }
+  return uniqueModelIds(models);
+}
+
+function looksLikeModelId(value: string): boolean {
+  return value.length <= 256 && !/\s/.test(value) && /[-/:.]/.test(value);
+}
+
 export function extractOpenCodeConfigModels(content: string): string[] {
   const parsed = parseJsonObject(content);
   if (!parsed) return [];
@@ -187,6 +220,12 @@ export const LOCAL_CLI_MODELS_PROBES = {
       'gemini-2.5-pro',
       'gemini-2.5-flash',
     ],
+  },
+  // Kiro CLI exposes a read-only JSON settings command. The strict parser reads only model fields.
+  kiro: {
+    command: { args: ['settings', 'list', '--format', 'json'], parse: parseKiroSettingsModels },
+    firstResultIsDefault: true,
+    static: [],
   },
   // OpenCode 1.15.13: models --pure is non-interactive and prints one provider/model id per line.
   opencode: {
@@ -266,7 +305,9 @@ async function probeCommandModels(
   if (!probe.command || !options.installed || !options.resolvedPath) return [];
   try {
     const result = await options.runCommand(options.resolvedPath, probe.command.args);
-    return candidates(probe.command.parse(redactProbeOutput(result.stdout)), 'cli', options.defaultModel);
+    const ids = probe.command.parse(redactProbeOutput(result.stdout));
+    const defaultModel = options.defaultModel ?? (probe.firstResultIsDefault ? ids[0] : undefined);
+    return candidates(ids, 'cli', defaultModel);
   } catch {
     // A timeout, buffer cap, auth failure, or parser error falls through to L2.
     return [];
