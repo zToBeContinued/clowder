@@ -13,12 +13,15 @@ export interface KiroAcpProfileInput {
 /** Build the process profile for the official `kiro-cli acp` carrier. */
 export function createKiroAcpProfile(config: KiroAcpProfileInput): AcpProviderProfile {
   const configuredArgs = [...(config.cli?.defaultArgs ?? [])];
-  const extraArgs = configuredArgs[0] === 'acp' ? configuredArgs.slice(1) : configuredArgs;
+  const withoutEntrypoint = configuredArgs[0] === 'acp' ? configuredArgs.slice(1) : configuredArgs;
+  // This deployment explicitly opts every non-interactive Kiro ACP process into
+  // trust-all. Normalize the short alias and duplicates to one auditable flag.
+  const extraArgs = withoutEntrypoint.filter((arg) => arg !== '--trust-all-tools' && arg !== '-a');
   const model = config.defaultModel?.trim();
 
   return {
     command: config.cli?.command ?? 'kiro-cli',
-    startupArgs: ['acp', ...extraArgs],
+    startupArgs: ['acp', '--trust-all-tools', ...extraArgs],
     mcpServers: [],
     model: model || undefined,
     supportsMultiplexing: false,

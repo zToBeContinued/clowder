@@ -91,6 +91,48 @@ describe('AcpClient', () => {
     assert.ok(client.isAlive);
   });
 
+  it('passes parent proxy environment variables to spawned ACP processes', async () => {
+    const previousProxyEnv = {
+      HTTP_PROXY: process.env.HTTP_PROXY,
+      HTTPS_PROXY: process.env.HTTPS_PROXY,
+      NO_PROXY: process.env.NO_PROXY,
+    };
+    process.env.HTTP_PROXY = 'http://127.0.0.1:17890';
+    process.env.HTTPS_PROXY = 'http://127.0.0.1:17891';
+    process.env.NO_PROXY = 'localhost,127.0.0.1';
+
+    const { child, clientStdin, agentStdout } = createMockChild();
+    let capturedEnv;
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') agentRespond(agentStdout, msg.id, INIT_RESULT);
+      }
+    });
+
+    try {
+      client = new AcpClient({
+        command: 'fake',
+        args: [],
+        cwd: '/tmp',
+        spawnFn: (_command, _args, options) => {
+          capturedEnv = options.env;
+          return child;
+        },
+      });
+
+      await client.initialize();
+      assert.equal(capturedEnv.HTTP_PROXY, 'http://127.0.0.1:17890');
+      assert.equal(capturedEnv.HTTPS_PROXY, 'http://127.0.0.1:17891');
+      assert.equal(capturedEnv.NO_PROXY, 'localhost,127.0.0.1');
+    } finally {
+      for (const [key, value] of Object.entries(previousProxyEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
+
   it('newSession sends cwd and mcpServers', async () => {
     const { child, clientStdin, agentStdout } = createMockChild();
 
@@ -522,6 +564,91 @@ describe('AcpClient', () => {
     await new Promise((resolve) => setTimeout(resolve, 25));
 
     assert.deepEqual(permissionOutcome, { outcome: 'cancelled' });
+  });
+
+  // ─── Nested subagent guarantee (defense-in-depth for --trust-all-tools) ───
+  // A Kiro subagent can fire several tool calls in a single turn. Kiro's ACP
+  // method set does not document session/request_permission and --trust-all-tools
+  // suppresses prompts at the source, but IF a permission request ever reaches us
+  // over ACP, Clowder must auto-approve EVERY one synchronously (never wait for a
+  // human that cannot exist in headless ACP) and never escalate to allow_always.
+  it('nested subagent: consecutive permission requests are each auto-approved, never allow_always', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+    const approvals = [];
+
+    // Offer allow_always FIRST every time to prove Clowder still refuses to pick it.
+    const optionsFor = (n) => [
+      { optionId: `always-${n}`, kind: 'allow_always', name: 'Always allow' },
+      { optionId: `once-${n}`, kind: 'allow_once', name: 'Allow once' },
+      { optionId: `reject-${n}`, kind: 'reject_once', name: 'Reject' },
+    ];
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (!msg.method && msg.result?.outcome?.outcome === 'selected') {
+          approvals.push({ id: msg.id, optionId: msg.result.outcome.optionId });
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+
+    // Two request-form permissions (with id) + one notification-form (no id),
+    // back-to-back, mimicking a subagent's tool calls within one turn.
+    agentStdout.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 'perm-sub-1', method: 'session/request_permission', params: { options: optionsFor(1) } })}\n`,
+    );
+    agentStdout.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id: 'perm-sub-2', method: 'session/request_permission', params: { options: optionsFor(2) } })}\n`,
+    );
+    agentStdout.write(
+      `${JSON.stringify({ jsonrpc: '2.0', method: 'session/request_permission', params: { sessionId: 'sub', options: optionsFor(3) } })}\n`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Every request was answered (2 by explicit id, 1 by synthetic id for the no-id form).
+    assert.equal(approvals.length, 3, `expected 3 auto-approvals, got ${approvals.length}`);
+    assert.equal(approvals.find((a) => a.id === 'perm-sub-1')?.optionId, 'once-1');
+    assert.equal(approvals.find((a) => a.id === 'perm-sub-2')?.optionId, 'once-2');
+    const synth = approvals.find((a) => String(a.id).startsWith('synth-perm-'));
+    assert.ok(synth, 'no-id permission notification must still receive a synthetic-id response');
+    assert.equal(synth.optionId, 'once-3');
+    // Contract #7 holds under load: allow_always is never selected.
+    assert.ok(!approvals.some((a) => String(a.optionId).startsWith('always-')), 'must never select allow_always');
+  });
+
+  it('ignores _session/terminate subagent teardown without polluting the prompt stream', async () => {
+    const { child, clientStdin, agentStdout } = createMockChild();
+
+    clientStdin.on('data', (chunk) => {
+      for (const line of chunk.toString().trim().split('\n')) {
+        const msg = JSON.parse(line);
+        if (msg.method === 'initialize') {
+          agentRespond(agentStdout, msg.id, INIT_RESULT);
+        } else if (msg.method === 'session/prompt') {
+          // Kiro extension notification for subagent session teardown — must be
+          // ignored, never surfaced as a stream event nor used to refresh liveness.
+          agentNotify(agentStdout, '_session/terminate', { sessionId: 'kiro-sub-session' });
+          agentNotify(agentStdout, 'session/update', {
+            sessionId: 'kiro-sub-session',
+            update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'visible' } },
+          });
+          setTimeout(() => agentRespond(agentStdout, msg.id, { stopReason: 'end_turn' }), 10);
+        }
+      }
+    });
+
+    client = new AcpClient({ command: 'fake', args: [], cwd: '/tmp', spawnFn: () => child });
+    await client.initialize();
+    const events = [];
+    for await (const event of client.promptStream('kiro-sub-session', 'hello')) events.push(event);
+
+    assert.equal(events.length, 1, 'only the real session/update should reach the stream');
+    assert.equal(events[0].update.content.text, 'visible');
   });
 
   it('aborts an active prompt with exactly one session-scoped cancel', async () => {

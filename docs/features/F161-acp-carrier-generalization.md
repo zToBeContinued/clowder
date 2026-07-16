@@ -35,7 +35,7 @@ F149 交付了完整的 ACP runtime operations（进程池 / session lease / lif
 
 `kiro-acp-profile.ts` 和 `KiroAcpAdapter.ts` 只负责 provider 差异：
 
-- 启动入口固定为 `kiro-cli acp`；若用户参数首项已是 `acp` 则去重。
+- 启动入口固定为 `kiro-cli acp`；若用户参数首项已是 `acp` 则去重。此自用部署明确要求每个 Kiro ACP 进程默认携带且仅携带一次 `--trust-all-tools`，`-a` 与重复长参数会归一化。
 - `defaultModel` 仅在 trim 后非空时作为 `session/set_model` override；留空继续使用 Kiro CLI 当前默认模型。
 - Kiro 声明 `supportsMultiplexing=false`。
 - builtin MCP 只允许 `cat-cafe`、`cat-cafe-collab`、`cat-cafe-memory`、`cat-cafe-signals`。
@@ -68,8 +68,8 @@ Gemini 的 multiplex 行为保持不变。对 `supportsMultiplexing=false` 的 K
 
 - **Session**：new/load 二选一；模型 override 仅在已配置时发送；abort 使用当前 session 的 `cancelSession`，并保证 exactly once；`finally` 始终 release lease。
 - **MCP**：支持 stdio 与 HTTP；过滤 Kiro 声明不支持的 SSE。`mcpSupport=false` 时 builtin 与 user project MCP 均不注入；启用时 callback env 仍走通用 materialization。
-- **Permission**：无人值守 fallback 优先 `allow_once`，然后 `reject_once`、`reject_always`；没有安全选项则 `cancelled`，绝不默认选择 `allow_always`。
-- **Notification**：只有标准 `session/update` 进入 prompt listener。`_kiro.dev/*` 等扩展 notification 只记 debug，不污染输出 stream，也不刷新基于标准更新的 liveness/watchdog。
+- **Permission**：Kiro 以 `--trust-all-tools` 启动（官方文档：该 flag 覆盖所有 agent，含 subagent），源头即不发起权限请求；官方 ACP 方法集也**不含** `session/request_permission`（工具活动仅以信息性 `ToolCall`/`ToolCallUpdate` 上报）。作为第二层兜底，无人值守 fallback 同步优先 `allow_once`，然后 `reject_once`、`reject_always`；没有安全选项则 `cancelled`，绝不默认选择 `allow_always`。两层共同保证嵌套 subagent 触发的工具权限不会在非交互 ACP 下留下无人可确认的等待（fail-closed ≠ 挂起）。
+- **Notification**：只有标准 `session/update` 进入 prompt listener。`_kiro.dev/*`、`_session/terminate`（subagent 会话结束）等扩展 notification 只记 debug，不污染输出 stream，也不刷新基于标准更新的 liveness/watchdog。
 - **JSON-RPC ID**：按字段是否存在识别 request/response，正确支持 Kiro 发出的数字 ID（包括 `0`）。
 
 ## Product Integration
@@ -84,14 +84,14 @@ Gemini 的 multiplex 行为保持不变。对 `supportsMultiplexing=false` 的 K
 
 自动化测试覆盖：
 
-- `acp-client.test.js`：`session/set_model`、`id=0`、permission fail-closed、Kiro extension notification 隔离。
+- `acp-client.test.js`：`session/set_model`、`id=0`、permission fail-closed、嵌套 subagent 连续多次权限各自 `allow_once` 自动批准（绝不 `allow_always`、门控不卡）、`_session/terminate` 隔离、父进程 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` 传入子进程、Kiro extension notification 隔离。
 - `acp-process-pool.test.js`：non-multiplex active/pending 不共享、release 后复用、factory 获得实际 pool key。
 - `kiro-acp-profile.test.js` / `kiro-acp-adapter.test.js`：argv、model、builtin whitelist、cwd、new/load、MCP、事件转换、missing session、cancel exactly once 与 release。
 - `client-routing.test.js`、`local-cli-probe.test.js`、`cli-resolve.test.js`：shared routing 边界、安全 settings parser 与 Windows resolver。
 - `cats-routes-runtime-crud.test.js`：默认 CLI/MCP、无账号、PATCH 清旧账号与 registry runtime。
 - `hub-cat-editor.test.tsx`：Kiro adopt、无账号 UI、可空模型、payload 清账号与默认 MCP。
 
-本机确认的 CLI 为 `kiro-cli-chat 2.12.2`，`kiro-cli acp` 可启动，initialize 能力声明支持 loadSession/HTTP、SSE unsupported。**本特性尚未执行真实模型 prompt，因此这里不声称完整的模型端到端调用已验证。** 自动化测试验证的是 Clowder integration contract 与 runtime policy。
+本机当前确认的 CLI 为 `kiro-cli-chat 2.12.3`，`kiro-cli acp` 可启动，initialize 能力声明支持 loadSession/HTTP、SSE unsupported。**本特性尚未执行真实模型 prompt，因此这里不声称完整的模型端到端调用已验证。** 自动化测试验证的是 Clowder integration contract 与 runtime policy。
 
 ## Acceptance Criteria
 

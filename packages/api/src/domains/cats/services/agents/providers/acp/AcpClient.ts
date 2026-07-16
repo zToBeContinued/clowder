@@ -54,7 +54,15 @@ export interface AcpClientConfig {
   env?: Record<string, string>;
   /** Inject spawn function for testing */
   spawnFn?: typeof nodeSpawn;
-  /** Custom permission request handler. Defaults to auto-approve (allow_once). */
+  /**
+   * Custom permission request handler. Defaults to auto-approve (allow_once).
+   *
+   * Kiro/Gemini adapters deliberately leave this unset: in headless ACP there is
+   * no human who could answer a prompt, so the default synchronous auto-approve
+   * (see handleAgentRequest) is the second layer that guarantees a subagent's
+   * tool-permission request can never leave an unconfirmable wait. Do not wire a
+   * blocking handler here for Kiro without preserving that no-hang guarantee.
+   */
   permissionHandler?: AcpPermissionHandler;
 }
 
@@ -695,6 +703,18 @@ export class AcpClient {
     });
   }
 
+  /**
+   * Handle an agent→client ACP request (permission, fs, terminal).
+   *
+   * Nested-subagent no-hang guarantee (defense-in-depth behind `--trust-all-tools`):
+   * every `session/request_permission` — request-form (with id), notification-form
+   * (no id → synthetic id) or numeric id `0` — is answered SYNCHRONOUSLY here. When
+   * no custom permissionHandler is set (the Kiro/Gemini default), we pick the first
+   * available option in order allow_once → reject_once → reject_always, else reply
+   * `cancelled`. We NEVER select allow_always (contract #7, fail-closed) and we
+   * NEVER await a human. Fail-closed ≠ hang: every branch writes a response, so a
+   * subagent firing many tool calls in headless ACP can never stall the turn.
+   */
   private handleAgentRequest(req: AcpAgentRequest): void {
     if (req.method === ACP_METHODS.requestPermission) {
       const respond = (result: { optionId: string }) => {

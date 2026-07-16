@@ -6,28 +6,39 @@ const { KIRO_MCP_WHITELIST, createKiroAcpProfile } = await import(
 );
 
 describe('kiro-acp-profile', () => {
-  it('uses the official kiro-cli acp entrypoint and disables multiplexing', () => {
+  it('uses the official kiro-cli acp entrypoint, trusts all tools and disables multiplexing', () => {
     const profile = createKiroAcpProfile({});
 
     assert.equal(profile.command, 'kiro-cli');
-    assert.deepEqual(profile.startupArgs, ['acp']);
+    assert.deepEqual(profile.startupArgs, ['acp', '--trust-all-tools']);
     assert.equal(profile.supportsMultiplexing, false);
     assert.deepEqual(profile.mcpServers, []);
     assert.equal(profile.model, undefined);
   });
 
-  it('appends defaultArgs after acp and honors a custom command', () => {
+  it('appends defaultArgs after the mandatory trust policy and honors a custom command', () => {
     const profile = createKiroAcpProfile({
       cli: { command: 'C:/tools/kiro-cli.exe', defaultArgs: ['--verbose'] },
     });
 
     assert.equal(profile.command, 'C:/tools/kiro-cli.exe');
-    assert.deepEqual(profile.startupArgs, ['acp', '--verbose']);
+    assert.deepEqual(profile.startupArgs, ['acp', '--trust-all-tools', '--verbose']);
   });
 
   it('deduplicates a leading acp argument', () => {
     const profile = createKiroAcpProfile({ cli: { command: 'kiro-cli', defaultArgs: ['acp', '--verbose'] } });
-    assert.deepEqual(profile.startupArgs, ['acp', '--verbose']);
+    assert.deepEqual(profile.startupArgs, ['acp', '--trust-all-tools', '--verbose']);
+  });
+
+  it('normalizes trust-all aliases and duplicates to exactly one long-form flag', () => {
+    for (const defaultArgs of [
+      ['--trust-all-tools', '--verbose'],
+      ['-a', '--verbose'],
+      ['acp', '-a', '--trust-all-tools', '--trust-all-tools', '--verbose'],
+    ]) {
+      const profile = createKiroAcpProfile({ cli: { defaultArgs } });
+      assert.deepEqual(profile.startupArgs, ['acp', '--trust-all-tools', '--verbose']);
+    }
   });
 
   it('only exposes a non-empty trimmed model override', () => {
