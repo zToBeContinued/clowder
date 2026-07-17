@@ -2088,7 +2088,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     );
   });
 
-  it('treats Kiro as an accountless ACP provider across POST and PATCH', async () => {
+  it('accepts accountless Kiro onboarding POSTs without defaultModel and preserves PATCH semantics', async () => {
     const projectRoot = createProjectRoot();
     process.env.CAT_TEMPLATE_PATH = join(projectRoot, 'cat-template.json');
 
@@ -2104,7 +2104,6 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       color: { primary: '#6750a4', secondary: '#eaddff' },
       roleDescription: 'Kiro ACP runtime member',
       clientId: 'kiro',
-      defaultModel: '',
     };
 
     const boundRes = await app.inject({
@@ -2139,6 +2138,28 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(created.mcpSupport, true);
     assert.deepEqual(created.cli, { command: 'kiro-cli', outputFormat: 'acp' });
     assert.equal(created.adapterMode, 'acp');
+
+    const missingModelRes = await app.inject({
+      method: 'POST',
+      url: '/api/cats',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({
+        catId: 'runtime-openai-no-model',
+        name: '缺省模型猫',
+        displayName: '缺省模型猫',
+        avatar: '/avatars/runtime.png',
+        color: { primary: '#334155', secondary: '#cbd5e1' },
+        mentionPatterns: ['@runtime-openai-no-model'],
+        roleDescription: 'non-Kiro schema guard fixture',
+        clientId: 'openai',
+        accountRef: 'codex',
+      }),
+    });
+    assert.equal(missingModelRes.statusCode, 400, missingModelRes.body);
+    assert.ok(
+      JSON.parse(missingModelRes.body).details.some((issue) => issue.path?.includes('defaultModel')),
+      'non-Kiro create requests must still require defaultModel',
+    );
 
     const openaiRes = await app.inject({
       method: 'POST',

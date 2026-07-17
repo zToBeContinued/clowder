@@ -12,7 +12,11 @@ import { builtinAccountIdForClient, type ClientId, protocolForClient } from '@ca
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { resolveByAccountRef } from '../config/account-resolver.js';
-import { detectAvailableClients } from '../domains/cats/services/first-run-quest/client-detection.js';
+import {
+  detectAvailableClients,
+  detectClient,
+  type DetectedClient,
+} from '../domains/cats/services/first-run-quest/client-detection.js';
 import type { FirstRunQuestStateV1, IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveActiveProjectRoot } from '../utils/active-project-root.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -21,6 +25,7 @@ const execAsync = promisify(exec);
 
 interface FirstRunQuestRoutesOptions {
   threadStore: IThreadStore;
+  detectClient?: (client: DetectedClient['client']) => Promise<DetectedClient | null>;
 }
 
 const createQuestSchema = z.object({
@@ -29,7 +34,7 @@ const createQuestSchema = z.object({
 });
 
 const connectivityTestSchema = z.object({
-  profileId: z.string().min(1),
+  profileId: z.string().min(1).optional(),
   /** Client ID for account binding (anthropic/openai/google) — NOT the CLI tool name. */
   clientId: z.string().min(1),
   client: z.string().optional(),
@@ -126,7 +131,7 @@ export async function tryCliProbe(
 }
 
 export const firstRunQuestRoutes: FastifyPluginAsync<FirstRunQuestRoutesOptions> = async (app, opts) => {
-  const { threadStore } = opts;
+  const { threadStore, detectClient: detectLocalClient = detectClient } = opts;
 
   /** Detect installed CLI clients on this machine. */
   app.get('/api/first-run/available-clients', async (request, reply) => {
@@ -214,6 +219,26 @@ export const firstRunQuestRoutes: FastifyPluginAsync<FirstRunQuestRoutesOptions>
     }
 
     const { profileId, clientId, client: clientName, model } = parsed.data;
+
+    /* Kiro is accountless in Clowder. Its onboarding check is deliberately
+     * local-only: resolve the allowlisted executable and run `--version`.
+     * Never start chat/ACP or send a model prompt from this endpoint. */
+    if (clientId === 'kiro') {
+      const kiro = await detectLocalClient('kiro');
+      if (!kiro?.installed) {
+        return { ok: false, error: '未检测到 Kiro CLI，请先完成本机安装' };
+      }
+      return {
+        ok: true,
+        message: kiro.version ? `Kiro CLI 本地检查通过（${kiro.version}）` : 'Kiro CLI 本地检查通过',
+      };
+    }
+
+    if (!profileId) {
+      reply.status(400);
+      return { ok: false, error: '非 Kiro 客户端必须选择账号配置' };
+    }
+
     const projectRoot = resolveActiveProjectRoot();
     const runtime = resolveByAccountRef(projectRoot, profileId);
 

@@ -3,16 +3,18 @@
  * Only returns clients that are actually available for binding.
  */
 
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { resolveCliCommand } from '../../../../utils/cli-resolve.js';
+import { resolveWindowsShimSpawn } from '../../../../utils/cli-spawn-win.js';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export interface DetectedClient {
-  /** Client ID — the CLI tool identity (claude, codex, gemini, opencode, dare, kimi, grok) */
-  client: 'claude' | 'codex' | 'gemini' | 'opencode' | 'dare' | 'kimi' | 'grok';
+  /** Client ID — the CLI tool identity. */
+  client: 'claude' | 'codex' | 'gemini' | 'kiro' | 'opencode' | 'dare' | 'kimi' | 'grok';
   /** Provider key matching ClientValue in hub-cat-editor (anthropic, openai, etc.) */
-  provider: 'anthropic' | 'openai' | 'google' | 'opencode' | 'dare' | 'kimi' | 'xai';
+  provider: 'anthropic' | 'openai' | 'google' | 'kiro' | 'opencode' | 'dare' | 'kimi' | 'xai';
   /** Human-readable label */
   label: string;
   /** CLI binary name */
@@ -30,8 +32,13 @@ interface CliSpec {
   provider: DetectedClient['provider'];
   label: string;
   cli: string;
-  versionCmd: string;
+  versionArgs: readonly string[];
   envKey: string;
+}
+
+export interface ClientDetectionOptions {
+  resolveCommand?: (command: string) => string | null;
+  runCommand?: (file: string, args: readonly string[]) => Promise<{ stdout: string; stderr: string }>;
 }
 
 const CLI_SPECS: CliSpec[] = [
@@ -40,7 +47,7 @@ const CLI_SPECS: CliSpec[] = [
     provider: 'anthropic',
     label: 'Claude',
     cli: 'claude',
-    versionCmd: 'claude --version',
+    versionArgs: ['--version'],
     envKey: 'ANTHROPIC_API_KEY',
   },
   {
@@ -48,7 +55,7 @@ const CLI_SPECS: CliSpec[] = [
     provider: 'openai',
     label: 'Codex',
     cli: 'codex',
-    versionCmd: 'codex --version',
+    versionArgs: ['--version'],
     envKey: 'OPENAI_API_KEY',
   },
   {
@@ -56,7 +63,7 @@ const CLI_SPECS: CliSpec[] = [
     provider: 'opencode',
     label: 'OpenCode',
     cli: 'opencode',
-    versionCmd: 'opencode version',
+    versionArgs: ['version'],
     envKey: 'ANTHROPIC_API_KEY',
   },
   {
@@ -64,16 +71,24 @@ const CLI_SPECS: CliSpec[] = [
     provider: 'google',
     label: 'Gemini',
     cli: 'gemini',
-    versionCmd: 'gemini --version',
+    versionArgs: ['--version'],
     envKey: 'GOOGLE_API_KEY',
   },
-  { client: 'dare', provider: 'dare', label: 'Dare', cli: 'dare', versionCmd: 'dare --version', envKey: '' },
+  {
+    client: 'kiro',
+    provider: 'kiro',
+    label: 'Kiro',
+    cli: 'kiro-cli',
+    versionArgs: ['--version'],
+    envKey: '',
+  },
+  { client: 'dare', provider: 'dare', label: 'Dare', cli: 'dare', versionArgs: ['--version'], envKey: '' },
   {
     client: 'kimi',
     provider: 'kimi',
     label: 'Kimi',
     cli: 'kimi',
-    versionCmd: 'kimi --version',
+    versionArgs: ['--version'],
     envKey: 'MOONSHOT_API_KEY',
   },
   {
@@ -81,44 +96,68 @@ const CLI_SPECS: CliSpec[] = [
     provider: 'xai',
     label: 'Grok',
     cli: 'grok',
-    versionCmd: 'grok --version',
+    versionArgs: ['--version'],
     envKey: 'XAI_API_KEY',
   },
 ];
 
-async function checkCli(spec: CliSpec): Promise<DetectedClient> {
+async function checkCli(spec: CliSpec, options: ClientDetectionOptions): Promise<DetectedClient> {
+  const resolveCommand = options.resolveCommand ?? resolveCliCommand;
+  const runCommand =
+    options.runCommand ??
+    (async (file: string, args: readonly string[]) =>
+      execFileAsync(file, [...args], {
+        timeout: 5_000,
+        maxBuffer: 16 * 1024,
+        windowsHide: true,
+      }));
+  const resolvedCommand = resolveCommand(spec.cli);
+  const base = {
+    client: spec.client,
+    provider: spec.provider,
+    label: spec.label,
+    cli: spec.cli,
+    hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
+  };
+
+  if (!resolvedCommand) return { ...base, installed: false };
+
   try {
-    const { stdout } = await execAsync(spec.versionCmd, { timeout: 5000 });
-    const version = stdout.trim().split('\n').at(0) ?? '';
+    const spawn =
+      process.platform === 'win32' && /\.cmd$/i.test(resolvedCommand)
+        ? resolveWindowsShimSpawn(resolvedCommand, spec.versionArgs)
+        : { command: resolvedCommand, args: [...spec.versionArgs] };
+    if (!spawn) return { ...base, installed: false };
+
+    const { stdout } = await runCommand(spawn.command, spawn.args);
+    const version = stdout.trim().split(/\r?\n/).at(0)?.slice(0, 160) ?? '';
     return {
-      client: spec.client,
-      provider: spec.provider,
-      label: spec.label,
-      cli: spec.cli,
+      ...base,
       installed: true,
       version: version || undefined,
-      hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
     };
   } catch {
-    return {
-      client: spec.client,
-      provider: spec.provider,
-      label: spec.label,
-      cli: spec.cli,
-      installed: false,
-      hasApiKey: spec.envKey ? Boolean(process.env[spec.envKey]) : false,
-    };
+    return { ...base, installed: false };
   }
 }
 
 /** Detect all available CLI clients in parallel. */
-export async function detectAvailableClients(): Promise<DetectedClient[]> {
-  const results = await Promise.all(CLI_SPECS.map(checkCli));
+export async function detectAvailableClients(options: ClientDetectionOptions = {}): Promise<DetectedClient[]> {
+  const results = await Promise.all(CLI_SPECS.map((spec) => checkCli(spec, options)));
   return results;
 }
 
+/** Detect one allowlisted CLI client without invoking chat, ACP, or a model prompt. */
+export async function detectClient(
+  client: DetectedClient['client'],
+  options: ClientDetectionOptions = {},
+): Promise<DetectedClient | null> {
+  const spec = CLI_SPECS.find((candidate) => candidate.client === client);
+  return spec ? checkCli(spec, options) : null;
+}
+
 /** Return only clients that are installed. */
-export async function getInstalledClients(): Promise<DetectedClient[]> {
-  const all = await detectAvailableClients();
+export async function getInstalledClients(options: ClientDetectionOptions = {}): Promise<DetectedClient[]> {
+  const all = await detectAvailableClients(options);
   return all.filter((c) => c.installed);
 }

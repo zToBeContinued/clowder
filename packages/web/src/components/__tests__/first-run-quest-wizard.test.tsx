@@ -240,4 +240,135 @@ describe('FirstRunQuestWizard', () => {
     expect(catsPayload!.clientId).toBe('anthropic');
     expect(catsPayload!.client).toBeUndefined();
   });
+
+  it('uses accountless Kiro config and omits accountRef/defaultModel from create and retry payloads', async () => {
+    const requestedUrls: string[] = [];
+    let connectivityPayload: Record<string, unknown> | null = null;
+    let catsPayload: Record<string, unknown> | null = null;
+    let retryPayload: Record<string, unknown> | null = null;
+    let threadAttempts = 0;
+
+    mockApiFetch.mockImplementation(async (url: string, init?: RequestInit) => {
+      requestedUrls.push(url);
+      if (url.includes('/api/cat-templates')) {
+        return jsonResponse({
+          templates: [
+            {
+              id: 'ragdoll',
+              name: '布偶猫',
+              nickname: '宪宪',
+              avatar: '/avatars/opus.png',
+              color: { primary: '#9B7EBD', secondary: '#E8DFF5' },
+              roleDescription: '主架构师',
+              personality: '温柔',
+            },
+          ],
+        });
+      }
+      if (url.includes('/api/first-run/available-clients')) {
+        return jsonResponse({
+          clients: [
+            {
+              client: 'kiro',
+              provider: 'kiro',
+              label: 'Kiro',
+              cli: 'kiro-cli',
+              installed: true,
+              version: 'kiro-cli-chat 2.12.2',
+              hasApiKey: false,
+            },
+          ],
+        });
+      }
+      if (url.includes('/api/first-run/connectivity-test')) {
+        connectivityPayload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return jsonResponse({ ok: true, message: 'Kiro CLI 本地检查通过' });
+      }
+      if (url === '/api/cats' && init?.method === 'POST') {
+        catsPayload = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse({ cat: { id: 'ragdoll-kiro', displayName: '布偶猫' } });
+      }
+      if (url.startsWith('/api/cats/') && init?.method === 'PATCH') {
+        retryPayload = JSON.parse(String(init.body)) as Record<string, unknown>;
+        return jsonResponse({ cat: { id: 'ragdoll-kiro', displayName: '布偶猫' } });
+      }
+      if (url === '/api/threads' && init?.method === 'POST') {
+        threadAttempts += 1;
+        return threadAttempts === 1
+          ? jsonResponse({ error: 'fixture thread failure' }, 500)
+          : jsonResponse({ id: 'thread-kiro' });
+      }
+      return jsonResponse({});
+    });
+
+    await act(async () => {
+      root.render(<WizardHost />);
+    });
+    await flushEffects();
+
+    const templateButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('布偶猫'),
+    );
+    expect(templateButton).toBeTruthy();
+    await act(async () => {
+      templateButton!.click();
+    });
+    await flushEffects();
+
+    const clientButton = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Kiro'),
+    );
+    expect(clientButton).toBeTruthy();
+    await act(async () => {
+      clientButton!.click();
+    });
+    await flushEffects();
+
+    expect(container.textContent).toContain('Kiro 本机配置');
+    expect(container.textContent).toContain('无需在 Clowder 选择账号或模型');
+    expect(container.textContent).not.toContain('新建账号认证');
+    expect(requestedUrls.some((url) => url.includes('/api/accounts'))).toBe(false);
+
+    const runSafeCheck = async () => {
+      const safeCheckButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('安全检查'),
+      );
+      expect(safeCheckButton).toBeTruthy();
+      await act(async () => {
+        safeCheckButton!.click();
+      });
+      await flushEffects();
+    };
+
+    const createCat = async () => {
+      const createButton = Array.from(container.querySelectorAll('button')).find((button) =>
+        button.textContent?.includes('创建猫猫'),
+      );
+      expect(createButton).toBeTruthy();
+      expect(createButton!.disabled).toBe(false);
+      await act(async () => {
+        createButton!.click();
+      });
+      await flushEffects();
+    };
+
+    await runSafeCheck();
+    expect(connectivityPayload).toEqual({ clientId: 'kiro', client: 'kiro' });
+    await createCat();
+
+    expect(catsPayload).not.toBeNull();
+    expect(catsPayload!.clientId).toBe('kiro');
+    expect(catsPayload!.accountRef).toBeUndefined();
+    expect(catsPayload!.defaultModel).toBeUndefined();
+    expect(container.textContent).toContain('创建训练营线程失败');
+
+    await runSafeCheck();
+    await createCat();
+
+    expect(retryPayload).not.toBeNull();
+    expect(retryPayload).toEqual({ clientId: 'kiro' });
+    expect(threadAttempts).toBe(2);
+    expect(requestedUrls.some((url) => url.includes('/api/accounts'))).toBe(false);
+  });
+
 });

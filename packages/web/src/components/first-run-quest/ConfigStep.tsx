@@ -7,11 +7,16 @@ import { builtinAccountIdForClient, type ClientValue, filterAccounts } from '../
 import { type UnifiedAuthEditData, UnifiedAuthModal } from '../UnifiedAuthModal';
 import { ProfileCard } from './ProfileCard';
 
+export interface FirstRunClientConfig {
+  accountRef?: string;
+  model?: string;
+}
+
 interface ConfigStepProps {
   client: string;
   /** Account provider key (anthropic/openai/google) — distinct from model provider. */
   clientId: string;
-  onComplete: (config: { accountRef: string; model: string }) => void;
+  onComplete: (config: FirstRunClientConfig) => void;
 }
 
 /** Map raw API error messages to user-friendly Chinese */
@@ -26,8 +31,9 @@ function humanizeError(msg: string): string {
 }
 
 export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
+  const isKiro = client === 'kiro' || clientId === 'kiro';
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isKiro);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [expandedId, setExpandedId] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
@@ -48,10 +54,11 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   }, []);
 
   useEffect(() => {
+    if (isKiro) return;
     fetchProfiles()
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [fetchProfiles]);
+  }, [fetchProfiles, isKiro]);
 
   const available = useMemo(() => filterAccounts(clientId as ClientValue, profiles), [clientId, profiles]);
 
@@ -59,13 +66,14 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   const firstModel = (p?: ProfileItem) => p?.models?.filter(Boolean)?.[0] ?? '';
 
   useEffect(() => {
+    if (isKiro) return;
     if (!selectedProfileId && available.length > 0) {
       const defaultId = builtinAccountIdForClient(clientId as ClientValue) ?? available[0]?.id ?? '';
       setSelectedProfileId(defaultId);
       setExpandedId(defaultId);
       setSelectedModel(firstModel(available.find((p) => p.id === defaultId)));
     }
-  }, [available, clientId, selectedProfileId]);
+  }, [available, clientId, isKiro, selectedProfileId]);
 
   const handleSelectProfile = (id: string) => {
     const collapse = expandedId === id && selectedProfileId === id;
@@ -86,29 +94,35 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   };
 
   const handleTest = async () => {
-    if (!selectedProfileId || !selectedModel) return;
-    const sig = `${selectedProfileId}:${selectedModel}`;
+    if (!isKiro && (!selectedProfileId || !selectedModel)) return;
+    const sig = isKiro ? 'kiro:local' : `${selectedProfileId}:${selectedModel}`;
     testSigRef.current = sig;
     setTesting(true);
     setTestResult(null);
     try {
       const selectedProfile = available.find((p) => p.id === selectedProfileId);
-      const profileClientId = selectedProfile?.provider ?? clientId;
+      const profileClientId = isKiro ? 'kiro' : (selectedProfile?.provider ?? clientId);
       const res = await apiFetch('/api/first-run/connectivity-test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profileId: selectedProfileId,
-          clientId: profileClientId,
-          client,
-          model: selectedModel || undefined,
-        }),
+        body: JSON.stringify(
+          isKiro
+            ? { clientId: 'kiro', client: 'kiro' }
+            : {
+                profileId: selectedProfileId,
+                clientId: profileClientId,
+                client,
+                model: selectedModel || undefined,
+              },
+        ),
       });
       if (testSigRef.current !== sig) return;
       const body = (await res.json()) as { ok: boolean; message?: string; error?: string };
       const result = {
         ok: body.ok,
-        message: body.ok ? (body.message ?? '连接成功！') : humanizeError(body.error ?? body.message ?? '连接失败'),
+        message: body.ok
+          ? (body.message ?? (isKiro ? '本地检查通过！' : '连接成功！'))
+          : humanizeError(body.error ?? body.message ?? '连接失败'),
       };
       if (result.ok) testCacheRef.current.set(sig, result);
       setTestResult(result);
@@ -152,6 +166,55 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
 
   if (loading) {
     return <p className="py-8 text-center text-sm text-cafe-muted">加载认证配置...</p>;
+  }
+
+  if (isKiro) {
+    const canProceed = Boolean(testResult?.ok);
+    return (
+      <div>
+        <h4 className="mb-1 text-sm font-semibold text-cafe-secondary">Kiro 本机配置</h4>
+        <p className="mb-3 text-xs text-cafe-muted">无需在 Clowder 选择账号或模型</p>
+
+        <div className="mb-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-4 text-sm text-conn-amber-text">
+          认证和默认模型由本机 Kiro CLI 管理。安全检查仅执行 <code>kiro-cli --version</code>，不会启动
+          chat、ACP 或发送模型请求。
+        </div>
+
+        <button
+          type="button"
+          disabled={testing}
+          onClick={handleTest}
+          className="mb-3 w-full rounded-lg border border-conn-amber-ring py-2.5 text-sm font-semibold text-conn-amber-text transition hover:bg-conn-amber-bg disabled:cursor-wait disabled:opacity-60"
+        >
+          {testing ? '检查中...' : '安全检查'}
+        </button>
+
+        {testResult && (
+          <div
+            className={`mb-3 rounded-lg p-3 text-sm ${
+              testResult.ok
+                ? 'border border-conn-emerald-ring bg-conn-emerald-bg text-conn-emerald-text'
+                : 'border border-conn-red-ring bg-conn-red-bg text-conn-red-text'
+            }`}
+          >
+            {testResult.message}
+          </div>
+        )}
+
+        <button
+          type="button"
+          disabled={!canProceed}
+          onClick={() => onComplete({})}
+          className={`w-full rounded-lg py-2.5 text-sm font-semibold transition ${
+            canProceed
+              ? 'bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90'
+              : 'cursor-not-allowed bg-cafe-surface-elevated text-cafe-muted'
+          }`}
+        >
+          {canProceed ? '创建猫猫' : '请先完成安全检查'}
+        </button>
+      </div>
+    );
   }
 
   const canProceed = selectedProfileId && selectedModel && testResult?.ok;

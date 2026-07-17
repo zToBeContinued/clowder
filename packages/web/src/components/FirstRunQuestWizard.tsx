@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
 import { ClientStep, type DetectedClient } from './first-run-quest/ClientStep';
-import { ConfigStep } from './first-run-quest/ConfigStep';
+import { ConfigStep, type FirstRunClientConfig } from './first-run-quest/ConfigStep';
 import { type TemplateCard, TemplateStep } from './first-run-quest/TemplateStep';
 
 type WizardStep = 'template' | 'client' | 'config' | 'creating' | 'done';
@@ -56,11 +56,20 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
   }, []);
 
   const handleConfigComplete = useCallback(
-    async (config: { accountRef: string; model: string }) => {
+    async (config: FirstRunClientConfig) => {
       if (!selectedTemplate || !selectedClient) return;
       setStep('creating');
       setError(null);
       try {
+        const isKiro = selectedClient.client === 'kiro' || selectedClient.provider === 'kiro';
+        const accountRef = config.accountRef?.trim();
+        const model = config.model?.trim();
+        const clientConfigPayload = {
+          clientId: isKiro ? 'kiro' : selectedClient.provider,
+          ...(!isKiro && accountRef ? { accountRef } : {}),
+          ...(model ? { defaultModel: model } : {}),
+        };
+
         // Reuse previously created cat if thread creation failed on a prior attempt
         let createdCatId: string;
         let createdCatName: string;
@@ -73,10 +82,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
           const patchRes = await apiFetch(`/api/cats/${encodeURIComponent(createdCatId)}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              accountRef: config.accountRef,
-              defaultModel: config.model,
-            }),
+            body: JSON.stringify(clientConfigPayload),
           });
           if (!patchRes.ok) throw new Error('猫猫配置更新失败');
         } else {
@@ -101,9 +107,7 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
               roleDescription: selectedTemplate.roleDescription,
               personality: selectedTemplate.personality,
               teamStrengths: selectedTemplate.teamStrengths,
-              clientId: selectedClient.provider,
-              accountRef: config.accountRef,
-              defaultModel: config.model,
+              ...clientConfigPayload,
             }),
           });
 

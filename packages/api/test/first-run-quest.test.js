@@ -6,8 +6,8 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
 import Fastify from 'fastify';
@@ -67,6 +67,10 @@ describe('First-Run Quest Routes', () => {
     assert.ok(grok, 'first-run client detection should include Grok');
     assert.equal(grok.provider, 'xai');
     assert.equal(grok.cli, 'grok');
+    const kiro = body.clients.find((client) => client.client === 'kiro');
+    assert.ok(kiro, 'first-run client detection should include Kiro');
+    assert.equal(kiro.provider, 'kiro');
+    assert.equal(kiro.cli, 'kiro-cli');
     // Each client has required fields
     for (const c of body.clients) {
       assert.ok(typeof c.client === 'string');
@@ -293,6 +297,98 @@ describe('First-Run Quest Routes', () => {
   });
 });
 
+test(
+  'client detection uses the isolated LOCALAPPDATA Kiro fallback and only runs --version on Windows',
+  { skip: process.platform !== 'win32' && 'Windows-only (official Kiro CLI fallback)' },
+  async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'first-run-kiro-fallback-'));
+    const kiroDir = join(tempRoot, 'Kiro-Cli');
+    const fakeExe = join(kiroDir, 'kiro-cli.exe');
+    await mkdir(kiroDir, { recursive: true });
+    await writeFile(fakeExe, 'fixture only', 'utf8');
+
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    const originalPath = process.env.PATH;
+    const { detectClient } = await import(
+      '../dist/domains/cats/services/first-run-quest/client-detection.js'
+    );
+    const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
+    const executed = [];
+    try {
+      process.env.LOCALAPPDATA = tempRoot;
+      process.env.PATH = '';
+      invalidateCliCommand('kiro-cli');
+      const result = await detectClient('kiro', {
+        async runCommand(file, args) {
+          executed.push({ file, args: [...args] });
+          return { stdout: 'kiro-cli-chat 2.12.2\n', stderr: '' };
+        },
+      });
+
+      assert.equal(result?.installed, true);
+      assert.equal(result?.version, 'kiro-cli-chat 2.12.2');
+      assert.deepEqual(executed, [{ file: fakeExe, args: ['--version'] }]);
+    } finally {
+      invalidateCliCommand('kiro-cli');
+      if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = originalLocalAppData;
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'client detection safely executes an isolated npm .cmd shim with the default runner on Windows',
+  { skip: process.platform !== 'win32' && 'Windows-only (npm .cmd shim execution)' },
+  async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'first-run-cmd-shim-'));
+    const npmDir = join(tempRoot, 'npm');
+    const packageDir = join(npmDir, 'node_modules', 'fixture-cli');
+    const shimPath = join(npmDir, 'claude.cmd');
+    const scriptPath = join(packageDir, 'cli.js');
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(shimPath, '@"%~dp0\\node_modules\\fixture-cli\\cli.js" %*\r\n', 'utf8');
+    await writeFile(
+      scriptPath,
+      [
+        "if (process.argv.slice(2).join(' ') !== '--version') process.exit(2);",
+        "process.stdout.write('fixture-claude 1.2.3\\n');",
+      ].join('\n'),
+      'utf8',
+    );
+
+    const originalAppData = process.env.APPDATA;
+    const originalLocalAppData = process.env.LOCALAPPDATA;
+    const originalPath = process.env.PATH;
+    const { detectClient } = await import(
+      '../dist/domains/cats/services/first-run-quest/client-detection.js'
+    );
+    const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
+    try {
+      process.env.APPDATA = tempRoot;
+      process.env.LOCALAPPDATA = join(tempRoot, 'local-app-data');
+      process.env.PATH = '';
+      invalidateCliCommand('claude');
+
+      const result = await detectClient('claude');
+
+      assert.equal(result?.installed, true);
+      assert.equal(result?.version, 'fixture-claude 1.2.3');
+    } finally {
+      invalidateCliCommand('claude');
+      if (originalAppData === undefined) delete process.env.APPDATA;
+      else process.env.APPDATA = originalAppData;
+      if (originalLocalAppData === undefined) delete process.env.LOCALAPPDATA;
+      else process.env.LOCALAPPDATA = originalLocalAppData;
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  },
+);
+
 describe('POST /api/first-run/connectivity-test', () => {
   /** @type {string | undefined} */ let savedGlobalRoot;
 
@@ -306,12 +402,12 @@ describe('POST /api/first-run/connectivity-test', () => {
     else process.env.CAT_CAFE_GLOBAL_CONFIG_ROOT = savedGlobalRoot;
   }
 
-  async function createTestApp() {
+  async function createTestApp(routeOptions = {}) {
     const { firstRunQuestRoutes } = await import('../dist/routes/first-run-quest.js');
     const { accountsRoutes } = await import('../dist/routes/accounts.js');
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const app = Fastify();
-    await app.register(firstRunQuestRoutes, { threadStore: new ThreadStore() });
+    await app.register(firstRunQuestRoutes, { threadStore: new ThreadStore(), ...routeOptions });
     await app.register(accountsRoutes);
     return app;
   }
@@ -329,7 +425,7 @@ describe('POST /api/first-run/connectivity-test', () => {
     await app.close();
   });
 
-  test('rejects invalid body with 400', async () => {
+  test('rejects non-Kiro requests without profileId with 400', async () => {
     const app = await createTestApp();
     const res = await app.inject({
       method: 'POST',
@@ -339,6 +435,36 @@ describe('POST /api/first-run/connectivity-test', () => {
     });
     assert.equal(res.statusCode, 400);
     assert.equal(res.json().ok, false);
+    await app.close();
+  });
+
+  test('checks Kiro locally without profileId, account lookup, ACP, chat, or prompt', async () => {
+    const detected = [];
+    const app = await createTestApp({
+      async detectClient(client) {
+        detected.push(client);
+        return {
+          client: 'kiro',
+          provider: 'kiro',
+          label: 'Kiro',
+          cli: 'kiro-cli',
+          installed: true,
+          version: 'kiro-cli-chat 2.12.2',
+          hasApiKey: false,
+        };
+      },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/first-run/connectivity-test',
+      headers: { ...AUTH_HEADERS, 'content-type': 'application/json' },
+      payload: { clientId: 'kiro', client: 'kiro' },
+    });
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.json().ok, true);
+    assert.match(res.json().message, /本地检查通过/);
+    assert.deepEqual(detected, ['kiro']);
     await app.close();
   });
 
@@ -522,7 +648,13 @@ describe('tryCliProbe (unit)', () => {
     assert.equal(capturedOpts.env.ANTHROPIC_API_KEY, 'sk-test');
     assert.equal(capturedOpts.env.ANTHROPIC_BASE_URL, 'https://proxy.test');
     // process.env vars should also be present (merged)
-    assert.equal(capturedOpts.env.PATH, process.env.PATH);
+    const envValueIgnoreCase = (env, key) =>
+      Object.entries(env).find(([candidate]) => candidate.toLowerCase() === key.toLowerCase())?.[1];
+    assert.equal(
+      envValueIgnoreCase(capturedOpts.env, 'PATH'),
+      envValueIgnoreCase(process.env, 'PATH'),
+      'parent PATH/Path should be preserved regardless of Windows key casing',
+    );
   });
 
   test('does not set env when no env vars provided', async () => {

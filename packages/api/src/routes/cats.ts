@@ -136,8 +136,20 @@ const baseCatSchema = z.object({
 const modelSchema = z.string().transform((v) => v.replace(/\/+$/, ''));
 
 const createNormalCatSchema = baseCatSchema.extend({
-  clientId: clientSchema.exclude(['antigravity']),
+  clientId: clientSchema.exclude(['antigravity', 'kiro']),
   defaultModel: modelSchema,
+  mcpSupport: z.boolean().optional(),
+  cli: cliSchema.optional(),
+  cliConfigArgs: z.array(z.string().min(1)).optional(),
+  provider: z.string().min(1).optional(),
+});
+
+/** Kiro owns account and model selection locally. Keep the runtime shape stable
+ * by normalizing an omitted onboarding model to the existing empty-string
+ * sentinel at the API boundary. */
+const createKiroCatSchema = baseCatSchema.extend({
+  clientId: z.literal('kiro'),
+  defaultModel: modelSchema.default(''),
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
@@ -151,7 +163,11 @@ const createAntigravityCatSchema = baseCatSchema.extend({
   commandArgs: z.array(z.string().min(1)).min(1).optional(),
 });
 
-const createCatSchema = z.discriminatedUnion('clientId', [createNormalCatSchema, createAntigravityCatSchema]);
+const createCatSchema = z.discriminatedUnion('clientId', [
+  createNormalCatSchema,
+  createKiroCatSchema,
+  createAntigravityCatSchema,
+]);
 
 const updateCatSchema = z.object({
   name: z.string().min(1).optional(),
