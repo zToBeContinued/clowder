@@ -178,6 +178,9 @@ if (-not $gitCommand) {
 }
 
 $ProjectRoot = Resolve-ProjectRoot
+. (Join-Path $ScriptDir "windows-runtime-env.ps1")
+Set-Location -LiteralPath $ProjectRoot
+Initialize-ClowderWindowsRuntimeEnvironment -ProjectRoot $ProjectRoot | Out-Null
 $authState = New-InstallerAuthState -ProjectRoot $ProjectRoot
 
 if ($env:CAT_CAFE_NPM_REGISTRY) {

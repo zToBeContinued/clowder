@@ -14,8 +14,9 @@
  * See also: packages/api/package.json `--import $(pwd)/...` for Node loader usage.
  */
 
-import { cpSync, mkdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
 
@@ -26,10 +27,14 @@ const TEMPLATE_PATH = resolve(__dirname, '../../../../cat-template.json');
 // This ensures loadCatConfig() (called by getCachedConfig → getRoster, etc.)
 // never finds stale cat-catalog.json files created by tests like
 // cat-account-binding, even after _resetCachedConfig() clears the cache.
-const tmpDir = resolve(process.env.TMPDIR ?? '/tmp', `cat-cafe-test-template-${process.pid}`);
-mkdirSync(tmpDir, { recursive: true });
-cpSync(TEMPLATE_PATH, resolve(tmpDir, 'cat-template.json'));
-process.env.CAT_TEMPLATE_PATH = resolve(tmpDir, 'cat-template.json');
+const processTempDir = mkdtempSync(join(tmpdir(), `cat-cafe-test-template-${process.pid}-`));
+process.once('exit', () => {
+  rmSync(processTempDir, { recursive: true, force: true });
+});
+
+const isolatedTemplatePath = resolve(processTempDir, 'cat-template.json');
+cpSync(TEMPLATE_PATH, isolatedTemplatePath);
+process.env.CAT_TEMPLATE_PATH = isolatedTemplatePath;
 
 async function registerAllCats() {
   const { loadCatConfig, toAllCatConfigs } = await import('../../dist/config/cat-config-loader.js');

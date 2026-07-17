@@ -42,9 +42,11 @@ if (-not $ScriptPath) {
     exit 1
 }
 $ScriptDir = Split-Path -Parent $ScriptPath
-. (Join-Path $ScriptDir "install-windows-helpers.ps1")
 $ProjectRoot = Split-Path -Parent $ScriptDir
-Set-Location $ProjectRoot
+. (Join-Path $ScriptDir "windows-runtime-env.ps1")
+Set-Location -LiteralPath $ProjectRoot
+Initialize-ClowderWindowsRuntimeEnvironment -ProjectRoot $ProjectRoot | Out-Null
+. (Join-Path $ScriptDir "install-windows-helpers.ps1")
 
 $Profile_ = $env:CAT_CAFE_PROFILE  # set by start-entry.mjs when --profile=* is given
 Write-Host "Cat Cafe - Windows Startup" -ForegroundColor Cyan

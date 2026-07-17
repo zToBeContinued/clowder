@@ -8,7 +8,11 @@
 #  trust-all-tools is already baked into the Kiro ACP profile, so every Kiro
 #  tool call (incl. nested subagents) is auto-approved -- nothing to confirm.
 # =============================================================================
-$repo     = $PSScriptRoot
+$repo = [System.IO.Path]::GetFullPath($PSScriptRoot)
+Set-Location -LiteralPath $repo
+. (Join-Path $repo "scripts\windows-runtime-env.ps1")
+Initialize-ClowderWindowsRuntimeEnvironment -ProjectRoot $repo | Out-Null
+
 $proxyUrl = "http://127.0.0.1:7890"
 $redisDownloadUrl = "https://github.com/redis-windows/redis-windows/releases/download/8.8.0/Redis-8.8.0-Windows-x64-msys2.zip"
 
@@ -60,6 +64,8 @@ try {
 }
 
 # --- 3) Start Clowder (default mode = Redis; trust-all is automatic) ---------
-Set-Location $repo
 Write-Step "Starting Clowder (API + web) ..."
-pnpm start
+& node (Join-Path $repo "scripts\start-entry.mjs") start
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
