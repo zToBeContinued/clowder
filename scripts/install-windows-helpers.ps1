@@ -1,6 +1,16 @@
 . (Join-Path $PSScriptRoot "windows-command-helpers.ps1")
 . (Join-Path $PSScriptRoot "windows-installer-ui.ps1")
 
+if (-not (Get-Command Write-Ok -ErrorAction SilentlyContinue)) {
+    function Write-Ok { param([string]$m) Write-Host "  [OK] $m" -ForegroundColor Green }
+}
+if (-not (Get-Command Write-Warn -ErrorAction SilentlyContinue)) {
+    function Write-Warn { param([string]$m) Write-Host "  [!!] $m" -ForegroundColor Yellow }
+}
+if (-not (Get-Command Write-Err -ErrorAction SilentlyContinue)) {
+    function Write-Err { param([string]$m) Write-Host "  [ERR] $m" -ForegroundColor Red }
+}
+
 function Mount-InstallerSkills {
     param([string]$ProjectRoot)
 
@@ -497,37 +507,55 @@ function Ensure-WindowsRedis {
         return $false
     }
 
+    $layout = Resolve-PortableRedisLayout -ProjectRoot $ProjectRoot
+    $headers = @{ "User-Agent" = "ClowderAI-Installer" }
+    $redisReleaseApi = if ($env:CAT_CAFE_WINDOWS_REDIS_RELEASE_API) {
+        $env:CAT_CAFE_WINDOWS_REDIS_RELEASE_API.Trim()
+    } else {
+        "https://api.github.com/repos/redis-windows/redis-windows/releases/latest"
+    }
+    $redisDownloadUrl = if ($env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL) {
+        $env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL.Trim()
+    } else {
+        $null
+    }
+    $desiredReleaseMarker = if ($redisDownloadUrl) { "url:$redisDownloadUrl" } else { $null }
+    $existingReleaseMarker = if (Test-Path $layout.VersionFile) {
+        (Get-Content -Path $layout.VersionFile -Raw -ErrorAction SilentlyContinue).Trim()
+    } else {
+        ""
+    }
+
     $portableRedis = Resolve-PortableRedisBinaries -ProjectRoot $ProjectRoot
     if ($portableRedis) {
-        Write-Ok "Redis available ($($portableRedis.Source)): $($portableRedis.BinDir)"
-        return $true
+        if ($desiredReleaseMarker -and $existingReleaseMarker -ne $desiredReleaseMarker) {
+            Write-Warn "Redis bundle URL changed - updating project-local Redis binaries"
+        } else {
+            Write-Ok "Redis available ($($portableRedis.Source)): $($portableRedis.BinDir)"
+            return $true
+        }
     }
 
-    $globalRedis = Resolve-GlobalRedisBinaries
-    if ($globalRedis) {
-        Write-Ok "Redis available ($($globalRedis.Source)): $($globalRedis.BinDir)"
-        return $true
+    if (-not $portableRedis -and -not $redisDownloadUrl) {
+        $globalRedis = Resolve-GlobalRedisBinaries
+        if ($globalRedis) {
+            Write-Ok "Redis available ($($globalRedis.Source)): $($globalRedis.BinDir)"
+            return $true
+        }
     }
 
-    Write-Warn "Redis not found - attempting portable install into .cat-cafe/redis/windows"
+    if ($portableRedis) {
+        Write-Warn "Attempting Redis binary update in .cat-cafe/redis/windows (data directory is preserved)"
+    } else {
+        Write-Warn "Redis not found - attempting portable install into .cat-cafe/redis/windows"
+    }
     try {
-        $layout = Resolve-PortableRedisLayout -ProjectRoot $ProjectRoot
-        $headers = @{ "User-Agent" = "ClowderAI-Installer" }
-        $redisReleaseApi = if ($env:CAT_CAFE_WINDOWS_REDIS_RELEASE_API) {
-            $env:CAT_CAFE_WINDOWS_REDIS_RELEASE_API.Trim()
-        } else {
-            "https://api.github.com/repos/redis-windows/redis-windows/releases/latest"
-        }
-        $redisDownloadUrl = if ($env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL) {
-            $env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL.Trim()
-        } else {
-            $null
-        }
-
         New-Item -Path $layout.ArchiveDir -ItemType Directory -Force | Out-Null
         New-Item -Path $layout.Root -ItemType Directory -Force | Out-Null
-        if (Test-Path $layout.Current) {
-            Remove-Item -Path $layout.Current -Recurse -Force
+
+        $stagingDir = Join-Path $layout.Root ("staging-" + [guid]::NewGuid().ToString("N"))
+        if (Test-Path $stagingDir) {
+            Remove-Item -Path $stagingDir -Recurse -Force
         }
 
         if ($redisDownloadUrl) {
@@ -536,7 +564,7 @@ function Ensure-WindowsRedis {
                 $archiveName = "redis-windows.zip"
             }
             $archivePath = Join-Path $layout.ArchiveDir $archiveName
-            $releaseTag = "manual-override"
+            $releaseMarker = $desiredReleaseMarker
             Write-Host "  Redis archive source: explicit CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL"
             Write-Host "  Downloading $archiveName..."
             Invoke-WebRequest -Uri $redisDownloadUrl -OutFile $archivePath -Headers $headers -UseBasicParsing
@@ -558,23 +586,41 @@ function Ensure-WindowsRedis {
             }
 
             $archivePath = Join-Path $layout.ArchiveDir $asset.name
-            $releaseTag = $release.tag_name
+            $releaseMarker = "release:$($release.tag_name)"
             Write-Host "  Downloading $($asset.name)..."
             Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $archivePath -Headers $headers -UseBasicParsing
         }
 
-        Expand-Archive -Path $archivePath -DestinationPath $layout.Current -Force
+        Expand-Archive -Path $archivePath -DestinationPath $stagingDir -Force
 
-        $portableRedis = Resolve-PortableRedisBinaries -ProjectRoot $ProjectRoot
-        if (-not $portableRedis) {
+        $redisServer = Get-ChildItem $stagingDir -Recurse -Filter "redis-server.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $redisServer) {
             throw "Redis executables were not found after extraction"
         }
 
-        Set-Content -Path $layout.VersionFile -Value $releaseTag -Encoding ascii
+        if (Test-Path $layout.Current) {
+            Remove-Item -Path $layout.Current -Recurse -Force
+        }
+        Move-Item -Path $stagingDir -Destination $layout.Current
+
+        $portableRedis = Resolve-PortableRedisBinaries -ProjectRoot $ProjectRoot
+        if (-not $portableRedis) {
+            throw "Redis executables were not found after installation"
+        }
+
+        Set-Content -Path $layout.VersionFile -Value $releaseMarker -Encoding ascii
         Write-Ok "Redis installed: $($portableRedis.BinDir)"
-        Write-Warn "Portable Redis will be reused from .cat-cafe/redis/windows on later starts."
+        Write-Warn "Portable Redis binaries live in .cat-cafe/redis/windows/current; data is kept in .cat-cafe/redis/windows/data."
         return $true
     } catch {
+        if ($stagingDir -and (Test-Path $stagingDir)) {
+            Remove-Item -Path $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if ($portableRedis) {
+            Write-Warn "Redis binary update failed - keeping existing project-local Redis"
+            Write-InstallerExceptionDetails -Context "Redis auto-install" -ErrorRecord $_
+            return $true
+        }
         Write-Warn "Redis auto-install failed - install Redis manually or rerun with an external Redis URL"
         Write-InstallerExceptionDetails -Context "Redis auto-install" -ErrorRecord $_
         Write-Warn "Manual Redis install: https://github.com/redis-windows/redis-windows/releases"

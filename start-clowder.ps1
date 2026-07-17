@@ -10,6 +10,7 @@
 # =============================================================================
 $repo     = $PSScriptRoot
 $proxyUrl = "http://127.0.0.1:7890"
+$redisDownloadUrl = "https://github.com/redis-windows/redis-windows/releases/download/8.8.0/Redis-8.8.0-Windows-x64-msys2.zip"
 
 function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Write-Ok   { param([string]$m) Write-Host "  [OK] $m" -ForegroundColor Green }
@@ -37,6 +38,13 @@ if ($proxyUp) {
     [System.Net.WebRequest]::DefaultWebProxy = $wp
 } else {
     Write-Warn "Proxy $proxyUrl not reachable - continuing; Redis download may fail if GitHub is blocked."
+}
+
+# Pin the one-click launcher to the portable, non-Service MSYS2 Redis bundle.
+# To upgrade Redis later, replace this URL; the installer will update binaries
+# while preserving .cat-cafe\redis\windows\data.
+if (-not $env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL) {
+    $env:CAT_CAFE_WINDOWS_REDIS_DOWNLOAD_URL = $redisDownloadUrl
 }
 
 # --- 2) Ensure portable Redis (downloads once if missing; idempotent) --------
