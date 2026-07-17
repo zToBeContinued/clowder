@@ -611,6 +611,10 @@ function Ensure-WindowsRedis {
         Set-Content -Path $layout.VersionFile -Value $releaseMarker -Encoding ascii
         Write-Ok "Redis installed: $($portableRedis.BinDir)"
         Write-Warn "Portable Redis binaries live in .cat-cafe/redis/windows/current; data is kept in .cat-cafe/redis/windows/data."
+        if ($archivePath -and (Test-Path $archivePath)) {
+            Remove-Item -LiteralPath $archivePath -Force
+            Write-Ok "Redis archive removed after successful extraction"
+        }
         return $true
     } catch {
         if ($stagingDir -and (Test-Path $stagingDir)) {
