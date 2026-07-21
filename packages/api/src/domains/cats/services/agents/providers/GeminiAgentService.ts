@@ -150,6 +150,8 @@ interface GeminiAgentServiceOptions {
   catId?: CatId;
   /** F32-b: model override (default: resolved via getCatModel) */
   model?: string;
+  /** Override executable name/path for Gemini CLI. */
+  cliCommand?: string;
   /** Inject spawn for gemini-cli adapter (via spawnCli) */
   spawnFn?: SpawnFn;
   /** Inject spawn for antigravity adapter (direct child_process.spawn) */
@@ -166,6 +168,7 @@ export class GeminiAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
+  private readonly cliCommand: string;
   private readonly antigravitySpawnFn: typeof nodeSpawn;
   private readonly adapter: GeminiAdapter;
   constructor(options?: GeminiAgentServiceOptions) {
@@ -174,6 +177,7 @@ export class GeminiAgentService implements AgentService {
     this.spawnFn = options?.spawnFn;
     this.antigravitySpawnFn = options?.antigravitySpawnFn ?? nodeSpawn;
     this.adapter = options?.adapter ?? (process.env.GEMINI_ADAPTER as GeminiAdapter | undefined) ?? 'gemini-cli';
+    this.cliCommand = options?.cliCommand ?? (this.adapter === 'antigravity' ? 'antigravity' : 'gemini');
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -230,12 +234,13 @@ export class GeminiAgentService implements AgentService {
     }
 
     try {
-      const geminiCommand = resolveCliCommand('gemini');
+      const hasInjectedExecutor = Boolean(this.spawnFn || options?.spawnCliOverride);
+      const geminiCommand = hasInjectedExecutor ? this.cliCommand : resolveCliCommand(this.cliCommand);
       if (!geminiCommand) {
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: formatCliNotFoundError('gemini'),
+          error: formatCliNotFoundError(this.cliCommand),
           metadata,
           timestamp: Date.now(),
         };
@@ -435,8 +440,9 @@ export class GeminiAgentService implements AgentService {
       // Clone all env, strip bloated vars (LS_COLORS etc.) to avoid E2BIG,
       // then merge callbackEnv overrides. Preserves API keys etc. from parent env.
       const childEnv = buildChildEnv(options.callbackEnv);
+      if (options.accountEnv) Object.assign(childEnv, options.accountEnv);
 
-      const child = this.antigravitySpawnFn('antigravity', ['chat', '--mode', 'agent', prompt], {
+      const child = this.antigravitySpawnFn(this.cliCommand, ['chat', '--mode', 'agent', prompt], {
         detached: true,
         stdio: 'ignore',
         env: childEnv as Record<string, string>,

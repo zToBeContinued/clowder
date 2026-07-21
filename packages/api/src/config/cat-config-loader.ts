@@ -142,6 +142,7 @@ const catVariantSchema = z.object({
   mentionPatterns: z.array(mentionPatternSchema).optional(), // F32-b: variant-level mentions
   source: z.string().optional(), // #441: legacy field, ignored — kept in schema for old catalog read compat
   accountRef: z.string().min(1).optional(), // F127: concrete account binding
+  cliRuntimeProfileRef: z.string().min(1).optional(), // machine-local CLI runtime profile binding
   assetCard: assetCardSchema.optional(),
   clientId: z.string().min(1), // #252: accept unknown providers to avoid full config crash
 
@@ -529,6 +530,9 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
+        ...(variant.cliRuntimeProfileRef != null
+          ? { cliRuntimeProfileRef: variant.cliRuntimeProfileRef }
+          : {}),
         ...(assetCard != null ? { assetCard } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         defaultModel: variant.defaultModel,

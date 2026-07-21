@@ -86,6 +86,8 @@ export interface CatVariant {
   readonly mentionPatterns?: readonly string[];
   /** F127: member-side binding to a concrete account config (built-in or API key). */
   readonly accountRef?: string;
+  /** Machine-local CLI runtime profile binding. The referenced profile is not stored in Git. */
+  readonly cliRuntimeProfileRef?: string;
   /** Local asset-card binding for this specific variant. */
   readonly assetCard?: CatAssetCard;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */

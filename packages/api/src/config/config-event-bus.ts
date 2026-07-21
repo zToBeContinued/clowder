@@ -3,7 +3,14 @@ import { EventEmitter } from 'node:events';
 
 // ── Types ──
 
-export type ConfigChangeSource = 'env' | 'config-store' | 'cat-config' | 'provider-profile' | 'secrets' | 'accounts';
+export type ConfigChangeSource =
+  | 'env'
+  | 'config-store'
+  | 'cat-config'
+  | 'provider-profile'
+  | 'secrets'
+  | 'accounts'
+  | 'cli-runtime-profiles';
 
 export type ConfigChangeScope = 'key' | 'domain' | 'file';
 

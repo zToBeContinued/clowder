@@ -155,6 +155,12 @@ export type {
   ProbeState,
   SkillHealthSummary,
 } from './capability.js';
+// Machine-local CLI runtime profile API types (environment values are never exposed)
+export type {
+  CliRuntimeProfileView,
+  CreateCliRuntimeProfileInput,
+  PatchCliRuntimeProfileInput,
+} from './cli-runtime-profile.js';
 // Cat types
 export type {
   CatCapabilityContract,

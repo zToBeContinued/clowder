@@ -27,6 +27,14 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     group: 'basic',
   },
   {
+    id: 'cli-runtime',
+    label: 'CLI 运行环境',
+    icon: 'terminal',
+    color: 'var(--cafe-accent)',
+    description: '管理仅存于本机的 CLI command override 与代理环境变量，并按成员独立绑定。',
+    group: 'advanced',
+  },
+  {
     id: 'im',
     label: 'IM 对接',
     icon: 'plug',

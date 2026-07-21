@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export interface ManagedAcpPool {
   getMetrics(): { readonly activeLeaseCount: number };
   closeAll(): Promise<void>;
@@ -8,6 +10,8 @@ export interface AcpPoolIdentity {
   readonly projectRoot: string;
   readonly command: string;
   readonly startupArgs: readonly string[];
+  /** SHA-256 digest only; raw environment values must never enter the fingerprint. */
+  readonly environmentDigest?: string;
   readonly supportsMultiplexing: boolean;
   readonly maxLiveProcesses: number;
   readonly idleTtlMs: number;
@@ -19,6 +23,17 @@ interface RegistryEntry<TPool> {
   readonly pool: TPool;
 }
 
+export function createAcpEnvironmentDigest(env: Readonly<Record<string, string>> | undefined): string {
+  const hash = createHash('sha256');
+  for (const [key, value] of Object.entries(env ?? {}).sort(([left], [right]) => left.localeCompare(right))) {
+    hash.update(key);
+    hash.update('\0');
+    hash.update(value);
+    hash.update('\0');
+  }
+  return hash.digest('hex');
+}
+
 /** Stable identity for every setting captured by an AcpProcessPool factory. */
 export function createAcpPoolFingerprint(identity: AcpPoolIdentity): string {
   return JSON.stringify([
@@ -26,6 +41,7 @@ export function createAcpPoolFingerprint(identity: AcpPoolIdentity): string {
     identity.projectRoot,
     identity.command,
     [...identity.startupArgs],
+    identity.environmentDigest ?? createAcpEnvironmentDigest(undefined),
     identity.supportsMultiplexing,
     identity.maxLiveProcesses,
     identity.idleTtlMs,

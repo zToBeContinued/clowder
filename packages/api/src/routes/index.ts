@@ -12,6 +12,7 @@ export { registerCallbackDocsRoutes } from './callback-docs-routes.js';
 export { callbacksRoutes } from './callbacks.js';
 export { capabilitiesRoutes } from './capabilities.js';
 export { catsRoutes } from './cats.js';
+export { cliRuntimeProfilesRoutes } from './cli-runtime-profiles.js';
 export { claudeRescueRoutes } from './claude-rescue.js';
 export { commandsRoutes } from './commands.js';
 export { communityIssueRoutes } from './community-issues.js';

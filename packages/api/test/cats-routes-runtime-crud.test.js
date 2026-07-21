@@ -2105,6 +2105,12 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
       roleDescription: 'Kiro ACP runtime member',
       clientId: 'kiro',
     };
+    const { createCliRuntimeProfile } = await import('../dist/config/cli-runtime-profile-store.js');
+    createCliRuntimeProfile({
+      id: 'kiro-local-proxy',
+      displayName: 'Kiro Local Proxy',
+      envSet: { HTTPS_PROXY: 'http://127.0.0.1:7890' },
+    });
 
     const boundRes = await app.inject({
       method: 'POST',
@@ -2128,6 +2134,7 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
         ...baseKiro,
         catId: 'runtime-kiro',
         mentionPatterns: ['@runtime-kiro'],
+        cliRuntimeProfileRef: 'kiro-local-proxy',
       }),
     });
     assert.equal(createRes.statusCode, 201, createRes.body);
@@ -2138,6 +2145,26 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(created.mcpSupport, true);
     assert.deepEqual(created.cli, { command: 'kiro-cli', outputFormat: 'acp' });
     assert.equal(created.adapterMode, 'acp');
+    assert.equal(created.cliRuntimeProfileRef, 'kiro-local-proxy');
+    assert.equal(created.cliRuntimeProfileMissing, false);
+
+    const clearRuntimeProfileRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-kiro',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ cliRuntimeProfileRef: null }),
+    });
+    assert.equal(clearRuntimeProfileRes.statusCode, 200, clearRuntimeProfileRes.body);
+    assert.equal(JSON.parse(clearRuntimeProfileRes.body).cat.cliRuntimeProfileRef, undefined);
+
+    const missingRuntimeProfileRes = await app.inject({
+      method: 'PATCH',
+      url: '/api/cats/runtime-kiro',
+      headers: { 'content-type': 'application/json', 'x-cat-cafe-user': 'codex' },
+      body: JSON.stringify({ cliRuntimeProfileRef: 'missing-on-this-machine' }),
+    });
+    assert.equal(missingRuntimeProfileRes.statusCode, 400, missingRuntimeProfileRes.body);
+    assert.match(JSON.parse(missingRuntimeProfileRes.body).error, /not found on this machine/i);
 
     const missingModelRes = await app.inject({
       method: 'POST',
@@ -2194,6 +2221,8 @@ describe('cats routes runtime CRUD', { concurrency: false }, () => {
     assert.equal(patched.adapterMode, 'acp');
 
     const catalog = JSON.parse(readFileSync(join(projectRoot, '.cat-cafe', 'cat-catalog.json'), 'utf-8'));
+    const runtimeKiroVariant = catalog.breeds.find((breed) => breed.catId === 'runtime-kiro')?.variants?.[0];
+    assert.equal(runtimeKiroVariant.cliRuntimeProfileRef, undefined);
     const switchedVariant = catalog.breeds.find((breed) => breed.catId === 'runtime-switch-kiro')?.variants?.[0];
     assert.equal(switchedVariant.accountRef, undefined);
     assert.deepEqual(switchedVariant.cli, { command: 'kiro-cli', outputFormat: 'acp' });

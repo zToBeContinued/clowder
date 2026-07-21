@@ -21,6 +21,7 @@ import {
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
   getCliEffortOptionsForClient,
+  initialState,
   type HubCatEditorFormState,
   splitCommandArgs,
   validateModelFormatForClient,
@@ -162,6 +163,33 @@ describe('HubCatEditor', () => {
     expect(payload.variantLabel).toBe('GPT-5.5');
   });
 
+  it('buildCatPayload creates, updates, and clears cliRuntimeProfileRef', () => {
+    const existingCat: CatData = {
+      id: 'runtime-kiro',
+      name: 'runtime-kiro',
+      displayName: '运行时 Kiro 猫',
+      clientId: 'kiro',
+      defaultModel: '',
+      color: { primary: '#6750a4', secondary: '#eaddff' },
+      mentionPatterns: ['@runtime-kiro'],
+      avatar: '/avatars/kiro.png',
+      roleDescription: 'Kiro ACP',
+      personality: '',
+      cliRuntimeProfileRef: 'old-proxy',
+    };
+    const editForm = initialState(existingCat, null);
+
+    expect(buildCatPayload({ ...editForm, cliRuntimeProfileRef: 'new-proxy' }, existingCat)).toMatchObject({
+      cliRuntimeProfileRef: 'new-proxy',
+    });
+    expect(buildCatPayload({ ...editForm, cliRuntimeProfileRef: '' }, existingCat)).toMatchObject({
+      cliRuntimeProfileRef: null,
+    });
+    expect(buildCatPayload({ ...initialState(null, null), cliRuntimeProfileRef: 'create-proxy' }, null)).toMatchObject({
+      cliRuntimeProfileRef: 'create-proxy',
+    });
+  });
+
   it('buildCatPayload recomputes mcpSupport when client changes on existing cat', () => {
     const baseForm: HubCatEditorFormState = {
       catId: 'runtime-codex',
@@ -270,6 +298,61 @@ describe('HubCatEditor', () => {
     expect(payload.accountRef).toBeNull();
     expect(payload.defaultModel).toBe('');
     expect(payload.mcpSupport).toBe(true);
+  });
+
+  it('preserves a missing cliRuntimeProfileRef, warns, and reloads after the change event', async () => {
+    const existingCat: CatData = {
+      id: 'runtime-kiro',
+      name: 'runtime-kiro',
+      displayName: '运行时 Kiro 猫',
+      clientId: 'kiro',
+      defaultModel: '',
+      color: { primary: '#6750a4', secondary: '#eaddff' },
+      mentionPatterns: ['@runtime-kiro'],
+      avatar: '/avatars/kiro.png',
+      roleDescription: 'Kiro ACP',
+      personality: '',
+      cliRuntimeProfileRef: 'missing-office-proxy',
+    };
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/accounts') return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', providers: [] }));
+      if (path === '/api/cat-model-options') return Promise.resolve(jsonResponse({ clients: {} }));
+      if (path === '/api/config/session-strategy') return Promise.resolve(jsonResponse({ cats: [] }));
+      if (path === '/api/cli-runtime-profiles') {
+        return Promise.resolve(
+          jsonResponse({
+            configRoot: '/tmp/local-config',
+            profiles: [{ id: 'home', displayName: '家庭网络', envKeys: ['NO_PROXY'] }],
+          }),
+        );
+      }
+      throw new Error(`Unexpected apiFetch path: ${path}`);
+    });
+
+    await act(async () => {
+      root.render(
+        React.createElement(HubCatEditor, {
+          open: true,
+          cat: existingCat,
+          onClose: vi.fn(),
+          onSaved: vi.fn(),
+        }),
+      );
+    });
+    await flushEffects();
+    await flushEffects();
+
+    const runtimeSelect = queryField<HTMLSelectElement>(container, 'select[aria-label="CLI 运行环境"]');
+    expect(runtimeSelect.value).toBe('missing-office-proxy');
+    expect(container.textContent).toContain('当前引用的 CLI 运行环境「missing-office-proxy」在本机不存在');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('引用 ID 已保留');
+    expect(mockApiFetch.mock.calls.filter(([path]) => path === '/api/cli-runtime-profiles')).toHaveLength(1);
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent('cli-runtime-profiles-changed'));
+    });
+    await flushEffects();
+    expect(mockApiFetch.mock.calls.filter(([path]) => path === '/api/cli-runtime-profiles')).toHaveLength(2);
   });
 
   it('adopts Kiro CLI without an account selector and permits an empty model', async () => {

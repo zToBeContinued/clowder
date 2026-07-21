@@ -112,6 +112,17 @@ describe('SettingsNav search filtering', () => {
     expect(buttons[0].textContent).toContain('规则与 SOP');
   });
 
+  it('finds CLI runtime profiles by proxy environment variable keyword', () => {
+    act(() => {
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'HTTP_PROXY' }),
+      );
+    });
+    const buttons = Array.from(container.querySelectorAll('[data-active]'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toContain('CLI 运行环境');
+  });
+
   it('shows empty message when no match', () => {
     act(() => {
       root.render(

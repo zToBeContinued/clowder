@@ -143,6 +143,26 @@ describe('DareAgentService', () => {
     assert.ok(args.includes('-m') && args.includes('client'), `expected -m client in args: ${args}`);
   });
 
+
+  test('uses the configured CLI executable without changing darePath semantics', async () => {
+    const proc = createMockProcess();
+    const spawnFn = mock.fn(() => proc);
+    const service = new DareAgentService({
+      catId: 'dare',
+      spawnFn,
+      model: 'test/model',
+      cliCommand: 'python-custom',
+      darePath: '/opt/dare',
+    });
+    const promise = collect(service.invoke('Test prompt'));
+    emitDareEvents(proc, [SESSION_STARTED, TASK_COMPLETED]);
+    await promise;
+
+    const call = spawnFn.mock.calls[0];
+    assert.equal(call.arguments[0], 'python-custom');
+    assert.equal(call.arguments[2].cwd, '/opt/dare');
+  });
+
   test('passes --adapter and --model', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);

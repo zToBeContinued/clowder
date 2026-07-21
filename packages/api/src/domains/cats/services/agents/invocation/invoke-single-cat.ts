@@ -21,6 +21,10 @@ import {
   validateRuntimeProviderBinding,
 } from '../../../../../config/account-resolver.js';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
+import {
+  getCliRuntimeProfile,
+  mergeCliRuntimeProfileEnv,
+} from '../../../../../config/cli-runtime-profile-store.js';
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
@@ -953,6 +957,23 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // F127 account injection:
     // Members bind to a concrete accountRef (builtin oauth account or generic api_key account).
     const catConfig = catRegistry.tryGet(catId as string)?.config;
+    const cliRuntimeProfileRef = catConfig?.cliRuntimeProfileRef?.trim();
+    let cliRuntimeProfile: ReturnType<typeof getCliRuntimeProfile>;
+    if (cliRuntimeProfileRef) {
+      try {
+        cliRuntimeProfile = getCliRuntimeProfile(cliRuntimeProfileRef);
+      } catch (error) {
+        throw new Error(
+          `CLI runtime profile "${cliRuntimeProfileRef}" for member "${catId}" could not be loaded: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+      if (!cliRuntimeProfile) {
+        throw new Error(`CLI runtime profile "${cliRuntimeProfileRef}" for member "${catId}" is missing on this machine`);
+      }
+    }
+    const runtimeProfileEnv = cliRuntimeProfile?.envVars;
     const provider = catConfig?.clientId;
     const builtinClient = provider ? resolveBuiltinClientForProvider(provider) : null;
     const defaultModel = catConfig?.defaultModel?.trim() || undefined;
@@ -1138,7 +1159,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     // Passed separately via accountEnv — NOT injected into callbackEnv.
     // callbackEnv is for MCP callback routing; accountEnv is applied LAST
     // in subprocess env so user vars override provider-injected values.
-    let accountEnv: Record<string, string> | undefined;
+    let legacyAccountEnv: Record<string, string> | undefined;
     if (resolvedAccount?.envVars) {
       const validEnvKey = /^[A-Z_][A-Za-z0-9_]*$/;
       const filtered: Record<string, string> = {};
@@ -1146,8 +1167,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         if (!validEnvKey.test(k) || k.startsWith('CAT_CAFE_')) continue;
         filtered[k] = v;
       }
-      if (Object.keys(filtered).length > 0) accountEnv = filtered;
+      if (Object.keys(filtered).length > 0) legacyAccountEnv = filtered;
     }
+    const accountEnv = mergeCliRuntimeProfileEnv(runtimeProfileEnv, legacyAccountEnv);
 
     const trimmedDefaultModel = typeof defaultModel === 'string' ? defaultModel.trim() : undefined;
     const modelProviderName = catConfig?.provider?.trim() || undefined;

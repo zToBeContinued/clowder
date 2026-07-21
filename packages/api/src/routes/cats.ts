@@ -32,6 +32,7 @@ import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { getAcpConfig, getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
 import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
+import { getCliRuntimeProfile } from '../config/cli-runtime-profile-store.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { getResolvedCats } from '../config/resolved-cats.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
@@ -106,6 +107,7 @@ const baseCatSchema = z.object({
   color: colorSchema,
   mentionPatterns: z.array(z.string().min(1)).min(1),
   accountRef: z.string().min(1).optional(),
+  cliRuntimeProfileRef: z.string().trim().min(1).optional(),
   assetCard: assetCardSchema.optional(),
   contextBudget: contextBudgetSchema.optional(),
   toolPolicy: toolPolicySchema.optional(),
@@ -178,6 +180,7 @@ const updateCatSchema = z.object({
   color: colorSchema.optional(),
   mentionPatterns: z.array(z.string().min(1)).min(1).optional(),
   accountRef: z.string().min(1).nullable().optional(),
+  cliRuntimeProfileRef: z.string().trim().min(1).nullable().optional(),
   assetCard: assetCardSchema.nullable().optional(),
   contextBudget: contextBudgetSchema.nullable().optional(),
   toolPolicy: toolPolicySchema.nullable().optional(),
@@ -501,6 +504,24 @@ async function validateAccountBindingOrThrow(
   }
 }
 
+function validateCliRuntimeProfileBindingOrThrow(profileRef: string | null | undefined): void {
+  const normalized = profileRef?.trim();
+  if (!normalized) return;
+  const profile = getCliRuntimeProfile(normalized);
+  if (!profile) {
+    throw new Error(`CLI runtime profile "${normalized}" not found on this machine`);
+  }
+}
+
+function isCliRuntimeProfileMissing(profileRef: string | undefined): boolean {
+  if (!profileRef) return false;
+  try {
+    return !getCliRuntimeProfile(profileRef);
+  } catch {
+    return true;
+  }
+}
+
 async function toCatResponse(
   cat: CatConfig & { contextBudget?: ContextBudget },
   metadata: CatResponseMetadata,
@@ -516,6 +537,8 @@ async function toCatResponse(
     mentionPatterns: cat.mentionPatterns,
     breedId: cat.breedId,
     accountRef: await resolveEffectiveAccountRef(cat),
+    cliRuntimeProfileRef: cat.cliRuntimeProfileRef,
+    cliRuntimeProfileMissing: isCliRuntimeProfileMissing(cat.cliRuntimeProfileRef),
     assetCard: cat.assetCard ?? undefined,
     clientId: cat.clientId,
     defaultModel: cat.defaultModel,
@@ -685,6 +708,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
 
     const accountRef = resolveAccountRef(body);
     try {
+      validateCliRuntimeProfileBindingOrThrow(body.cliRuntimeProfileRef);
       const providerNameForValidation = 'provider' in body ? body.provider : undefined;
       await validateAccountBindingOrThrow(
         projectRoot,
@@ -705,6 +729,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
+          ...(body.cliRuntimeProfileRef ? { cliRuntimeProfileRef: body.cliRuntimeProfileRef } : {}),
           contextBudget: body.contextBudget,
           toolPolicy: body.toolPolicy,
           roleDescription: body.roleDescription,
@@ -737,6 +762,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
           color: body.color,
           mentionPatterns: body.mentionPatterns,
           ...(accountRef !== undefined ? { accountRef: accountRef ?? undefined } : {}),
+          ...(body.cliRuntimeProfileRef ? { cliRuntimeProfileRef: body.cliRuntimeProfileRef } : {}),
           contextBudget: body.contextBudget,
           toolPolicy: body.toolPolicy,
           roleDescription: body.roleDescription,
@@ -823,6 +849,14 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
       reply.status(404);
       return { error: `Cat "${request.params.id}" not found` };
     }
+    if (body.cliRuntimeProfileRef !== undefined) {
+      try {
+        validateCliRuntimeProfileBindingOrThrow(body.cliRuntimeProfileRef);
+      } catch (error) {
+        reply.status(400);
+        return { error: error instanceof Error ? error.message : String(error) };
+      }
+    }
     const effectiveClient = body.clientId ?? currentCat.clientId;
     const currentEffectiveAccountRef = await resolveEffectiveAccountRef(currentCat);
     let targetAccountRef = resolveAccountRef(body);
@@ -907,6 +941,9 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
         ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
+        ...(body.cliRuntimeProfileRef !== undefined
+          ? { cliRuntimeProfileRef: body.cliRuntimeProfileRef }
+          : {}),
         ...(body.assetCard !== undefined ? { assetCard: body.assetCard } : {}),
         ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
         ...(body.toolPolicy !== undefined ? { toolPolicy: body.toolPolicy } : {}),

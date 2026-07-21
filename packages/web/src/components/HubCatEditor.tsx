@@ -6,6 +6,12 @@ import { apiFetch } from '@/utils/api-client';
 import type { ConfigData } from './config-viewer-types';
 import type { TemplateCard } from './first-run-quest/TemplateStep';
 import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
+import { CliRuntimeProfileBindingSection } from './CliRuntimeProfileBindingSection';
+import {
+  CLI_RUNTIME_PROFILES_CHANGED_EVENT,
+  type CliRuntimeProfileSummary,
+  parseCliRuntimeProfilesResponse,
+} from './cli-runtime-profiles';
 import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
 import {
   autoSlug,
@@ -84,6 +90,10 @@ export function HubCatEditor({
   const confirm = useConfirm();
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
   const [loadingProfiles, setLoadingProfiles] = useState(false);
+  const [cliRuntimeProfiles, setCliRuntimeProfiles] = useState<CliRuntimeProfileSummary[]>([]);
+  const [loadingCliRuntimeProfiles, setLoadingCliRuntimeProfiles] = useState(false);
+  const [cliRuntimeProfilesLoaded, setCliRuntimeProfilesLoaded] = useState(false);
+  const [cliRuntimeProfilesError, setCliRuntimeProfilesError] = useState<string | null>(null);
   const [loadingStrategy, setLoadingStrategy] = useState(false);
   const [loadingCodexSettings, setLoadingCodexSettings] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -160,12 +170,18 @@ export function HubCatEditor({
     setHasUnsavedChanges(false);
   }, [open, cat, draft]);
 
-  // Re-fetch profiles when Provider Profiles page creates/saves/deletes an account.
+  // Re-fetch profiles when their settings pages create/save/delete an entry.
   const [profilesVersion, setProfilesVersion] = useState(0);
+  const [cliRuntimeProfilesVersion, setCliRuntimeProfilesVersion] = useState(0);
   useEffect(() => {
-    const handler = () => setProfilesVersion((v) => v + 1);
-    window.addEventListener('accounts-changed', handler);
-    return () => window.removeEventListener('accounts-changed', handler);
+    const accountHandler = () => setProfilesVersion((version) => version + 1);
+    const cliRuntimeHandler = () => setCliRuntimeProfilesVersion((version) => version + 1);
+    window.addEventListener('accounts-changed', accountHandler);
+    window.addEventListener(CLI_RUNTIME_PROFILES_CHANGED_EVENT, cliRuntimeHandler);
+    return () => {
+      window.removeEventListener('accounts-changed', accountHandler);
+      window.removeEventListener(CLI_RUNTIME_PROFILES_CHANGED_EVENT, cliRuntimeHandler);
+    };
   }, []);
 
   useEffect(() => {
@@ -250,6 +266,46 @@ export function HubCatEditor({
       cancelled = true;
     };
   }, [open, profilesVersion]);
+
+  useEffect(() => {
+    if (!open) {
+      setCliRuntimeProfiles([]);
+      setCliRuntimeProfilesLoaded(false);
+      setCliRuntimeProfilesError(null);
+      setLoadingCliRuntimeProfiles(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingCliRuntimeProfiles(true);
+    setCliRuntimeProfilesLoaded(false);
+    setCliRuntimeProfilesError(null);
+    Promise.resolve()
+      .then(() => apiFetch('/api/cli-runtime-profiles'))
+      .then(async (response) => {
+        const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        if (!response.ok) {
+          throw new Error(typeof body.error === 'string' ? body.error : `CLI 运行环境加载失败 (${response.status})`);
+        }
+        return parseCliRuntimeProfilesResponse(body);
+      })
+      .then((body) => {
+        if (cancelled) return;
+        setCliRuntimeProfiles(body.profiles);
+        setCliRuntimeProfilesLoaded(true);
+      })
+      .catch((caught) => {
+        if (cancelled) return;
+        setCliRuntimeProfiles([]);
+        setCliRuntimeProfilesLoaded(false);
+        setCliRuntimeProfilesError(caught instanceof Error ? caught.message : 'CLI 运行环境加载失败');
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingCliRuntimeProfiles(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, cliRuntimeProfilesVersion]);
 
   useEffect(() => {
     if (!open || !cat) {
@@ -857,6 +913,14 @@ export function HubCatEditor({
         availableProfiles={availableProfiles}
         loadingProfiles={loadingProfiles}
         onChange={patchForm}
+      />
+      <CliRuntimeProfileBindingSection
+        value={form.cliRuntimeProfileRef ?? ''}
+        profiles={cliRuntimeProfiles}
+        loading={loadingCliRuntimeProfiles}
+        loaded={cliRuntimeProfilesLoaded}
+        error={cliRuntimeProfilesError}
+        onChange={(cliRuntimeProfileRef) => patchForm({ cliRuntimeProfileRef })}
       />
       <LocalCliProbeSection
         probes={localCliProbes}

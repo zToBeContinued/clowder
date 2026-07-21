@@ -20,6 +20,8 @@ export interface CatData {
   mentionPatterns: string[];
   breedId?: string;
   accountRef?: string;
+  /** 仅引用当前机器上的 CLI Runtime Profile；配置值不会进入成员数据。 */
+  cliRuntimeProfileRef?: string;
   assetCard?: {
     path: string;
     version?: string;

@@ -150,11 +150,17 @@ describe('OpenCodeAgentService', () => {
   test('yields session_init, text, done from opencode events', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);
-    const service = new OpenCodeAgentService({ catId: 'opencode', spawnFn, model: 'claude-haiku-4-5' });
+    const service = new OpenCodeAgentService({
+      catId: 'opencode',
+      spawnFn,
+      model: 'claude-haiku-4-5',
+      cliCommand: 'opencode-custom',
+    });
     const promise = collect(service.invoke('Say hello'));
     emitOpenCodeEvents(proc, [STEP_START, TEXT_RESPONSE, STEP_FINISH]);
     const messages = await promise;
 
+    assert.equal(spawnFn.mock.calls[0].arguments[0], 'opencode-custom');
     const types = messages.map((m) => m.type);
     assert.ok(types.includes('session_init'), `expected session_init, got: ${types}`);
     assert.ok(types.includes('text'), `expected text, got: ${types}`);

@@ -100,6 +100,13 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
       : cat?.accountRef
         ? { accountRef: null as null }
         : {};
+  const trimmedCliRuntimeProfileRef = trimText(form.cliRuntimeProfileRef);
+  const cliRuntimeProfileRefPatch =
+    trimmedCliRuntimeProfileRef.length > 0
+      ? { cliRuntimeProfileRef: trimmedCliRuntimeProfileRef }
+      : cat?.cliRuntimeProfileRef
+        ? { cliRuntimeProfileRef: null as null }
+        : {};
   const mcpSupportPatch =
     cat && form.clientId !== cat.clientId
       ? { mcpSupport: defaultMcpSupportForClient(form.clientId) }
@@ -143,6 +150,7 @@ export function buildCatPayload(form: HubCatEditorFormState, cat?: CatData | nul
     ...assetCardPatch,
     sessionChain: form.sessionChain === 'true',
     toolPolicy: form.toolPolicy,
+    ...cliRuntimeProfileRefPatch,
     ...contextBudgetPatch,
     ...voiceConfigPatch,
   };

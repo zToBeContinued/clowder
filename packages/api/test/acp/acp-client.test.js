@@ -91,7 +91,7 @@ describe('AcpClient', () => {
     assert.ok(client.isAlive);
   });
 
-  it('passes parent proxy environment variables to spawned ACP processes', async () => {
+  it('passes parent proxy variables and applies runtime profile environment overrides', async () => {
     const previousProxyEnv = {
       HTTP_PROXY: process.env.HTTP_PROXY,
       HTTPS_PROXY: process.env.HTTPS_PROXY,
@@ -115,6 +115,10 @@ describe('AcpClient', () => {
         command: 'fake',
         args: [],
         cwd: '/tmp',
+        env: {
+          HTTPS_PROXY: 'http://profile-proxy:27891',
+          PROFILE_ONLY: 'profile-value',
+        },
         spawnFn: (_command, _args, options) => {
           capturedEnv = options.env;
           return child;
@@ -123,8 +127,9 @@ describe('AcpClient', () => {
 
       await client.initialize();
       assert.equal(capturedEnv.HTTP_PROXY, 'http://127.0.0.1:17890');
-      assert.equal(capturedEnv.HTTPS_PROXY, 'http://127.0.0.1:17891');
+      assert.equal(capturedEnv.HTTPS_PROXY, 'http://profile-proxy:27891');
       assert.equal(capturedEnv.NO_PROXY, 'localhost,127.0.0.1');
+      assert.equal(capturedEnv.PROFILE_ONLY, 'profile-value');
     } finally {
       for (const [key, value] of Object.entries(previousProxyEnv)) {
         if (value === undefined) delete process.env[key];

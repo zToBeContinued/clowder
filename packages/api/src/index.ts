@@ -16,6 +16,10 @@ import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/accou
 import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
 import { resolveStartupCliConfigContext } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
+import {
+  getCliRuntimeProfile,
+  resolveCliRuntimeCommand,
+} from './config/cli-runtime-profile-store.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import {
   bootstrapDefaultCatCatalog,
@@ -50,6 +54,7 @@ import { RedisInvocationQueuePersistence } from './domains/cats/services/agents/
 import { SessionContinuationCoordinator } from './domains/cats/services/agents/invocation/SessionContinuationCoordinator.js';
 import {
   AcpPoolRegistry,
+  createAcpEnvironmentDigest,
   createAcpPoolFingerprint,
 } from './domains/cats/services/agents/providers/acp/AcpPoolRegistry.js';
 import type { AcpProcessPool as AcpProcessPoolType } from './domains/cats/services/agents/providers/acp/AcpProcessPool.js';
@@ -155,6 +160,7 @@ import {
   callbacksRoutes,
   capabilitiesRoutes,
   catsRoutes,
+  cliRuntimeProfilesRoutes,
   claudeRescueRoutes,
   commandsRoutes,
   communityIssueRoutes,
@@ -1087,15 +1093,32 @@ async function main(): Promise<void> {
     const activeAcpPoolIds = new Set<string>();
     for (const [id, config] of Object.entries(configs)) {
       const catId = config.id;
+      let cliRuntimeProfile: ReturnType<typeof getCliRuntimeProfile>;
+      if (config.cliRuntimeProfileRef) {
+        try {
+          cliRuntimeProfile = getCliRuntimeProfile(config.cliRuntimeProfileRef);
+          if (!cliRuntimeProfile) {
+            app.log.warn(
+              `[api] Cat "${id}" references missing CLI runtime profile "${config.cliRuntimeProfileRef}"; invocation will fail until it is restored or rebound.`,
+            );
+          }
+        } catch (error) {
+          app.log.warn(
+            `[api] Failed to load CLI runtime profile "${config.cliRuntimeProfileRef}" for cat "${id}": ${String(error)}`,
+          );
+        }
+      }
+      const cliCommand = resolveCliRuntimeCommand(cliRuntimeProfile, config.cli?.command);
+      const cliRuntimeEnv = cliRuntimeProfile?.envVars;
       // F32-b P1 fix: do NOT pass model here — let constructors resolve via
       // getCatModel(catId) which respects env override (CAT_*_MODEL > config > fallback)
       let service: AgentService;
       switch (config.clientId) {
         case 'anthropic':
-          service = new ClaudeAgentService({ catId, cliCommand: config.cli?.command });
+          service = new ClaudeAgentService({ catId, cliCommand });
           break;
         case 'openai':
-          service = new CodexAgentService({ catId });
+          service = new CodexAgentService({ catId, cliCommand });
           break;
         case 'google': {
           const acpConfig = getAcpConfig(id);
@@ -1106,7 +1129,7 @@ async function main(): Promise<void> {
             const { AcpProcessPool } = await import('./domains/cats/services/agents/providers/acp/AcpProcessPool.js');
             const { AcpClient } = await import('./domains/cats/services/agents/providers/acp/AcpClient.js');
             const acpProjectRoot = findMonorepoRoot();
-            const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, acpConfig.command);
+            const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, cliCommand ?? acpConfig.command);
             const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, acpConfig.startupArgs);
             const poolKey = { projectPath: acpProjectRoot, providerProfile: id };
             const maxLiveProcesses = acpConfig.pool?.maxLiveProcesses ?? 3;
@@ -1117,6 +1140,7 @@ async function main(): Promise<void> {
               projectRoot: acpProjectRoot,
               command: acpCommand,
               startupArgs: acpArgs,
+              environmentDigest: createAcpEnvironmentDigest(cliRuntimeEnv),
               supportsMultiplexing: acpConfig.supportsMultiplexing !== false,
               maxLiveProcesses,
               idleTtlMs,
@@ -1134,6 +1158,7 @@ async function main(): Promise<void> {
                       command: acpCommand,
                       args: acpArgs,
                       cwd: resolveAcpBootstrapCwd(acpProjectRoot, id),
+                      ...(cliRuntimeEnv ? { env: { ...cliRuntimeEnv } } : {}),
                     }),
                 ),
             );
@@ -1150,7 +1175,7 @@ async function main(): Promise<void> {
               mcpServers,
             });
           } else {
-            service = new GeminiAgentService({ catId });
+            service = new GeminiAgentService({ catId, cliCommand });
           }
           break;
         }
@@ -1163,7 +1188,7 @@ async function main(): Promise<void> {
           );
           const acpProjectRoot = findMonorepoRoot();
           const profile = createKiroAcpProfile(config);
-          const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, profile.command);
+          const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, cliCommand ?? profile.command);
           const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, profile.startupArgs);
           const maxLiveProcesses = 3;
           const idleTtlMs = 5 * 60 * 1000;
@@ -1173,6 +1198,7 @@ async function main(): Promise<void> {
             projectRoot: acpProjectRoot,
             command: acpCommand,
             startupArgs: acpArgs,
+            environmentDigest: createAcpEnvironmentDigest(cliRuntimeEnv),
             supportsMultiplexing: profile.supportsMultiplexing,
             maxLiveProcesses,
             idleTtlMs,
@@ -1190,6 +1216,7 @@ async function main(): Promise<void> {
                     command: acpCommand,
                     args: acpArgs,
                     cwd: resolveAcpBootstrapCwd(poolKey.projectPath, id),
+                    ...(cliRuntimeEnv ? { env: { ...cliRuntimeEnv } } : {}),
                   }),
               ),
           );
@@ -1211,13 +1238,13 @@ async function main(): Promise<void> {
           break;
         }
         case 'kimi':
-          service = new KimiAgentService({ catId });
+          service = new KimiAgentService({ catId, cliCommand });
           break;
         case 'grok':
-          service = new GrokAgentService({ catId, cliCommand: config.cli?.command });
+          service = new GrokAgentService({ catId, cliCommand });
           break;
         case 'dare':
-          service = new DareAgentService({ catId });
+          service = new DareAgentService({ catId, cliCommand });
           break;
         case 'antigravity':
           service = new AntigravityAgentService({
@@ -1225,10 +1252,10 @@ async function main(): Promise<void> {
           });
           break;
         case 'opencode':
-          service = new OpenCodeAgentService({ catId });
+          service = new OpenCodeAgentService({ catId, cliCommand });
           break;
         case 'pi':
-          service = new PiAgentService({ catId, cliCommand: config.cli?.command });
+          service = new PiAgentService({ catId, cliCommand });
           break;
         case 'catagent': {
           const { CatAgentService } = await import(
@@ -1276,6 +1303,17 @@ async function main(): Promise<void> {
   const accountBindingSubscriber = createAccountBindingSubscriber({
     async onRebind(changedAccountRefs) {
       app.log.info(`[api] F136: Accounts changed [${changedAccountRefs.join(', ')}], syncing agent registry...`);
+      await syncAgentRegistry(catRegistry.getAllConfigs());
+    },
+    log: app.log,
+  });
+
+  const { createCliRuntimeProfileSubscriber } = await import('./config/cli-runtime-profile-subscriber.js');
+  const cliRuntimeProfileSubscriber = createCliRuntimeProfileSubscriber({
+    async onReload(changedProfileIds) {
+      app.log.info(
+        `[api] CLI runtime profiles changed [${changedProfileIds.join(', ')}], syncing agent registry...`,
+      );
       await syncAgentRegistry(catRegistry.getAllConfigs());
     },
     log: app.log,
@@ -1585,6 +1623,7 @@ async function main(): Promise<void> {
     });
   }
   await app.register(catsRoutes);
+  await app.register(cliRuntimeProfilesRoutes);
 
   // F182 Phase D: disable-impact endpoint
   {
@@ -2849,6 +2888,7 @@ async function main(): Promise<void> {
       // Stop event bus subscribers
       catCatalogSubscriber.unsubscribe();
       accountBindingSubscriber.unsubscribe();
+      cliRuntimeProfileSubscriber.unsubscribe();
       connectorReloadUnsub?.();
       try {
         await connectorGatewayHandle?.stop();

@@ -40,6 +40,8 @@ interface DareAgentServiceOptions {
   apiKey?: string;
   /** Path to DARE repo (used as cwd fallback) */
   darePath?: string;
+  /** Override the Python executable used to launch the DARE module. */
+  cliCommand?: string;
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
 }
@@ -72,6 +74,7 @@ export class DareAgentService implements AgentService {
   private readonly endpoint: string | undefined;
   private readonly apiKey: string | undefined;
   private readonly darePath: string | undefined;
+  private readonly cliCommand: string;
   private readonly spawnFn: SpawnFn | undefined;
 
   constructor(options?: DareAgentServiceOptions) {
@@ -83,6 +86,7 @@ export class DareAgentService implements AgentService {
       options?.endpoint ?? process.env[DARE_ENDPOINT_ENV] ?? process.env[this.getAdapterEndpointEnvName()];
     this.apiKey = options?.apiKey;
     this.darePath = options?.darePath ?? process.env.DARE_PATH ?? resolveDefaultDarePath();
+    this.cliCommand = options?.cliCommand ?? 'python';
     this.spawnFn = options?.spawnFn;
   }
 
@@ -137,7 +141,7 @@ export class DareAgentService implements AgentService {
 
     try {
       const cliOpts = {
-        command: 'python' as const,
+        command: this.cliCommand,
         args,
         ...(cwd ? { cwd } : {}),
         env: childEnv,

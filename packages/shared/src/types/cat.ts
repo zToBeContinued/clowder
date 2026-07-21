@@ -66,6 +66,8 @@ export interface CatConfig {
   readonly color: CatColor;
   readonly mentionPatterns: readonly string[];
   readonly accountRef?: string;
+  /** Machine-local CLI runtime profile binding (environment and optional executable override). */
+  readonly cliRuntimeProfileRef?: string;
   /** Local asset-card binding metadata, if this cat was generated from a file. */
   readonly assetCard?: CatAssetCard;
   /** clowder-ai#340 P5: CLI client identity (renamed from `provider`). */

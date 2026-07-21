@@ -34,6 +34,8 @@ interface OpenCodeAgentServiceOptions {
   apiKey?: string;
   /** Base URL for Anthropic provider (e.g. proxy endpoint) */
   baseUrl?: string;
+  /** Override executable name/path for OpenCode CLI. */
+  cliCommand?: string;
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
 }
@@ -97,6 +99,7 @@ export class OpenCodeAgentService implements AgentService {
   private readonly model: string;
   private readonly apiKey: string | undefined;
   private readonly baseUrl: string | undefined;
+  private readonly cliCommand: string;
   private readonly spawnFn: SpawnFn | undefined;
 
   constructor(options?: OpenCodeAgentServiceOptions) {
@@ -104,6 +107,7 @@ export class OpenCodeAgentService implements AgentService {
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.apiKey = options?.apiKey;
     this.baseUrl = options?.baseUrl;
+    this.cliCommand = options?.cliCommand ?? 'opencode';
     this.spawnFn = options?.spawnFn;
   }
 
@@ -122,12 +126,13 @@ export class OpenCodeAgentService implements AgentService {
     let sessionInitEmitted = false;
 
     try {
-      const opencodeCommand = resolveCliCommand('opencode');
+      const hasInjectedExecutor = Boolean(this.spawnFn || options?.spawnCliOverride);
+      const opencodeCommand = hasInjectedExecutor ? this.cliCommand : resolveCliCommand(this.cliCommand);
       if (!opencodeCommand) {
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: formatCliNotFoundError('opencode'),
+          error: formatCliNotFoundError(this.cliCommand),
           metadata,
           timestamp: Date.now(),
         };

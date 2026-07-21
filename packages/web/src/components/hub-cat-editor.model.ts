@@ -48,6 +48,7 @@ export interface HubCatEditorFormState {
   assetCardPath?: string;
   clientId: ClientId;
   accountRef: string;
+  cliRuntimeProfileRef?: string;
   defaultModel: string;
   toolPolicy: ToolPolicyValue;
   commandArgs: string;
@@ -384,6 +385,7 @@ export function initialState(cat?: CatData | null, draft?: HubCatEditorDraft | n
     assetCardPath: cat?.assetCard?.path ?? '',
     clientId: (cat?.clientId as ClientId | undefined) ?? createDraft?.clientId ?? 'anthropic',
     accountRef: cat?.accountRef ?? createDraft?.accountRef ?? '',
+    cliRuntimeProfileRef: cat?.cliRuntimeProfileRef ?? '',
     defaultModel: cat?.defaultModel ?? createDraft?.defaultModel ?? '',
     toolPolicy: cat?.toolPolicy ?? 'standard',
     commandArgs: cat?.commandArgs?.join(' ') ?? createDraft?.commandArgs ?? '',

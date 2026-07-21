@@ -38,6 +38,7 @@ interface KimiAgentServiceOptions {
   catId?: CatId;
   spawnFn?: SpawnFn;
   model?: string;
+  cliCommand?: string;
   mcpServerPath?: string;
 }
 
@@ -45,12 +46,14 @@ export class KimiAgentService implements AgentService {
   readonly catId: CatId;
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
+  private readonly cliCommand: string;
   private readonly mcpServerPath: string | undefined;
 
   constructor(options?: KimiAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('kimi');
     this.spawnFn = options?.spawnFn;
     this.model = options?.model ?? getCatModel(this.catId as string);
+    this.cliCommand = options?.cliCommand ?? 'kimi';
     this.mcpServerPath =
       options?.mcpServerPath ?? process.env.CAT_CAFE_MCP_SERVER_PATH ?? resolveDefaultClaudeMcpServerPath();
   }
@@ -125,12 +128,13 @@ export class KimiAgentService implements AgentService {
     }
 
     try {
-      const kimiCommand = resolveCliCommand('kimi');
+      const hasInjectedExecutor = Boolean(this.spawnFn || options?.spawnCliOverride);
+      const kimiCommand = hasInjectedExecutor ? this.cliCommand : resolveCliCommand(this.cliCommand);
       if (!kimiCommand) {
         yield {
           type: 'error' as const,
           catId: this.catId,
-          error: formatCliNotFoundError('kimi'),
+          error: formatCliNotFoundError(this.cliCommand),
           metadata,
           timestamp: Date.now(),
         };

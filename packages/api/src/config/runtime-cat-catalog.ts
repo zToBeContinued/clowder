@@ -38,6 +38,7 @@ export interface RuntimeCatInput {
   color: CatColor;
   mentionPatterns: string[];
   accountRef?: string;
+  cliRuntimeProfileRef?: string;
   assetCard?: CatAssetCard;
   roleDescription: string;
   personality?: string;
@@ -76,6 +77,7 @@ export interface RuntimeCatUpdate {
   color?: CatColor;
   mentionPatterns?: string[];
   accountRef?: string | null;
+  cliRuntimeProfileRef?: string | null;
   assetCard?: CatAssetCard | null;
   roleDescription?: string;
   personality?: string;
@@ -277,6 +279,9 @@ function createBreedFromInput(input: RuntimeCatInput): CatBreed {
         ...(input.accountRef != null && input.accountRef.trim().length > 0
           ? { accountRef: input.accountRef.trim() }
           : {}),
+        ...(input.cliRuntimeProfileRef != null && input.cliRuntimeProfileRef.trim().length > 0
+          ? { cliRuntimeProfileRef: input.cliRuntimeProfileRef.trim() }
+          : {}),
         ...(input.commandArgs && input.commandArgs.length > 0 ? { commandArgs: input.commandArgs } : {}),
         ...(input.cliConfigArgs && input.cliConfigArgs.length > 0 ? { cliConfigArgs: input.cliConfigArgs } : {}),
         ...(input.provider ? { provider: input.provider } : {}),
@@ -416,6 +421,13 @@ export function updateRuntimeCat(projectRoot: string, catId: string, patch: Runt
       variant.accountRef = patch.accountRef.trim();
     } else {
       delete variant.accountRef;
+    }
+  }
+  if (patch.cliRuntimeProfileRef !== undefined) {
+    if (patch.cliRuntimeProfileRef && patch.cliRuntimeProfileRef.trim().length > 0) {
+      variant.cliRuntimeProfileRef = patch.cliRuntimeProfileRef.trim();
+    } else {
+      delete variant.cliRuntimeProfileRef;
     }
   }
   if (patch.assetCard !== undefined) {

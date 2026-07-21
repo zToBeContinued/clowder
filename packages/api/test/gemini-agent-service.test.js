@@ -114,12 +114,14 @@ describe('GeminiAgentService (gemini-cli adapter)', () => {
       spawnFn,
       adapter: 'gemini-cli',
       model: 'gemini-test-model',
+      cliCommand: 'gemini-custom',
     });
 
     const promise = collect(service.invoke('test prompt'));
     emitGeminiEvents(proc, [{ type: 'init', session_id: 's1', model: 'auto' }]);
     await promise;
 
+    assert.equal(spawnFn.mock.calls[0].arguments[0], 'gemini-custom');
     const args = spawnFn.mock.calls[0].arguments[1];
     const modelIdx = args.indexOf('--model');
     assert.ok(modelIdx >= 0, 'fresh invoke should include --model');
@@ -457,6 +459,7 @@ describe('GeminiAgentService (antigravity adapter)', () => {
 
     const service = new GeminiAgentService({
       adapter: 'antigravity',
+      cliCommand: 'antigravity-custom',
       antigravitySpawnFn,
     });
 
@@ -466,11 +469,16 @@ describe('GeminiAgentService (antigravity adapter)', () => {
       CAT_CAFE_CALLBACK_TOKEN: 'tok-2',
     };
 
-    await collect(service.invoke('Design a logo', { callbackEnv }));
+    await collect(
+      service.invoke('Design a logo', {
+        callbackEnv,
+        accountEnv: { HTTPS_PROXY: 'http://127.0.0.1:7890' },
+      }),
+    );
 
     assert.equal(antigravitySpawnFn.mock.callCount(), 1);
     const call = antigravitySpawnFn.mock.calls[0];
-    assert.equal(call.arguments[0], 'antigravity');
+    assert.equal(call.arguments[0], 'antigravity-custom');
     assert.deepEqual(call.arguments[1], ['chat', '--mode', 'agent', 'Design a logo']);
 
     const spawnOpts = call.arguments[2];
@@ -478,6 +486,7 @@ describe('GeminiAgentService (antigravity adapter)', () => {
     assert.equal(spawnOpts.stdio, 'ignore');
     assert.equal(spawnOpts.env.CAT_CAFE_INVOCATION_ID, 'inv-2');
     assert.equal(spawnOpts.env.CAT_CAFE_CALLBACK_TOKEN, 'tok-2');
+    assert.equal(spawnOpts.env.HTTPS_PROXY, 'http://127.0.0.1:7890');
   });
 
   test('preserves inherited env vars (not whitelist) — regression for v2 strip approach', async () => {
@@ -766,7 +775,9 @@ test('emits wrapped thinking from local Gemini session snapshots when available'
   const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
   mkdirSync(sessionDir, { recursive: true });
   const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
   process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
 
   try {
     const promise = collect(service.invoke('test thinking', { workingDirectory: '/home/user/clowder-ai' }));
@@ -807,7 +818,10 @@ test('emits wrapped thinking from local Gemini session snapshots when available'
     assert.match(parsed.text, /\*\*Planning\*\*/);
     assert.match(parsed.text, /Second think\./);
   } finally {
-    process.env.HOME = previousHome;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
   }
 });
 
@@ -820,7 +834,9 @@ test('skips Gemini local thinking hydration when the latest session content does
   const sessionDir = join(fakeHome, '.gemini', 'tmp', 'clowder-ai', 'chats');
   mkdirSync(sessionDir, { recursive: true });
   const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
   process.env.HOME = fakeHome;
+  process.env.USERPROFILE = fakeHome;
 
   try {
     const promise = collect(service.invoke('test mismatch', { workingDirectory: '/home/user/clowder-ai' }));
@@ -854,6 +870,9 @@ test('skips Gemini local thinking hydration when the latest session content does
     const thinkingMsg = msgs.find((m) => m.type === 'system_info' && m.content.includes('"type":"thinking"'));
     assert.equal(thinkingMsg, undefined);
   } finally {
-    process.env.HOME = previousHome;
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = previousUserProfile;
   }
 });

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { AcpPoolRegistry, createAcpPoolFingerprint } = await import(
+const { AcpPoolRegistry, createAcpEnvironmentDigest, createAcpPoolFingerprint } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/AcpPoolRegistry.js'
 );
 
@@ -93,5 +93,39 @@ describe('AcpPoolRegistry', () => {
 
     assert.equal(registry.size, 0);
     assert.equal(pool.closeCount, 1);
+  });
+
+  it('rotates the pool when runtime environment changes without leaking raw values', async () => {
+    const registry = new AcpPoolRegistry();
+    const firstPool = createPool();
+    const secondPool = createPool();
+    const secretProxy = 'http://user:secret@127.0.0.1:7890';
+    const baseIdentity = {
+      carrier: 'kiro-acp',
+      projectRoot: '/project',
+      command: 'kiro-cli',
+      startupArgs: ['acp', '--trust-all-tools'],
+      supportsMultiplexing: false,
+      maxLiveProcesses: 3,
+      idleTtlMs: 300_000,
+      healthCheckIntervalMs: 30_000,
+    };
+    const firstFingerprint = createAcpPoolFingerprint({
+      ...baseIdentity,
+      environmentDigest: createAcpEnvironmentDigest({ HTTPS_PROXY: secretProxy }),
+    });
+    const secondFingerprint = createAcpPoolFingerprint({
+      ...baseIdentity,
+      environmentDigest: createAcpEnvironmentDigest({ HTTPS_PROXY: 'http://127.0.0.1:7891' }),
+    });
+
+    assert.notEqual(firstFingerprint, secondFingerprint);
+    assert.equal(firstFingerprint.includes(secretProxy), false);
+    const first = await registry.getOrCreate('kiro-cat', firstFingerprint, () => firstPool);
+    const second = await registry.getOrCreate('kiro-cat', secondFingerprint, () => secondPool);
+    assert.strictEqual(first, firstPool);
+    assert.strictEqual(second, secondPool);
+    assert.equal(firstPool.closeCount, 1);
+    await registry.closeAll();
   });
 });

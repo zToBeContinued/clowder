@@ -68,7 +68,7 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
   const shareDir = mkdtempSync(join(tmpdir(), 'kimi-share-'));
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
-  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5' });
+  const service = new KimiAgentService({ spawnFn, model: 'kimi-k2.5', cliCommand: 'kimi-custom' });
 
   try {
     mkdirSync(shareDir, { recursive: true });
@@ -128,6 +128,7 @@ test('yields text, tool_use, inferred session_init, and done on print-mode succe
     assert.equal(msgs[4].sessionId, 'kimi-session-123');
     assert.equal(msgs[5].type, 'done');
 
+    assert.equal(spawnFn.mock.calls[0].arguments[0], 'kimi-custom');
     const args = spawnFn.mock.calls[0].arguments[1];
     assert.ok(args.includes('--print'));
     assert.ok(args.includes('--output-format'));

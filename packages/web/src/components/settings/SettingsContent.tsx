@@ -12,6 +12,7 @@ import { HubEnvFilesTab } from '../HubEnvFilesTab';
 import { PushSettingsPanel } from '../PushSettingsPanel';
 import { useConfirm } from '../useConfirm';
 import { VoiceSettingsPanel } from '../VoiceSettingsPanel';
+import { CliRuntimeProfilesContent } from './CliRuntimeProfilesContent';
 import { MarketplaceContent } from './MarketplaceContent';
 import { McpManageContent } from './McpManageContent';
 import { OpsContent } from './OpsContent';
@@ -146,6 +147,8 @@ export function SettingsContent({ section }: SettingsContentProps) {
         );
       case 'accounts':
         return <HubAccountsTab />;
+      case 'cli-runtime':
+        return <CliRuntimeProfilesContent />;
       case 'plugins':
         return <PluginsContent />;
       case 'voice':
