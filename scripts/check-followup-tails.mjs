@@ -58,9 +58,21 @@ function scanText(text, source) {
 function getCommitMessages() {
   if (process.argv.includes('--no-commits')) return '';
   try {
+    // origin/main 在浅克隆或本地新分支上可能不存在；先校验其存在性，
+    // 否则 git 会把 "fatal: ambiguous argument 'origin/main..HEAD'" 打到终端造成脏输出。
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', 'origin/main'], {
+      cwd: repoRoot,
+      stdio: 'ignore',
+      timeout: 10_000,
+    });
+  } catch {
+    return '';
+  }
+  try {
     const out = execFileSync('git', ['log', '--format=%s', 'origin/main..HEAD'], {
       cwd: repoRoot,
       encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 10_000,
     });
     return out;

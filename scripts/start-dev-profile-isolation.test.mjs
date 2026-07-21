@@ -5,9 +5,14 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, it } from 'node:test';
 import { buildUnixStatus, buildWindowsStatus, resolveWindowsStatusPorts } from './lib/platform-status.mjs';
+import { resolveBashCommand } from './test-bash-runtime.mjs';
 
 const ROOT = resolve(process.cwd());
 const SYNC_SCRIPT = resolve(ROOT, 'scripts/sync-to-opensource.sh');
+// 非 Windows 返回 'bash'；Windows 有 Git Bash 时返回其绝对路径，否则 undefined。
+// 缺少 bash 的环境（如未装 Git Bash 的 Windows）应跳过纯 bash 脚本用例，而不是硬失败。
+const BASH = resolveBashCommand();
+const BASH_SKIP = BASH ? false : 'bash is unavailable on this platform';
 
 function createSandbox(envFile = '') {
   const dir = mkdtempSync(join(tmpdir(), 'cc-start-dev-profile-'));
@@ -32,7 +37,7 @@ function runSourceOnly({ sandboxDir, env = {}, extraArgs = [] }) {
     'printf "PROFILE=%s\\nASR=%s\\nPROXY=%s\\nTTS=%s\\nLLM=%s\\nEMBED=%s\\nTTL=%s\\nREDIS_PROFILE=%s\\n" "$PROFILE" "$ASR_ENABLED" "$ANTHROPIC_PROXY_ENABLED" "$TTS_ENABLED" "$LLM_POSTPROCESS_ENABLED" "${EMBED_ENABLED:-}" "$MESSAGE_TTL_SECONDS" "$REDIS_PROFILE"',
   ].join('; ');
 
-  return spawnSync('bash', ['-lc', command], {
+  return spawnSync(BASH, ['-lc', command], {
     cwd: sandboxDir,
     env: {
       PATH: process.env.PATH ?? '',
@@ -50,7 +55,7 @@ function runApiLaunchCommand({ sandboxDir, env = {}, extraArgs = [] }) {
     'printf "%s\\n" "$(api_launch_command)"',
   ].join('; ');
 
-  return spawnSync('bash', ['-lc', command], {
+  return spawnSync(BASH, ['-lc', command], {
     cwd: sandboxDir,
     env: {
       PATH: process.env.PATH ?? '',
@@ -62,7 +67,7 @@ function runApiLaunchCommand({ sandboxDir, env = {}, extraArgs = [] }) {
   });
 }
 
-describe('start-dev strict profile isolation', () => {
+describe('start-dev strict profile isolation', { skip: BASH_SKIP }, () => {
   it('ignores inherited shell env for profile-controlled vars when strict mode is on', () => {
     const sandboxDir = createSandbox();
     try {
@@ -441,9 +446,9 @@ describe('cross-platform pnpm-start profile propagation (#421)', () => {
   });
 });
 
-describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC_SCRIPT) }, () => {
+describe('sync-to-opensource public launch transforms', { skip: BASH_SKIP || !existsSync(SYNC_SCRIPT) }, () => {
   it('exports opensource-pinned direct launch wrappers and runtime startup', () => {
-    const result = spawnSync('bash', [SYNC_SCRIPT, '--dry-run', '--yes'], {
+    const result = spawnSync(BASH, [SYNC_SCRIPT, '--dry-run', '--yes'], {
       cwd: ROOT,
       env: {
         ...process.env,
@@ -494,7 +499,7 @@ describe('sync-to-opensource public launch transforms', { skip: !existsSync(SYNC
       );
 
       const envSource = spawnSync(
-        'bash',
+        BASH,
         ['-lc', 'set -euo pipefail\nset -a\nsource ./.env.example\nset +a\nprintf "%s" "$NEXT_PUBLIC_BRAND_NAME"'],
         {
           cwd: exportDir,

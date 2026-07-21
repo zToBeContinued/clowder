@@ -119,6 +119,8 @@ function runGate(bash, args = [], extraEnv = {}) {
 describe('pre-merge-check dependency refresh order', () => {
   it('runs pnpm install after rebasing onto origin/main', (t) => {
     const bash = requireBash(t);
+    // t.skip() 不会中断函数执行，缺少 bash 时必须显式 return，否则会用 undefined 调 spawnSync 抛错。
+    if (!bash) return;
     const result = runGate(bash);
 
     assert.equal(result.status, 0, result.stderr);
@@ -135,6 +137,7 @@ describe('pre-merge-check dependency refresh order', () => {
 
   it('clears inherited production install env before pnpm install', (t) => {
     const bash = requireBash(t);
+    if (!bash) return;
     const result = runGate(bash, [], {
       NODE_ENV: 'production',
       npm_config_production: 'true',

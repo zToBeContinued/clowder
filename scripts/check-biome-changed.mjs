@@ -51,6 +51,10 @@ export function listChangedFiles(base, { cwd = process.cwd() } = {}) {
   return diff.stdout.split('\0').filter(Boolean);
 }
 
+function quoteForWinShell(arg) {
+  return /[\s"&|<>^()]/.test(arg) ? `"${arg.replace(/"/g, '""')}"` : arg;
+}
+
 export function runChangedBiome({ cwd = process.cwd(), baseCandidate = process.env.CI_BASE_SHA } = {}) {
   const base = resolveDiffBase(baseCandidate, { cwd });
   const changed = listChangedFiles(base, { cwd });
@@ -62,10 +66,14 @@ export function runChangedBiome({ cwd = process.cwd(), baseCandidate = process.e
     return 0;
   }
 
-  const result = spawnSync('pnpm', ['biome', 'check', '--diagnostic-level=error', '--', ...candidates], {
-    cwd,
-    stdio: 'inherit',
-  });
+  // Windows 上 pnpm 实际是 pnpm.cmd；较新 Node 禁止直接 spawn .cmd/.bat（会报 ENOENT/EINVAL），
+  // 必须经由 shell 启动。为避免 DEP0190（shell:true 搭配 args 数组不转义参数）并防止路径含空格被
+  // shell 拆断，这里手动引用参数并作为单条命令行传入；非 Windows 保持不经 shell 的安全调用。
+  const isWindows = process.platform === 'win32';
+  const rawArgs = ['biome', 'check', '--diagnostic-level=error', '--', ...candidates];
+  const result = isWindows
+    ? spawnSync(['pnpm', ...rawArgs].map(quoteForWinShell).join(' '), { cwd, stdio: 'inherit', shell: true })
+    : spawnSync('pnpm', rawArgs, { cwd, stdio: 'inherit' });
   if (result.error) throw result.error;
   return result.status ?? 1;
 }
