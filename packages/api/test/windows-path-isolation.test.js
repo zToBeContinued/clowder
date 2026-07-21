@@ -139,6 +139,69 @@ $resolvedPnpmStore = (& pnpm store path | Select-Object -Last 1).Trim()
   },
 );
 
+test(
+  'Windows project pnpm configuration keeps store commands inside the workspace',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const sandbox = createSandbox('pnpm-store-config-');
+    try {
+      const projectRoot = join(sandbox, 'temporary project');
+      const packageCwd = join(projectRoot, 'packages', 'api');
+      const driver = join(sandbox, 'resolve-pnpm-store.ps1');
+      mkdirSync(packageCwd, { recursive: true });
+
+      const rootPackage = JSON.parse(readFileSync(join(PROJECT_ROOT, 'package.json'), 'utf8'));
+      assert.equal(typeof rootPackage.packageManager, 'string');
+      writeFileSync(
+        join(projectRoot, 'package.json'),
+        `${JSON.stringify(
+          {
+            name: 'pnpm-store-isolation-probe',
+            private: true,
+            packageManager: rootPackage.packageManager,
+          },
+          null,
+          2,
+        )}\n`,
+        'utf8',
+      );
+      writeFileSync(join(packageCwd, 'package.json'), '{"name":"@probe/api","private":true}\n', 'utf8');
+      copyFileSync(join(PROJECT_ROOT, '.npmrc'), join(projectRoot, '.npmrc'));
+      copyFileSync(join(PROJECT_ROOT, 'pnpm-workspace.yaml'), join(projectRoot, 'pnpm-workspace.yaml'));
+      writeFileSync(
+        driver,
+        `$ErrorActionPreference = "Stop"
+$output = & pnpm store path
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+($output | Select-Object -Last 1).Trim()
+`,
+        'utf8',
+      );
+
+      const result = spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', driver],
+        {
+          cwd: packageCwd,
+          env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+          encoding: 'utf8',
+          windowsHide: true,
+        },
+      );
+      assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+
+      const resolvedStore = result.stdout.trim().replace(/^\uFEFF/, '');
+      const expectedStoreBase = join(projectRoot, '.cat-cafe', 'pnpm-store');
+      assertPathInside(resolvedStore, expectedStoreBase, 'resolved pnpm store');
+      assert.doesNotMatch(normalizedPath(resolvedStore), /^[a-z]:\/\.pnpm-store(?:\/|$)/i);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  },
+);
+
 test('Windows launch entry points wire the shared runtime helper before dispatch', () => {
   const cmd = readFileSync(START_CMD, 'utf8');
   const ps1 = readFileSync(START_PS1, 'utf8');
