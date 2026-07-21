@@ -43,6 +43,7 @@ packages/web/public/vendor/
 .gitnexus/
 *.swp
 *.swo
+.codegraph/
 
 # MCP config (personal, contains local URLs)
 .mcp.json
