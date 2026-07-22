@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { LifecyclePhaseTip, type LifecycleTipConfig } from './LifecyclePhaseTip';
 
 interface BootcampGuideOverlayProps {
@@ -25,12 +26,16 @@ const LIFECYCLE_TIPS: Record<string, LifecycleTipConfig> = {
 };
 
 export function BootcampGuideOverlay({ catName, phase, hasMessages }: BootcampGuideOverlayProps) {
+  // Hook 必须在任何提前 return 之前无条件调用。
+  const [dismissed, setDismissed] = useState(false);
+
   const lifecycleTip = LIFECYCLE_TIPS[phase];
   if (lifecycleTip) {
     return <LifecyclePhaseTip phase={phase} config={lifecycleTip} />;
   }
 
   if (hasMessages) return null;
+  if (dismissed) return null;
   const cat = catName ?? '猫猫';
   const tipFn = PHASE_TIPS[phase];
   if (!tipFn) return null;
@@ -38,15 +43,26 @@ export function BootcampGuideOverlay({ catName, phase, hasMessages }: BootcampGu
 
   return (
     <>
-      {/* Full-screen overlay with input punch-through */}
-      <div className="fixed inset-0 z-[60] bg-[var(--console-overlay-backdrop)]" style={{ pointerEvents: 'auto' }} />
+      {/*
+        视觉遮罩：仅用于聚焦输入框。刻意 pointer-events-none —— 之前用 pointerEvents:'auto'
+        全屏拦截，靠 z-index 把输入框「打洞」露出来，但输入框深埋在多层容器里，一旦某个祖先
+        形成独立层叠上下文，z-index 抬升就失效、输入框被遮罩盖住，用户会被彻底困死、无法操作。
+        改为不拦截指针后，遮罩只做视觉压暗，输入框及其它元素始终可交互。
+      */}
+      <div className="pointer-events-none fixed inset-0 z-[60] bg-[var(--console-overlay-backdrop)]" />
       <style>{`[data-bootcamp-step="chat-input"] { position: relative; z-index: 65 !important; }`}</style>
-      <div className="pointer-events-none fixed bottom-24 left-1/2 -translate-x-1/2 z-[66]">
-        <div className="rounded-xl border border-conn-amber-ring bg-conn-amber-bg px-5 py-3 shadow-xl animate-fade-in">
-          <div className="flex items-center gap-2">
-            <span className="text-lg">👇</span>
-            <span className="text-sm font-medium text-conn-amber-text">{tip}</span>
-          </div>
+      <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[66]">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-conn-amber-ring bg-conn-amber-bg px-5 py-3 shadow-xl animate-fade-in">
+          <span className="text-lg">👇</span>
+          <span className="text-sm font-medium text-conn-amber-text">{tip}</span>
+          <button
+            type="button"
+            onClick={() => setDismissed(true)}
+            aria-label="关闭引导提示"
+            className="ml-2 rounded-md px-1.5 text-base leading-none text-conn-amber-text/60 transition-colors hover:text-conn-amber-text"
+          >
+            ✕
+          </button>
         </div>
       </div>
     </>
