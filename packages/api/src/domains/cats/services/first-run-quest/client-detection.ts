@@ -12,9 +12,9 @@ const execFileAsync = promisify(execFile);
 
 export interface DetectedClient {
   /** Client ID — the CLI tool identity. */
-  client: 'claude' | 'codex' | 'gemini' | 'kiro' | 'opencode' | 'dare' | 'kimi' | 'grok';
+  client: 'claude' | 'codex' | 'gemini' | 'kiro' | 'opencode' | 'dare' | 'kimi' | 'grok' | 'cursor';
   /** Provider key matching ClientValue in hub-cat-editor (anthropic, openai, etc.) */
-  provider: 'anthropic' | 'openai' | 'google' | 'kiro' | 'opencode' | 'dare' | 'kimi' | 'xai';
+  provider: 'anthropic' | 'openai' | 'google' | 'kiro' | 'opencode' | 'dare' | 'kimi' | 'xai' | 'cursor';
   /** Human-readable label */
   label: string;
   /** CLI binary name */
@@ -99,7 +99,40 @@ const CLI_SPECS: CliSpec[] = [
     versionArgs: ['--version'],
     envKey: 'XAI_API_KEY',
   },
+  {
+    client: 'cursor',
+    provider: 'cursor',
+    label: 'Cursor',
+    cli: 'cursor-agent',
+    versionArgs: ['--version'],
+    envKey: 'CURSOR_API_KEY',
+  },
 ];
+
+/**
+ * Windows 上把 --version 探测命令解析为可执行形态：
+ * - 标准 npm .cmd shim → 解析出底层 .js/.exe 入口（resolveWindowsShimSpawn）；
+ * - 非标准 .cmd（如 cursor-agent.cmd 是 powershell 包装器，parseShimFile 解析不了）→ 用 `cmd /c` 直跑；
+ * - .ps1（部分 CLI 直接以 .ps1 暴露）→ 用 powershell -File 跑。
+ */
+function resolveVersionSpawn(
+  resolvedCommand: string,
+  versionArgs: readonly string[],
+): { command: string; args: string[] } | null {
+  if (process.platform !== 'win32') return { command: resolvedCommand, args: [...versionArgs] };
+  if (/\.cmd$/i.test(resolvedCommand)) {
+    const shim = resolveWindowsShimSpawn(resolvedCommand, versionArgs);
+    if (shim) return shim;
+    return { command: 'cmd', args: ['/c', resolvedCommand, ...versionArgs] };
+  }
+  if (/\.ps1$/i.test(resolvedCommand)) {
+    return {
+      command: 'powershell',
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolvedCommand, ...versionArgs],
+    };
+  }
+  return { command: resolvedCommand, args: [...versionArgs] };
+}
 
 async function checkCli(spec: CliSpec, options: ClientDetectionOptions): Promise<DetectedClient> {
   const resolveCommand = options.resolveCommand ?? resolveCliCommand;
@@ -123,10 +156,7 @@ async function checkCli(spec: CliSpec, options: ClientDetectionOptions): Promise
   if (!resolvedCommand) return { ...base, installed: false };
 
   try {
-    const spawn =
-      process.platform === 'win32' && /\.cmd$/i.test(resolvedCommand)
-        ? resolveWindowsShimSpawn(resolvedCommand, spec.versionArgs)
-        : { command: resolvedCommand, args: [...spec.versionArgs] };
+    const spawn = resolveVersionSpawn(resolvedCommand, spec.versionArgs);
     if (!spawn) return { ...base, installed: false };
 
     const { stdout } = await runCommand(spawn.command, spawn.args);

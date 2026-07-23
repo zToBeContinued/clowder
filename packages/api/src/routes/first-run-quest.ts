@@ -234,6 +234,19 @@ export const firstRunQuestRoutes: FastifyPluginAsync<FirstRunQuestRoutesOptions>
       };
     }
 
+    /* Cursor 同样 accountless（本机 cursor-agent login 管理），检查也是本机 --version 探测，
+     * 绝不启动 chat 或发送模型请求。 */
+    if (clientId === 'cursor') {
+      const cursor = await detectLocalClient('cursor');
+      if (!cursor?.installed) {
+        return { ok: false, error: '未检测到 Cursor CLI（cursor-agent），请先完成本机安装' };
+      }
+      return {
+        ok: true,
+        message: cursor.version ? `Cursor CLI 本地检查通过（${cursor.version}）` : 'Cursor CLI 本地检查通过',
+      };
+    }
+
     if (!profileId) {
       reply.status(400);
       return { ok: false, error: '非 Kiro 客户端必须选择账号配置' };
