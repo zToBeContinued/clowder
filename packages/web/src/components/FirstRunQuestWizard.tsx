@@ -64,10 +64,12 @@ export function FirstRunQuestWizard({ open, onClose, onCreated }: FirstRunQuestW
         const isKiro = selectedClient.client === 'kiro' || selectedClient.provider === 'kiro';
         const accountRef = config.accountRef?.trim();
         const model = config.model?.trim();
+        const effort = config.effort?.trim();
         const clientConfigPayload = {
           clientId: isKiro ? 'kiro' : selectedClient.provider,
           ...(!isKiro && accountRef ? { accountRef } : {}),
           ...(model ? { defaultModel: model } : {}),
+          ...(effort ? { cli: { effort } } : {}),
         };
 
         // Reuse previously created cat if thread creation failed on a prior attempt

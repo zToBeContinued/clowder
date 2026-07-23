@@ -3,14 +3,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 import type { AccountsResponse, ProfileItem } from '../hub-accounts.types';
-import { builtinAccountIdForClient, type ClientValue, filterAccounts } from '../hub-cat-editor.model';
+import {
+  builtinAccountIdForClient,
+  type ClientValue,
+  filterAccounts,
+  getCliEffortOptionsForClient,
+} from '../hub-cat-editor.model';
 import { type UnifiedAuthEditData, UnifiedAuthModal } from '../UnifiedAuthModal';
 import { ProfileCard } from './ProfileCard';
 
 export interface FirstRunClientConfig {
   accountRef?: string;
   model?: string;
+  /** Reasoning effort (仅部分 CLI 支持，如 kiro/claude/codex)。 */
+  effort?: string;
 }
+
+const CLI_EFFORT_LABELS: Record<string, string> = {
+  low: 'low — 快速',
+  medium: 'medium — 标准',
+  high: 'high — 深度',
+  xhigh: 'xhigh — 超深',
+  max: 'max — 最深',
+};
 
 interface ConfigStepProps {
   client: string;
@@ -37,6 +52,10 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [expandedId, setExpandedId] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
+  // Kiro：模型来自本机 `kiro-cli settings list`（经 /api/local-cli-probes 扫描 → /api/cat-model-options）。
+  const [kiroModels, setKiroModels] = useState<string[]>([]);
+  const [selectedEffort, setSelectedEffort] = useState('');
+  const kiroEffortOptions = getCliEffortOptionsForClient('kiro') ?? [];
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -59,6 +78,30 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [fetchProfiles, isKiro]);
+
+  // Kiro：探测本机可用模型（扫描 → 读 /api/cat-model-options 的 kiro 候选）。失败不阻断创建。
+  useEffect(() => {
+    if (!isKiro) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await apiFetch('/api/local-cli-probes').catch(() => {});
+        const res = await apiFetch('/api/cat-model-options');
+        if (!res.ok || cancelled) return;
+        const body = (await res.json()) as { clients?: { kiro?: { defaultModel?: string; models?: string[] } } };
+        if (cancelled) return;
+        const models = body.clients?.kiro?.models ?? [];
+        const def = body.clients?.kiro?.defaultModel ?? '';
+        setKiroModels(models);
+        setSelectedModel((prev) => prev || (def && models.includes(def) ? def : (models[0] ?? '')));
+      } catch {
+        /* 模型探测失败不阻断——kiro 可留空使用 CLI 默认 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isKiro]);
 
   const available = useMemo(() => filterAccounts(clientId as ClientValue, profiles), [clientId, profiles]);
 
@@ -176,9 +219,41 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
         <p className="mb-3 text-xs text-cafe-muted">无需在 Clowder 选择账号或模型</p>
 
         <div className="mb-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-4 text-sm text-conn-amber-text">
-          认证和默认模型由本机 Kiro CLI 管理。安全检查仅执行 <code>kiro-cli --version</code>，不会启动
-          chat、ACP 或发送模型请求。
+          认证由本机 Kiro CLI 管理。安全检查仅执行 <code>kiro-cli --version</code>，不会启动
+          chat、ACP 或发送模型请求。模型与思考强度可选，留空则用 Kiro CLI 默认。
         </div>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-semibold text-cafe-secondary">模型（可选）</span>
+          <select
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
+            className="w-full rounded-lg border border-[var(--console-input-stroke)] bg-[var(--clowder-input-bg)] px-3 py-2 text-sm text-cafe"
+          >
+            <option value="">默认（Kiro CLI 当前模型）</option>
+            {kiroModels.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="mb-3 block">
+          <span className="mb-1 block text-xs font-semibold text-cafe-secondary">思考强度（可选）</span>
+          <select
+            value={selectedEffort}
+            onChange={(e) => setSelectedEffort(e.target.value)}
+            className="w-full rounded-lg border border-[var(--console-input-stroke)] bg-[var(--clowder-input-bg)] px-3 py-2 text-sm text-cafe"
+          >
+            <option value="">默认</option>
+            {kiroEffortOptions.map((v) => (
+              <option key={v} value={v}>
+                {CLI_EFFORT_LABELS[v] ?? v}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <button
           type="button"
@@ -204,7 +279,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
         <button
           type="button"
           disabled={!canProceed}
-          onClick={() => onComplete({})}
+          onClick={() => onComplete({ model: selectedModel || undefined, effort: selectedEffort || undefined })}
           className={`w-full rounded-lg py-2.5 text-sm font-semibold transition ${
             canProceed
               ? 'bg-conn-amber-text text-[var(--cafe-surface)] hover:opacity-90'

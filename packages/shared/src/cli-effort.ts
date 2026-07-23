@@ -2,21 +2,24 @@ import type { CatProvider } from './types/cat.js';
 
 export const CLI_EFFORT_VALUES = ['low', 'medium', 'high', 'max', 'xhigh'] as const;
 export type CliEffortValue = (typeof CLI_EFFORT_VALUES)[number];
-export type CliEffortProvider = 'anthropic' | 'openai';
+// Kiro CLI 的 `acp`/`chat` 子命令原生支持 `--effort low|medium|high|xhigh|max`（比 Claude 多 xhigh）。
+export type CliEffortProvider = 'anthropic' | 'openai' | 'kiro';
 export type CliEffortPatchValue = CliEffortValue | null;
 
 const CLI_EFFORT_OPTIONS_BY_PROVIDER: Record<CliEffortProvider, readonly CliEffortValue[]> = {
   anthropic: ['low', 'medium', 'high', 'max'],
   openai: ['low', 'medium', 'high', 'xhigh'],
+  kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
 };
 
 const CLI_EFFORT_DEFAULT_BY_PROVIDER: Record<CliEffortProvider, CliEffortValue> = {
   anthropic: 'max',
   openai: 'xhigh',
+  kiro: 'max',
 };
 
 function isCliEffortProvider(provider: string): provider is CliEffortProvider {
-  return provider === 'anthropic' || provider === 'openai';
+  return provider === 'anthropic' || provider === 'openai' || provider === 'kiro';
 }
 
 export function getCliEffortOptionsForProvider(provider: CatProvider | string): readonly CliEffortValue[] | null {

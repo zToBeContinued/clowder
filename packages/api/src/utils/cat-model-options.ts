@@ -21,6 +21,15 @@ const STATIC_PRESETS: Partial<Record<ClientId, CatModelOptionPreset>> = {
   grok: { defaultModel: 'grok-4.5', models: LOCAL_CLI_MODELS_PROBES.grok.static ?? [] },
   opencode: { defaultModel: 'xiaomi-mimo/mimo-v2.5-pro', models: LOCAL_CLI_MODELS_PROBES.opencode.static ?? [] },
   dare: { defaultModel: 'claude-fable-5', models: ['claude-fable-5'] },
+  // Kiro 模型由本机 Kiro CLI 的 settings 决定，因人而异；这里给一份保守兜底，
+  // 本机 CLI 扫描（LOCAL_CLI_MODELS_PROBES.kiro，读 `kiro-cli settings list`）会覆盖为真实列表。
+  kiro: {
+    defaultModel: 'gpt-5.6-sol',
+    models:
+      LOCAL_CLI_MODELS_PROBES.kiro.static && LOCAL_CLI_MODELS_PROBES.kiro.static.length > 0
+        ? LOCAL_CLI_MODELS_PROBES.kiro.static
+        : ['gpt-5.6-sol', 'claude-opus-4.8'],
+  },
   pi: {
     defaultModel: 'mimo/mimo-v2.5-pro',
     models: ['mimo/mimo-v2.5-pro', 'mimo/mimo-v2.5', 'xiaomi/mimo-v2.5-pro', 'openrouter/auto'],
