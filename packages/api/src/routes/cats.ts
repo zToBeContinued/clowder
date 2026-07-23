@@ -87,6 +87,7 @@ const clientSchema = z.enum([
   'opencode',
   'pi',
   'catagent',
+  'cursor',
 ]);
 const catIdSchema = z
   .string()
@@ -138,8 +139,19 @@ const baseCatSchema = z.object({
 const modelSchema = z.string().transform((v) => v.replace(/\/+$/, ''));
 
 const createNormalCatSchema = baseCatSchema.extend({
-  clientId: clientSchema.exclude(['antigravity', 'kiro']),
+  clientId: clientSchema.exclude(['antigravity', 'kiro', 'cursor']),
   defaultModel: modelSchema,
+  mcpSupport: z.boolean().optional(),
+  cli: cliSchema.optional(),
+  cliConfigArgs: z.array(z.string().min(1)).optional(),
+  provider: z.string().min(1).optional(),
+});
+
+/** Cursor CLI 与 Kiro 类似：认证由本机 `cursor-agent login` 管理，Clowder 不绑定账号；
+ * 模型可选（留空则用 cursor-agent 的 Auto/默认）。 */
+const createCursorCatSchema = baseCatSchema.extend({
+  clientId: z.literal('cursor'),
+  defaultModel: modelSchema.default(''),
   mcpSupport: z.boolean().optional(),
   cli: cliSchema.optional(),
   cliConfigArgs: z.array(z.string().min(1)).optional(),
@@ -168,6 +180,7 @@ const createAntigravityCatSchema = baseCatSchema.extend({
 const createCatSchema = z.discriminatedUnion('clientId', [
   createNormalCatSchema,
   createKiroCatSchema,
+  createCursorCatSchema,
   createAntigravityCatSchema,
 ]);
 
@@ -357,6 +370,8 @@ function defaultCliForClient(client: ClientId): { command: string; outputFormat:
       return { command: 'gemini', outputFormat: 'stream-json' };
     case 'kiro':
       return { command: 'kiro-cli', outputFormat: 'acp' };
+    case 'cursor':
+      return { command: 'cursor-agent', outputFormat: 'stream-json' };
     case 'kimi':
       return { command: 'kimi', outputFormat: 'stream-json' };
     case 'grok':
@@ -476,10 +491,16 @@ async function validateAccountBindingOrThrow(
   options?: { legacyCompat?: boolean },
 ): Promise<void> {
   const trimmedAccountRef = accountRef?.trim();
-  if ((client === 'antigravity' || client === 'kiro') && trimmedAccountRef) {
+  if ((client === 'antigravity' || client === 'kiro' || client === 'cursor') && trimmedAccountRef) {
     throw new Error(`${client} client does not support accountRef`);
   }
-  if (client !== 'antigravity' && client !== 'pi' && client !== 'kiro' && !trimmedAccountRef) {
+  if (
+    client !== 'antigravity' &&
+    client !== 'pi' &&
+    client !== 'kiro' &&
+    client !== 'cursor' &&
+    !trimmedAccountRef
+  ) {
     throw new Error(`client "${client}" requires a provider binding`);
   }
   if (!trimmedAccountRef) return;

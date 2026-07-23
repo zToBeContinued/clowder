@@ -402,7 +402,13 @@ export function HubCatEditor({
   }, [availableProfiles, cat, draft, form.clientId]);
 
   useEffect(() => {
-    if (form.clientId === 'antigravity' || form.clientId === 'kiro' || modelOptions.length === 0) return;
+    if (
+      form.clientId === 'antigravity' ||
+      form.clientId === 'kiro' ||
+      form.clientId === 'cursor' ||
+      modelOptions.length === 0
+    )
+      return;
     if (form.defaultModel.trim().length > 0) return;
     setForm((prev) => {
       if (prev.clientId === 'antigravity' || prev.clientId === 'kiro' || prev.defaultModel.trim().length > 0) {

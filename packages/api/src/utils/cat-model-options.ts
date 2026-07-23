@@ -30,6 +30,14 @@ const STATIC_PRESETS: Partial<Record<ClientId, CatModelOptionPreset>> = {
         ? LOCAL_CLI_MODELS_PROBES.kiro.static
         : ['gpt-5.6-sol', 'claude-opus-4.8'],
   },
+  // Cursor 模型由本机 cursor-agent 账号决定；给一份常见兜底，扫描(cursor-agent --list-models)会覆盖。
+  cursor: {
+    defaultModel: '',
+    models:
+      LOCAL_CLI_MODELS_PROBES.cursor?.static && LOCAL_CLI_MODELS_PROBES.cursor.static.length > 0
+        ? LOCAL_CLI_MODELS_PROBES.cursor.static
+        : ['gpt-5', 'sonnet-4-thinking', 'claude-opus-4-8'],
+  },
   pi: {
     defaultModel: 'mimo/mimo-v2.5-pro',
     models: ['mimo/mimo-v2.5-pro', 'mimo/mimo-v2.5', 'xiaomi/mimo-v2.5-pro', 'openrouter/auto'],

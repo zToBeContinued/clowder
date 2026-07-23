@@ -23,7 +23,8 @@ export type ClientId =
   | 'opencode'
   | 'pi'
   | 'a2a'
-  | 'catagent';
+  | 'catagent'
+  | 'cursor';
 
 /** @deprecated clowder-ai#340: Use {@link ClientId} instead. Kept as alias for backward compatibility. */
 export type CatProvider = ClientId;

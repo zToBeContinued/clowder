@@ -1243,6 +1243,13 @@ async function main(): Promise<void> {
         case 'grok':
           service = new GrokAgentService({ catId, cliCommand });
           break;
+        case 'cursor': {
+          const { CursorAgentService } = await import(
+            './domains/cats/services/agents/providers/CursorAgentService.js'
+          );
+          service = new CursorAgentService({ catId, cliCommand });
+          break;
+        }
         case 'dare':
           service = new DareAgentService({ catId, cliCommand });
           break;

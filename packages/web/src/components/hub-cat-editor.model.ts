@@ -21,7 +21,8 @@ export type ClientId =
   | 'opencode'
   | 'pi'
   | 'antigravity'
-  | 'catagent';
+  | 'catagent'
+  | 'cursor';
 /** @deprecated clowder-ai#340: Use {@link ClientId} instead. */
 export type ClientValue = ClientId;
 export type SessionChainValue = 'true' | 'false';
@@ -114,6 +115,7 @@ export const CLIENT_OPTIONS: Array<{ value: ClientId; label: string }> = [
   { value: 'pi', label: 'Pi' },
   { value: 'antigravity', label: 'Antigravity' },
   { value: 'catagent', label: 'CatAgent' },
+  { value: 'cursor', label: 'Cursor' },
 ];
 
 export const SESSION_CHAIN_OPTIONS: Array<{ value: SessionChainValue; label: string }> = [

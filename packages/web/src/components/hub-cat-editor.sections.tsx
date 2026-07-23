@@ -844,9 +844,11 @@ export function AccountSection({
           </>
         ) : (
           <>
-            {form.clientId === 'kiro' ? (
+            {form.clientId === 'kiro' || form.clientId === 'cursor' ? (
               <div className="rounded-[10px] bg-[var(--console-field-bg)] px-3 py-2 text-[12px] leading-5 text-cafe-secondary">
-                认证由本机 Kiro CLI 管理；Clowder 不读取或保存 Kiro 凭证。
+                {form.clientId === 'kiro'
+                  ? '认证由本机 Kiro CLI 管理；Clowder 不读取或保存 Kiro 凭证。'
+                  : '认证由本机 cursor-agent（cursor-agent login）管理；Clowder 不读取或保存 Cursor 凭证。'}
               </div>
             ) : (
               <SelectField
@@ -878,13 +880,15 @@ export function AccountSection({
               value={form.defaultModel}
               onChange={(value) => onChange({ defaultModel: value })}
               suggestions={modelOptions}
-              required={form.clientId !== 'kiro'}
+              required={form.clientId !== 'kiro' && form.clientId !== 'cursor'}
               placeholder={
                 form.clientId === 'kiro'
                   ? '可留空，使用 Kiro CLI 当前默认模型'
-                  : form.clientId === 'opencode'
-                    ? '例如 xiaomi-mimo/mimo-v2.5-pro 或 anthropic/claude-opus-4-6'
-                    : '模型标识符，如 claude-sonnet-4-5'
+                  : form.clientId === 'cursor'
+                    ? '可留空使用 Auto，或如 gpt-5 / sonnet-4-thinking'
+                    : form.clientId === 'opencode'
+                      ? '例如 xiaomi-mimo/mimo-v2.5-pro 或 anthropic/claude-opus-4-6'
+                      : '模型标识符，如 claude-sonnet-4-5'
               }
             />
             {modelOptionsError ? (

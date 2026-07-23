@@ -290,6 +290,7 @@ function isAgentOutputGateRuntimeCat(catId: string): boolean {
     command === 'codex' ||
     command === 'gemini' ||
     command === 'kiro-cli' ||
+    command === 'cursor-agent' ||
     command === 'kimi' ||
     command === 'grok'
   ) {
@@ -302,6 +303,7 @@ function isAgentOutputGateRuntimeCat(catId: string): boolean {
     clientId === 'openai' ||
     clientId === 'google' ||
     clientId === 'kiro' ||
+    clientId === 'cursor' ||
     clientId === 'kimi' ||
     clientId === 'grok'
   ) {
