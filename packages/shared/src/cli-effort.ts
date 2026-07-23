@@ -3,6 +3,8 @@ import type { CatProvider } from './types/cat.js';
 export const CLI_EFFORT_VALUES = ['low', 'medium', 'high', 'max', 'xhigh'] as const;
 export type CliEffortValue = (typeof CLI_EFFORT_VALUES)[number];
 // Kiro CLI 的 `acp`/`chat` 子命令原生支持 `--effort low|medium|high|xhigh|max`（比 Claude 多 xhigh）。
+// kiro: `--effort` flag。cursor 不在此列：其 effort 编码在模型名后缀里（如 claude-opus-4-8-high），
+// 通过选择模型变体来选 effort，而非独立 flag。
 export type CliEffortProvider = 'anthropic' | 'openai' | 'kiro';
 export type CliEffortPatchValue = CliEffortValue | null;
 

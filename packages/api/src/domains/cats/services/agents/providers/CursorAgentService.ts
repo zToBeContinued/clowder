@@ -68,6 +68,7 @@ export class CursorAgentService implements AgentService {
       args.push('--resume', options.sessionId);
       metadata.sessionId = options.sessionId;
     }
+    // cursor 的 effort 编码在模型名后缀里（如 claude-opus-4-8-high），直接作为 --model 传入。
     if (this.model) {
       args.push('--model', this.model);
     }

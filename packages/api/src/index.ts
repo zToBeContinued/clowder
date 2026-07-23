@@ -1247,7 +1247,7 @@ async function main(): Promise<void> {
           const { CursorAgentService } = await import(
             './domains/cats/services/agents/providers/CursorAgentService.js'
           );
-          service = new CursorAgentService({ catId, cliCommand });
+          service = new CursorAgentService({ catId, cliCommand, model: config.defaultModel });
           break;
         }
         case 'dare':
