@@ -1,6 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
+import { isContextWindowOverflowError } from '../../invocation/invoke-helpers.js';
 import { AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool } from './AcpProcessPool.js';
 import { transformAcpEvent } from './acp-event-transformer.js';
@@ -215,6 +216,14 @@ function classifyKiroError(error: unknown, requestedSessionId?: string): { error
   const message = error instanceof Error ? error.message : String(error);
   if (error instanceof AcpTimeoutError) {
     return { errorCode: 'turn_budget_exceeded', message: `Kiro ACP 请求超时：${message}` };
+  }
+  // Kiro 服务端在请求进入模型前就以 400 拒收超长输入，重试不会好转，只能压上下文。
+  // 单独分类是为了让用户看到可操作提示，而不是笼统的“请求失败”。
+  if (isContextWindowOverflowError(message)) {
+    return {
+      errorCode: 'context_window_overflow',
+      message: `Kiro 上下文超出服务端上限，本轮被拒收：${message}。请降低该成员的 contextBudget、关闭 sessionChain，或新开 thread 重新分派。`,
+    };
   }
   if (/Stream idle|STREAM_IDLE_STALL/i.test(message)) {
     return { errorCode: 'stream_idle_stall', message: `Kiro ACP 回复流中断：${message}` };

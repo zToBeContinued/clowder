@@ -65,13 +65,25 @@ export function isMissingClaudeSessionError(message: string | undefined): boolea
   return classifyResumeFailure(message) === 'missing_session';
 }
 
+/**
+ * Context-window overflow markers across providers.
+ *
+ * - `ran out of room` / `context window` / `context_window`: Claude / Codex CLI wording.
+ * - `ContextWindowOverflow` (no separator): Kiro runtime error kind — matched via the
+ *   optional separator, since the CamelCase form has neither space nor underscore.
+ * - `CONTENT_LENGTH_EXCEEDS_THRESHOLD` / `Input content length exceeds threshold`:
+ *   Kiro runtime service ValidationException reason + message.
+ */
+const CONTEXT_WINDOW_OVERFLOW_PATTERN =
+  /ran out of room|context[\s_]?window|CONTENT_LENGTH_EXCEEDS_THRESHOLD|input content length exceeds threshold/i;
+
 export function isTransientCliExitCode1(message: string | undefined): boolean {
   if (!message) return false;
   if (!/CLI 异常退出 \(code:\s*1(?:,\s*signal:\s*none)?\)/i.test(message)) return false;
   // Context-window overflow is NOT recoverable by retrying — a second resume
   // writes the same user turn into the rollout JSONL again (see bug-report
   // 2026-04-19-codex-transient-retry-context-overflow).
-  if (/ran out of room|context window|context_window/i.test(message)) return false;
+  if (CONTEXT_WINDOW_OVERFLOW_PATTERN.test(message)) return false;
   return true;
 }
 
@@ -89,7 +101,7 @@ export function isPromptTokenLimitExceededError(message: string | undefined): bo
 
 export function isContextWindowOverflowError(message: string | undefined): boolean {
   if (!message) return false;
-  return /ran out of room|context window|context_window/i.test(message);
+  return CONTEXT_WINDOW_OVERFLOW_PATTERN.test(message);
 }
 
 export function isCliTimeoutError(message: string | undefined): boolean {
