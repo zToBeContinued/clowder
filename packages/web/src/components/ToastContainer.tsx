@@ -19,6 +19,13 @@ function ToastCard({ toast }: { toast: ToastItem }) {
     return () => clearTimeout(timer);
   }, [toast.duration, dismiss]);
 
+  const action = toast.action;
+  const runAction = useCallback(() => {
+    // Dismiss first so a slow handler cannot leave a stale "undo" on screen.
+    dismiss();
+    void action?.onClick();
+  }, [action, dismiss]);
+
   const borderColor =
     toast.type === 'error'
       ? 'border-l-red-400'
@@ -49,6 +56,15 @@ function ToastCard({ toast }: { toast: ToastItem }) {
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-cafe truncate">{toast.title}</p>
           <p className="text-xs text-cafe-secondary mt-0.5 line-clamp-2">{toast.message}</p>
+          {toast.action && (
+            <button
+              type="button"
+              onClick={runAction}
+              className="mt-1.5 text-xs font-medium text-cafe-accent hover:text-cafe-accent/80 transition-colors"
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
         <button
           onClick={dismiss}

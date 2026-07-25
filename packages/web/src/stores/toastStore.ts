@@ -2,6 +2,17 @@
 
 import { create } from 'zustand';
 
+/**
+ * Optional inline action, e.g. undoing a soft delete.
+ *
+ * Reversible destructive actions should offer the reversal where the user already is,
+ * instead of relying on them finding the trash bin at the bottom of the sidebar.
+ */
+export interface ToastAction {
+  label: string;
+  onClick: () => void | Promise<void>;
+}
+
 export interface ToastItem {
   id: string;
   type: 'success' | 'error' | 'info';
@@ -13,6 +24,7 @@ export interface ToastItem {
   createdAt: number;
   /** Set true when exit animation starts */
   exiting?: boolean;
+  action?: ToastAction;
 }
 
 interface ToastState {

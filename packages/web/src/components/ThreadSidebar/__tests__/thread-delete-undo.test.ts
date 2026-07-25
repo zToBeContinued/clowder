@@ -1,11 +1,15 @@
 /**
- * I-1: Thread deletion must show a confirmation dialog before proceeding.
- * Verifies that clicking delete shows a dialog, cancel dismisses it,
- * and confirm actually triggers the DELETE API call.
+ * Sidebar thread deletion.
+ *
+ * Replaces the earlier "confirm dialog" contract. Deleting a thread is a soft delete
+ * (server keeps it with `deletedAt`, the trash bin lists it), so the flow trades the
+ * blocking confirmation for an undo affordance on the resulting toast. These tests pin
+ * that contract: one click deletes, the toast offers undo, and undo restores.
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useToastStore } from '@/stores/toastStore';
 import { ThreadSidebar } from '../ThreadSidebar';
 
 // ── Mocks ─────────────────────────────────────────────────────
@@ -54,10 +58,16 @@ const mockStore: Record<string, unknown> = {
   initThreadUnread: vi.fn(),
   fetchGlobalBubbleDefaults: vi.fn(),
 };
+
 vi.mock('@/stores/chatStore', () => {
+  const setState = (updater: unknown) => {
+    const next = typeof updater === 'function' ? (updater as (s: unknown) => unknown)(mockStore) : updater;
+    const patch = next as { threads?: typeof storeThreads };
+    if (patch?.threads) storeThreads = patch.threads;
+  };
   const hook = Object.assign(
     (selector?: (s: typeof mockStore) => unknown) => (selector ? selector(mockStore) : mockStore),
-    { getState: () => mockStore },
+    { getState: () => mockStore, setState },
   );
   return { useChatStore: hook };
 });
@@ -67,10 +77,17 @@ vi.mock('@/hooks/useCatData', () => ({
 }));
 
 function jsonOk(data: unknown) {
-  return Promise.resolve({ ok: true, status: 204, json: () => Promise.resolve(data) });
+  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(data) });
 }
 
-describe('Thread delete confirmation (I-1)', () => {
+function deleteCallsFor(threadId: string) {
+  return mockApiFetch.mock.calls.filter(
+    (call: unknown[]) =>
+      call[0] === `/api/threads/${threadId}` && (call[1] as { method?: string } | undefined)?.method === 'DELETE',
+  );
+}
+
+describe('Sidebar thread delete + undo', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -86,11 +103,12 @@ describe('Thread delete confirmation (I-1)', () => {
     root = createRoot(container);
     mockApiFetch.mockReset();
     mockPush.mockReset();
+    useToastStore.setState({ toasts: [] });
     mockApiFetch.mockImplementation((path: string) => {
       if (path === '/api/threads') return jsonOk({ threads: [TEST_THREAD] });
+      if (path.endsWith('/restore')) return jsonOk(TEST_THREAD);
       return jsonOk({});
     });
-    // Provide localStorage stub for collapse-state persistence
     const store: Record<string, string> = {};
     Object.defineProperty(window, 'localStorage', {
       value: {
@@ -123,8 +141,8 @@ describe('Thread delete confirmation (I-1)', () => {
     });
   }
 
-  function findDeleteButton(): HTMLButtonElement | undefined {
-    return Array.from(container.querySelectorAll('button')).find((b) => b.getAttribute('title') === '删除对话');
+  function findDeleteControl(threadId: string): HTMLElement | null {
+    return container.querySelector(`[data-testid="thread-delete-${threadId}"]`);
   }
 
   /** F095 defaults all sections collapsed. Click expand-all first. */
@@ -136,82 +154,83 @@ describe('Thread delete confirmation (I-1)', () => {
       });
   }
 
-  it('shows confirmation dialog when clicking delete', async () => {
+  async function renderSidebar() {
     act(() => {
       root.render(React.createElement(ThreadSidebar));
     });
     await flush();
     expandAll();
+  }
 
-    const deleteBtn = findDeleteButton();
-    expect(deleteBtn, 'delete button should exist for non-default thread').toBeTruthy();
-
-    act(() => {
-      deleteBtn?.click();
-    });
-
-    // Dialog should appear with thread title and warning
-    expect(container.textContent).toContain('确认删除对话');
-    expect(container.textContent).toContain('和砚砚讨论家规');
-    expect(container.textContent).toContain('回收站');
-
-    // No DELETE API call yet
-    const deleteCalls = mockApiFetch.mock.calls.filter(
-      (call: unknown[]) => (call[1] as { method?: string } | undefined)?.method === 'DELETE',
-    );
-    expect(deleteCalls).toHaveLength(0);
+  it('exposes a delete affordance for a non-default thread', async () => {
+    await renderSidebar();
+    const control = findDeleteControl(TEST_THREAD.id);
+    expect(control, 'delete affordance should exist for non-default thread').toBeTruthy();
+    // Nested <button> would be invalid HTML — the row itself is already a button.
+    expect(control?.tagName).toBe('SPAN');
+    expect(control?.getAttribute('role')).toBe('button');
   });
 
-  it('dismisses dialog when clicking cancel', async () => {
-    act(() => {
-      root.render(React.createElement(ThreadSidebar));
-    });
-    await flush();
-    expandAll();
-
-    const deleteBtn = findDeleteButton();
-    act(() => {
-      deleteBtn?.click();
-    });
-    expect(container.textContent).toContain('确认删除对话');
-
-    // Click cancel
-    const cancelBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '取消')!;
-    act(() => {
-      cancelBtn.click();
-    });
-
-    // Dialog should be gone
-    expect(container.textContent).not.toContain('确认删除对话');
+  it('never renders a delete affordance for the default thread', async () => {
+    await renderSidebar();
+    expect(findDeleteControl('default')).toBeNull();
   });
 
-  it('calls DELETE API only after clicking confirm', async () => {
-    act(() => {
-      root.render(React.createElement(ThreadSidebar));
-    });
-    await flush();
-    expandAll();
-
-    const deleteBtn = findDeleteButton();
-    act(() => {
-      deleteBtn?.click();
-    });
-
-    // Click confirm
-    const confirmBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent === '移入回收站')!;
-    expect(confirmBtn).toBeTruthy();
+  it('soft-deletes in one click, without a blocking confirmation', async () => {
+    await renderSidebar();
+    const control = findDeleteControl(TEST_THREAD.id);
 
     await act(async () => {
-      confirmBtn.click();
+      control?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     await flush();
 
-    // Now DELETE should have been called
-    const deleteCalls = mockApiFetch.mock.calls.filter(
-      (call: unknown[]) =>
-        call[0] === `/api/threads/${TEST_THREAD.id}` &&
-        (call[1] as { method?: string } | undefined)?.method === 'DELETE',
+    const calls = deleteCallsFor(TEST_THREAD.id);
+    expect(calls).toHaveLength(1);
+    expect((calls[0]?.[1] as { headers?: Record<string, string> }).headers).toMatchObject({
+      'X-Clowder-Dangerous-Action-Confirmed': 'thread.soft_delete',
+    });
+  });
+
+  it('offers undo on the resulting toast and restores the thread', async () => {
+    await renderSidebar();
+    const control = findDeleteControl(TEST_THREAD.id);
+
+    await act(async () => {
+      control?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    const toast = useToastStore.getState().toasts.at(-1);
+    expect(toast?.title).toContain(TEST_THREAD.title);
+    expect(toast?.message).toContain('回收站');
+    expect(toast?.action?.label).toBe('撤销');
+
+    await act(async () => {
+      await toast?.action?.onClick();
+    });
+    await flush();
+
+    const restoreCalls = mockApiFetch.mock.calls.filter(
+      (call: unknown[]) => call[0] === `/api/threads/${TEST_THREAD.id}/restore`,
     );
-    expect(deleteCalls).toHaveLength(1);
+    expect(restoreCalls).toHaveLength(1);
+  });
+
+  it('surfaces an error toast when the delete request fails', async () => {
+    mockApiFetch.mockImplementation((path: string) => {
+      if (path === '/api/threads') return jsonOk({ threads: [TEST_THREAD] });
+      return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ error: '服务端拒绝删除' }) });
+    });
+    await renderSidebar();
+
+    await act(async () => {
+      findDeleteControl(TEST_THREAD.id)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await flush();
+
+    const toast = useToastStore.getState().toasts.at(-1);
+    expect(toast?.type).toBe('error');
+    expect(toast?.message).toBe('服务端拒绝删除');
   });
 });

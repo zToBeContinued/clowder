@@ -41,6 +41,7 @@ import {
 } from '@/utils/saved-messages';
 import { computeScrollRecomputeSignal } from '@/utils/scrollRecomputeSignal';
 import { scrollToMessage } from '@/utils/scrollToMessage';
+import { softDeleteThreadWithUndo } from '@/utils/thread-delete';
 import { getUserId } from '@/utils/userId';
 import { AgentHookHealthNotice, shouldRenderAgentHookHealthNotice } from './AgentHookHealthNotice';
 import { AgentStatusIndicator } from './AgentStatusIndicator';
@@ -1056,27 +1057,19 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
     setIsDeletingChannel(true);
     setChannelSettingsError(null);
     try {
-      const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`, {
-        method: 'DELETE',
-        headers: { 'X-Clowder-Dangerous-Action-Confirmed': 'thread.soft_delete' },
+      const error = await softDeleteThreadWithUndo(threadId, {
+        title: currentThread?.title ?? null,
+        onDeleted: () => {
+          setChannelSettingsOpen(false);
+          navigateToThread('default');
+        },
+        onRestored: (restoredThreadId) => navigateToThread(restoredThreadId),
       });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setChannelSettingsError((body?.error as string) ?? '删除失败，请稍后重试');
-        return;
-      }
-      useChatStore.setState((state) => ({
-        threads: state.threads.filter((thread) => thread.id !== threadId),
-      }));
-      setChannelSettingsOpen(false);
-      addToast({ type: 'success', title: '频道已删除', message: '已移入回收站', duration: 2400 });
-      navigateToThread('default');
-    } catch {
-      setChannelSettingsError('网络请求未完成，请稍后重试');
+      if (error) setChannelSettingsError(error);
     } finally {
       setIsDeletingChannel(false);
     }
-  }, [addToast, isDeletingChannel, isSavingChannel, navigateToThread, threadId]);
+  }, [currentThread?.title, isDeletingChannel, isSavingChannel, navigateToThread, threadId]);
 
   const renderSingleMessage = useCallback(
     (msg: ChatMessageData, index: number) => {

@@ -7,6 +7,7 @@ import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
+import { softDeleteThreadWithUndo } from '@/utils/thread-delete';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import {
   isSavedMessagesViewOpen,
@@ -390,6 +391,27 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     [currentThreadId, navigateToThread, onClose],
   );
 
+  const handleDeleteThread = useCallback(
+    async (threadId: string, title: string | null) => {
+      const error = await softDeleteThreadWithUndo(threadId, {
+        title,
+        onDeleted: () => {
+          // Only leave the current view when the thread being removed is the open one.
+          if (threadId === currentThreadId) navigateToThread('default');
+          if (showTrash) void loadTrash();
+        },
+        onRestored: (restoredThreadId) => {
+          navigateToThread(restoredThreadId);
+          if (showTrash) void loadTrash();
+        },
+      });
+      if (error) {
+        useToastStore.getState().addToast({ type: 'error', title: '删除失败', message: error, duration: 4000 });
+      }
+    },
+    [currentThreadId, loadTrash, navigateToThread, showTrash],
+  );
+
   const handleMessageSearchResultSelect = useCallback(
     (message: MessageSearchResult) => {
       setSavedMessagesViewOpen(false);
@@ -708,6 +730,32 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         ) : (
           <span className="[font-size:var(--clowder-type-meta)] text-[var(--clowder-sidebar-row-muted)] opacity-0 transition-opacity group-hover:opacity-100">
             {formatRelativeTime(thread.lastActiveAt, true)}
+          </span>
+        )}
+        {thread.id !== 'default' && (
+          // The row itself is a <button>, so this affordance must not be one — a nested
+          // button is invalid HTML. Mirrors SectionGroup's ActionButton pattern.
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="删除对话"
+            title="删除对话"
+            data-testid={`thread-delete-${thread.id}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void handleDeleteThread(thread.id, thread.title ?? null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              event.stopPropagation();
+              void handleDeleteThread(thread.id, thread.title ?? null);
+            }}
+            className="ml-0.5 flex-shrink-0 cursor-pointer text-[var(--clowder-sidebar-row-muted)] opacity-0 transition-all hover:text-conn-red-text group-hover:opacity-100 focus-visible:opacity-100"
+          >
+            <svg aria-hidden="true" className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M6.5 1.75a.75.75 0 00-.75.75V3h4.5v-.5a.75.75 0 00-.75-.75h-3zM3.5 4.5h9l-.62 8.13A1.75 1.75 0 019.14 14.5H6.86a1.75 1.75 0 01-1.74-1.87L4.5 4.5h-1zM2 3.5h12a.5.5 0 010 1H2a.5.5 0 010-1z" />
+            </svg>
           </span>
         )}
       </button>

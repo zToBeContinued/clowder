@@ -64,4 +64,23 @@ describe('toastStore', () => {
     });
     expect(useToastStore.getState().toasts[0].threadId).toBe('thread-123');
   });
+
+  it('carries an inline action so reversible deletes can offer undo', () => {
+    const onClick = () => {};
+    useToastStore.getState().addToast({
+      type: 'success',
+      title: '频道已删除',
+      message: '已移入回收站',
+      duration: 8000,
+      action: { label: '撤销', onClick },
+    });
+    const toast = useToastStore.getState().toasts[0];
+    expect(toast.action?.label).toBe('撤销');
+    expect(toast.action?.onClick).toBe(onClick);
+  });
+
+  it('leaves action undefined when not provided', () => {
+    useToastStore.getState().addToast({ type: 'info', title: 'Plain', message: 'no action', duration: 1000 });
+    expect(useToastStore.getState().toasts[0].action).toBeUndefined();
+  });
 });
