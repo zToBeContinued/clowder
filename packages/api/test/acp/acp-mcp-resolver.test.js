@@ -5,8 +5,21 @@
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, describe, it } from 'node:test';
+
+/** Builtin entrypoints come from node:path.resolve, so the separator is platform-specific. */
+function assertEntrypoint(actual, posixSuffix, message) {
+  assert.ok(
+    actual.endsWith(posixSuffix.split('/').join(sep)),
+    message ?? `expected ${actual} to end with ${posixSuffix}`,
+  );
+}
+
+/** Last path segment, independent of the platform separator. */
+function basenameOf(pathValue) {
+  return pathValue.split(/[\\/]/).pop();
+}
 
 const { resolveAcpMcpServers, resolveUserProjectMcpServers } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/acp-mcp-resolver.js'
@@ -113,7 +126,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'cat-cafe');
     assert.equal(result[0].command, 'node');
-    assert.ok(result[0].args[0].endsWith('packages/mcp-server/dist/index.js'));
+    assertEntrypoint(result[0].args[0], 'packages/mcp-server/dist/index.js');
   });
 
   it('auto-generates cat-cafe-collab from projectRoot', () => {
@@ -123,7 +136,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 1);
     assert.equal(result[0].name, 'cat-cafe-collab');
     assert.equal(result[0].command, 'node');
-    assert.ok(result[0].args[0].endsWith('packages/mcp-server/dist/collab.js'));
+    assertEntrypoint(result[0].args[0], 'packages/mcp-server/dist/collab.js');
   });
 
   it('auto-generates all four builtin cat-cafe servers', () => {
@@ -134,7 +147,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     const names = result.map((s) => s.name);
     assert.deepStrictEqual(names, ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
 
-    const entrypoints = result.map((s) => s.args[0].split('/').pop());
+    const entrypoints = result.map((s) => basenameOf(s.args[0]));
     assert.deepStrictEqual(entrypoints, ['index.js', 'collab.js', 'memory.js', 'signals.js']);
   });
 
@@ -149,7 +162,7 @@ describe('resolveAcpMcpServers — builtin auto-provision (F145 Phase C)', () =>
     assert.equal(result.length, 2);
 
     const collab = result.find((s) => s.name === 'cat-cafe-collab');
-    assert.ok(collab.args[0].endsWith('packages/mcp-server/dist/collab.js'), 'builtin auto-generated');
+    assertEntrypoint(collab.args[0], 'packages/mcp-server/dist/collab.js', 'builtin auto-generated');
 
     const pencil = result.find((s) => s.name === 'pencil');
     assert.deepStrictEqual(pencil.args, ['/path/to/pencil'], 'external from .mcp.json');
@@ -241,7 +254,7 @@ describe('resolveAcpMcpServers — per-project MCP (F145 Phase E)', () => {
     const result = resolveAcpMcpServers(projectRoot, ['cat-cafe'], userRoot);
     const catCafe = result.find((s) => s.name === 'cat-cafe');
     assert.equal(catCafe.command, 'node'); // builtin, not python
-    assert.ok(catCafe.args[0].endsWith('packages/mcp-server/dist/index.js'));
+    assertEntrypoint(catCafe.args[0], 'packages/mcp-server/dist/index.js');
     assert.ok(
       result.find((s) => s.name === 'my-tool'),
       'non-conflicting user server still included',
