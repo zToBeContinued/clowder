@@ -7,7 +7,7 @@ import { TaskThreadActionsContext } from '@/contexts/TaskThreadActionsContext';
 import { useAgentHookHealth } from '@/hooks/useAgentHookHealth';
 import { useAgentMessages } from '@/hooks/useAgentMessages';
 import { useAuthorization } from '@/hooks/useAuthorization';
-import { useCatData } from '@/hooks/useCatData';
+import { type CatData, useCatData } from '@/hooks/useCatData';
 import { useChatHistory } from '@/hooks/useChatHistory';
 import { useChatSocketCallbacks } from '@/hooks/useChatSocketCallbacks';
 import { primeCoCreatorConfigCache, useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
@@ -199,6 +199,21 @@ function ChannelTabs({ activeTab, onTabChange }: { activeTab: ChannelTab; onTabC
       </div>
     </div>
   );
+}
+
+/**
+ * Empty-thread hint, derived from the roster that actually exists.
+ *
+ * The previous copy hardcoded "@布偶", which only made sense when the three
+ * built-in breeds were the whole roster — with a custom roster it names a member
+ * that cannot be summoned.
+ */
+function emptyThreadMentionHint(cats: CatData[]): string {
+  const first = cats[0];
+  if (!first) return '还没有可用成员，先开始新手教程创建第一只猫猫';
+  const handle = first.mentionPatterns?.[0] ?? `@${first.id}`;
+  const label = first.nickname?.trim() || first.displayName || first.name || first.id;
+  return `输入 ${handle} 召唤${label}开始聊天`;
 }
 
 export function ChatContainer({ threadId }: ChatContainerProps) {
@@ -1413,9 +1428,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                     <PawIcon className="w-12 h-12 text-cocreator-light mx-auto mb-4" />
                     <p className="text-lg text-cafe-secondary mb-1">欢迎来到 Clowder AI!</p>
                     <p className="text-sm text-cafe-muted">
-                      {cats.length > 0
-                        ? '输入 @布偶 召唤布偶猫开始聊天'
-                        : '还没有可用成员，先开始新手教程创建第一只猫猫'}
+                      {cats.length > 0 ? emptyThreadMentionHint(cats) : '还没有可用成员，先开始新手教程创建第一只猫猫'}
                     </p>
                     {showSetupCard && govStatus && (
                       <div className="mt-6 text-left">
