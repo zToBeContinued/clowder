@@ -323,7 +323,62 @@ it('parses only allowlisted Kiro chat model settings and ignores unrelated model
   assert.deepEqual(models, ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.6-mini']);
 });
 
-it('detects Kiro via kiro-cli and derives its default model from the safe settings command', async () => {
+describe('parseKiroAvailableModels', () => {
+  it('extracts the catalog from the --model validation error on stderr', async () => {
+    const { parseKiroAvailableModels } = await import('../dist/utils/local-cli-model-probes.js');
+    const models = parseKiroAvailableModels(
+      "error: Model 'clowder-model-probe-invalid' does not exist. Available models: auto, claude-opus-5, gpt-5.6-sol",
+    );
+    assert.deepEqual(models, ['auto', 'claude-opus-5', 'gpt-5.6-sol']);
+  });
+
+  it('drops a trailing period and ignores unrelated lines', async () => {
+    const { parseKiroAvailableModels } = await import('../dist/utils/local-cli-model-probes.js');
+    assert.deepEqual(parseKiroAvailableModels('Available models: a-1, b-2.\nTip: ignore this'), ['a-1', 'b-2']);
+  });
+
+  it('returns an empty list when no marker is present', async () => {
+    const { parseKiroAvailableModels } = await import('../dist/utils/local-cli-model-probes.js');
+    assert.deepEqual(parseKiroAvailableModels('unrelated failure output'), []);
+    assert.deepEqual(parseKiroAvailableModels(''), []);
+  });
+});
+
+it('parses Kiro chat settings from the flat dotted-key shape', async () => {
+  const { parseKiroSettingsModels } = await import('../dist/utils/local-cli-model-probes.js');
+  const models = parseKiroSettingsModels(
+    JSON.stringify({
+      'app.disableAutoupdates': false,
+      'chat.defaultModel': 'gpt-5.6-sol',
+      'chat.modelDefaults': { 'claude-opus-4.8': { output_config: { effort: 'max' } } },
+    }),
+  );
+
+  assert.deepEqual(models, ['gpt-5.6-sol', 'claude-opus-4.8']);
+});
+
+it('parses only allowlisted Kiro chat model settings and ignores unrelated model-shaped fields', async () => {
+  const { parseKiroSettingsModels } = await import('../dist/utils/local-cli-model-probes.js');
+  const models = parseKiroSettingsModels(
+    JSON.stringify({
+      model: 'root-secret-model',
+      auth: { model: 'credential-model', token: 'sk_agent_secret1234567890' },
+      chat: {
+        defaultModel: 'gpt-5.6-sol',
+        unrelated: { model: 'nested-unrelated-model' },
+        modelDefaults: {
+          'gpt-5.6-terra': { temperature: 0.2 },
+          fast: { modelId: 'gpt-5.6-luna', apiKey: 'do-not-read' },
+          unsafe: { model: 'gpt-5.6-mini', credentialModel: 'must-not-read' },
+        },
+      },
+    }),
+  );
+
+  assert.deepEqual(models, ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.6-mini']);
+});
+
+it('derives the Kiro catalog from the sentinel --model error and its default from settings', async () => {
   const executed = [];
   const results = await probeWithIsolatedHome({
     resolveCommand(command) {
@@ -331,12 +386,23 @@ it('detects Kiro via kiro-cli and derives its default model from the safe settin
     },
     async runCommand(file, args) {
       executed.push({ file, args: [...args] });
-      if (args[0] === '--version') return { stdout: 'kiro-cli-chat 2.12.2', stderr: '' };
-      assert.deepEqual(args, ['settings', 'list', '--format', 'json']);
-      return {
-        stdout: JSON.stringify({ chat: { defaultModel: 'gpt-5.6-sol', modelDefaults: {} } }),
-        stderr: '',
-      };
+      if (args[0] === '--version') return { stdout: 'kiro-cli-chat 2.14.2', stderr: '' };
+      if (args[0] === 'settings') {
+        return {
+          stdout: JSON.stringify({ 'chat.defaultModel': 'gpt-5.6-sol', 'chat.modelDefaults': {} }),
+          stderr: '',
+        };
+      }
+      // The sentinel model fails argument validation before any request: non-zero
+      // exit with the catalog on stderr, mirroring promisify(execFile) rejection.
+      assert.equal(args[0], 'chat');
+      assert.equal(args[2], 'clowder-model-probe-invalid');
+      const error = new Error('Command failed');
+      error.code = 1;
+      error.stdout = '';
+      error.stderr =
+        "error: Model 'clowder-model-probe-invalid' does not exist. Available models: auto, claude-opus-5, gpt-5.6-sol";
+      throw error;
     },
   });
 
@@ -344,13 +410,45 @@ it('detects Kiro via kiro-cli and derives its default model from the safe settin
   assert.equal(kiro?.installed, true);
   assert.equal(kiro?.command, 'kiro-cli');
   assert.equal(kiro?.clientId, 'kiro');
+  assert.equal(kiro?.modelsStatus, 'ok');
   assert.equal(kiro?.defaultModel, 'gpt-5.6-sol');
-  assert.deepEqual(kiro?.models, [{ id: 'gpt-5.6-sol', source: 'cli', isDefault: true }]);
+  assert.deepEqual(kiro?.models, [
+    { id: 'auto', source: 'cli' },
+    { id: 'claude-opus-5', source: 'cli' },
+    { id: 'gpt-5.6-sol', source: 'cli', isDefault: true },
+  ]);
   assert.deepEqual(executed, [
     { file: 'C:/Users/test/AppData/Local/Kiro-Cli/kiro-cli.exe', args: ['--version'] },
+    { file: 'C:/Users/test/AppData/Local/Kiro-Cli/kiro-cli.exe', args: ['settings', 'list', '--format', 'json'] },
     {
       file: 'C:/Users/test/AppData/Local/Kiro-Cli/kiro-cli.exe',
-      args: ['settings', 'list', '--format', 'json'],
+      args: ['chat', '--model', 'clowder-model-probe-invalid', '--no-interactive', '.'],
     },
   ]);
+});
+
+it('falls back to the static Kiro catalog when the sentinel error is unparseable', async () => {
+  const results = await probeWithIsolatedHome({
+    resolveCommand(command) {
+      return command === 'kiro-cli' ? '/opt/bin/kiro-cli' : null;
+    },
+    async runCommand(_file, args) {
+      if (args[0] === '--version') return { stdout: 'kiro-cli-chat 2.14.2', stderr: '' };
+      if (args[0] === 'settings') return { stdout: '{}', stderr: '' };
+      const error = new Error('Command failed');
+      error.code = 1;
+      error.stdout = '';
+      error.stderr = 'error: something changed and there is no catalog here';
+      throw error;
+    },
+  });
+
+  const { KIRO_MODEL_CATALOG } = await import('../dist/utils/local-cli-model-probes.js');
+  const kiro = results.find((item) => item.id === 'kiro');
+  assert.equal(kiro?.modelsStatus, 'static_only');
+  assert.deepEqual(
+    kiro?.models.map((model) => model.id),
+    [...KIRO_MODEL_CATALOG],
+  );
+  assert.equal(kiro?.models[0]?.source, 'static');
 });

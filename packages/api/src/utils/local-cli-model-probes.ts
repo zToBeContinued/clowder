@@ -12,8 +12,22 @@ export interface LocalCliModelCandidate {
   readonly isDefault?: boolean;
 }
 
+export interface LocalCliModelCommandProbe {
+  readonly args: readonly string[];
+  readonly parse: (output: string) => string[];
+  /** 解析哪条输出流，默认 stdout。部分 CLI 把模型目录写在 stderr 的参数校验报错里。 */
+  readonly stream?: 'stdout' | 'stderr' | 'merged';
+  /** 允许非零退出码：命令以失败告终，但输出仍包含可解析的模型目录。 */
+  readonly allowNonZeroExit?: boolean;
+}
+
 export interface LocalCliModelsProbeDefinition {
-  readonly command?: { readonly args: readonly string[]; readonly parse: (stdout: string) => string[] };
+  readonly command?: LocalCliModelCommandProbe;
+  /**
+   * 只用于探测本机默认模型的附加命令；返回列表的第一项被当作默认模型。
+   * 适用于 CLI 把「可用目录」和「当前默认」放在两个不同命令里的情况。
+   */
+  readonly defaultModelCommand?: LocalCliModelCommandProbe;
   readonly configFile?: { readonly path: string; readonly extract: (content: string) => string[] };
   readonly static?: readonly string[];
   /** The command parser deliberately returns the active default model first. */
@@ -115,30 +129,91 @@ export function extractJsonModelFields(content: string): string[] {
 }
 
 /**
+ * 用于向 Kiro CLI 索取模型目录的哨兵模型名：一定不存在，因此 CLI 在参数校验阶段
+ * 就会失败并把完整目录写进 stderr，不会发起任何对话请求。
+ */
+export const KIRO_MODEL_PROBE_SENTINEL = 'clowder-model-probe-invalid';
+
+/**
+ * `kiro-cli chat --model <哨兵>` 的兜底目录快照。L1 命令探测成功时会被真实目录覆盖，
+ * 命令不可用（未安装 / CLI 改了报错格式）时才用这份。
+ * settings 只记录被用户显式改过的模型，因此不能当作目录使用。
+ */
+export const KIRO_MODEL_CATALOG = [
+  'auto',
+  'claude-opus-5',
+  'claude-sonnet-5',
+  'claude-opus-4.8',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
+  'claude-opus-4.7',
+  'claude-opus-4.6',
+  'claude-sonnet-4.6',
+  'claude-opus-4.5',
+  'claude-sonnet-4.5',
+  'claude-sonnet-4',
+  'claude-haiku-4.5',
+  'deepseek-3.2',
+  'minimax-m2.5',
+  'minimax-m2.1',
+  'glm-5',
+  'qwen3-coder-next',
+] as const;
+
+/**
+ * 从 `kiro-cli chat --model <哨兵>` 的报错里提取 "Available models: a, b, c"。
+ * 只取该标记之后的同一行，去掉所有空白后按逗号切分（模型 ID 不含空白）。
+ */
+export function parseKiroAvailableModels(output: string): string[] {
+  const match = stripAnsi(output).match(/available models:(.*)/i);
+  if (!match?.[1]) return [];
+  return uniqueModelIds(match[1].replace(/\s+/g, '').replace(/\.$/, '').split(','));
+}
+
+/**
  * Parse the safe `kiro-cli settings list --format json` response.
  * Deliberately ignores every root except `chat`, and inside `chat` only reads
  * `defaultModel` plus explicit IDs under `modelDefaults`.
+ *
+ * 结果只用于确定本机默认模型（首项为 `chat.defaultModel`），不代表可用目录。
  */
 export function parseKiroSettingsModels(content: string): string[] {
   const parsed = parseJsonObject(content);
-  if (!parsed || !parsed.chat || typeof parsed.chat !== 'object' || Array.isArray(parsed.chat)) return [];
+  const chat = parsed ? kiroChatSettings(parsed) : null;
+  if (!chat) return [];
 
-  const chat = parsed.chat as Record<string, unknown>;
   const models: string[] = typeof chat.defaultModel === 'string' ? [chat.defaultModel] : [];
   const defaults = chat.modelDefaults;
-  if (!defaults || typeof defaults !== 'object' || Array.isArray(defaults)) return uniqueModelIds(models);
-
-  for (const [key, value] of Object.entries(defaults as Record<string, unknown>)) {
-    if (looksLikeModelId(key) && value && typeof value === 'object' && !Array.isArray(value)) {
-      models.push(key);
-    }
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
-    const entry = value as Record<string, unknown>;
-    for (const field of ['modelId', 'model', 'id'] as const) {
-      if (typeof entry[field] === 'string') models.push(entry[field]);
+  if (defaults && typeof defaults === 'object' && !Array.isArray(defaults)) {
+    for (const [key, value] of Object.entries(defaults as Record<string, unknown>)) {
+      if (looksLikeModelId(key) && value && typeof value === 'object' && !Array.isArray(value)) {
+        models.push(key);
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const entry = value as Record<string, unknown>;
+      for (const field of ['modelId', 'model', 'id'] as const) {
+        if (typeof entry[field] === 'string') models.push(entry[field]);
+      }
     }
   }
   return uniqueModelIds(models);
+}
+
+/**
+ * 取出 settings 里的 chat 段。kiro-cli 2.14 输出的是扁平点号键
+ * （`{"chat.defaultModel": "...", "chat.modelDefaults": {...}}`），
+ * 这里同时兼容扁平与嵌套两种形状，且只读取 chat 前缀，其余根键一律忽略。
+ */
+function kiroChatSettings(parsed: Record<string, unknown>): Record<string, unknown> | null {
+  if (parsed.chat && typeof parsed.chat === 'object' && !Array.isArray(parsed.chat)) {
+    return parsed.chat as Record<string, unknown>;
+  }
+  const flattened: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (key.startsWith('chat.')) flattened[key.slice('chat.'.length)] = value;
+  }
+  return Object.keys(flattened).length > 0 ? flattened : null;
 }
 
 function looksLikeModelId(value: string): boolean {
@@ -221,11 +296,18 @@ export const LOCAL_CLI_MODELS_PROBES = {
       'gemini-2.5-flash',
     ],
   },
-  // Kiro CLI exposes a read-only JSON settings command. The strict parser reads only model fields.
+  // Kiro CLI 没有 models 命令，但 --model 的参数校验发生在任何网络请求之前：
+  // 传哨兵模型名即可让它在 stderr 里列出完整目录并以退出码 1 结束。
+  // 默认模型另由只读的 settings 命令提供。
   kiro: {
-    command: { args: ['settings', 'list', '--format', 'json'], parse: parseKiroSettingsModels },
-    firstResultIsDefault: true,
-    static: [],
+    command: {
+      args: ['chat', '--model', KIRO_MODEL_PROBE_SENTINEL, '--no-interactive', '.'],
+      parse: parseKiroAvailableModels,
+      stream: 'stderr',
+      allowNonZeroExit: true,
+    },
+    defaultModelCommand: { args: ['settings', 'list', '--format', 'json'], parse: parseKiroSettingsModels },
+    static: KIRO_MODEL_CATALOG,
   },
   // OpenCode 1.15.13: models --pure is non-interactive and prints one provider/model id per line.
   opencode: {
@@ -279,20 +361,67 @@ function candidates(
   }));
 }
 
+interface CommandOutput {
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+/**
+ * 非零退出码时 promisify(execFile) 会 reject，但把已收集的输出挂在 error 上。
+ * 只有声明了 allowNonZeroExit 的探测才会读取这里。
+ */
+function commandOutputFromError(error: unknown): CommandOutput | null {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { stdout?: unknown; stderr?: unknown };
+  const stdout = typeof candidate.stdout === 'string' ? candidate.stdout : '';
+  const stderr = typeof candidate.stderr === 'string' ? candidate.stderr : '';
+  if (!stdout && !stderr) return null;
+  return { stdout, stderr };
+}
+
+function selectStream(output: CommandOutput, stream: LocalCliModelCommandProbe['stream']): string {
+  if (stream === 'stderr') return output.stderr;
+  if (stream === 'merged') return `${output.stdout}\n${output.stderr}`;
+  return output.stdout;
+}
+
+async function runModelCommand(options: ModelChainOptions, command: LocalCliModelCommandProbe): Promise<string[]> {
+  if (!options.installed || !options.resolvedPath) return [];
+  let output: CommandOutput | null = null;
+  try {
+    output = await options.runCommand(options.resolvedPath, command.args);
+  } catch (error) {
+    // A timeout, buffer cap, or auth failure normally ends the chain here.
+    if (!command.allowNonZeroExit) return [];
+    output = commandOutputFromError(error);
+  }
+  if (!output) return [];
+  try {
+    return command.parse(redactProbeOutput(selectStream(output, command.stream)));
+  } catch {
+    return [];
+  }
+}
+
 export async function probeLocalCliModels(
   options: ModelChainOptions,
 ): Promise<{ models: LocalCliModelCandidate[]; modelsStatus: LocalCliModelsStatus }> {
   const probe = options.modelsProbe;
   if (!probe) return { models: [], modelsStatus: 'unsupported' };
 
-  const commandModels = await probeCommandModels(options, probe);
+  const detectedDefault = probe.defaultModelCommand
+    ? (await runModelCommand(options, probe.defaultModelCommand))[0]
+    : undefined;
+  const defaultModel = options.defaultModel ?? detectedDefault;
+
+  const commandModels = await probeCommandModels(options, probe, defaultModel);
   if (commandModels.length > 0) return { models: commandModels, modelsStatus: 'ok' };
 
-  const configModels = await probeConfigModels(options, probe);
+  const configModels = await probeConfigModels(options, probe, defaultModel);
   if (configModels.length > 0) return { models: configModels, modelsStatus: 'config_only' };
 
   if (probe.static && probe.static.length > 0) {
-    return { models: candidates(probe.static, 'static', options.defaultModel), modelsStatus: 'static_only' };
+    return { models: candidates(probe.static, 'static', defaultModel), modelsStatus: 'static_only' };
   }
   const hasProbeLayer = Boolean(probe.command || probe.configFile);
   return { models: [], modelsStatus: hasProbeLayer ? 'failed' : 'unsupported' };
@@ -301,28 +430,24 @@ export async function probeLocalCliModels(
 async function probeCommandModels(
   options: ModelChainOptions,
   probe: LocalCliModelsProbeDefinition,
+  defaultModel?: string,
 ): Promise<LocalCliModelCandidate[]> {
-  if (!probe.command || !options.installed || !options.resolvedPath) return [];
-  try {
-    const result = await options.runCommand(options.resolvedPath, probe.command.args);
-    const ids = probe.command.parse(redactProbeOutput(result.stdout));
-    const defaultModel = options.defaultModel ?? (probe.firstResultIsDefault ? ids[0] : undefined);
-    return candidates(ids, 'cli', defaultModel);
-  } catch {
-    // A timeout, buffer cap, auth failure, or parser error falls through to L2.
-    return [];
-  }
+  if (!probe.command) return [];
+  const ids = await runModelCommand(options, probe.command);
+  if (ids.length === 0) return [];
+  return candidates(ids, 'cli', defaultModel ?? (probe.firstResultIsDefault ? ids[0] : undefined));
 }
 
 async function probeConfigModels(
   options: ModelChainOptions,
   probe: LocalCliModelsProbeDefinition,
+  defaultModel?: string,
 ): Promise<LocalCliModelCandidate[]> {
   if (!probe.configFile || !options.installed) return [];
   try {
     const path = resolveExplicitConfigPath(probe.configFile.path, options.homeDir ?? homedir());
     const content = await (options.readFile ?? ((value) => readFileFs(value, 'utf8')))(path);
-    return candidates(probe.configFile.extract(redactProbeOutput(content)), 'config', options.defaultModel);
+    return candidates(probe.configFile.extract(redactProbeOutput(content)), 'config', defaultModel);
   } catch {
     // Includes explicit rejection of sensitive or traversing paths, then falls through to L3.
     return [];

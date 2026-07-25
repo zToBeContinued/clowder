@@ -21,15 +21,9 @@ const STATIC_PRESETS: Partial<Record<ClientId, CatModelOptionPreset>> = {
   grok: { defaultModel: 'grok-4.5', models: LOCAL_CLI_MODELS_PROBES.grok.static ?? [] },
   opencode: { defaultModel: 'xiaomi-mimo/mimo-v2.5-pro', models: LOCAL_CLI_MODELS_PROBES.opencode.static ?? [] },
   dare: { defaultModel: 'claude-fable-5', models: ['claude-fable-5'] },
-  // Kiro 模型由本机 Kiro CLI 的 settings 决定，因人而异；这里给一份保守兜底，
-  // 本机 CLI 扫描（LOCAL_CLI_MODELS_PROBES.kiro，读 `kiro-cli settings list`）会覆盖为真实列表。
-  kiro: {
-    defaultModel: 'gpt-5.6-sol',
-    models:
-      LOCAL_CLI_MODELS_PROBES.kiro.static && LOCAL_CLI_MODELS_PROBES.kiro.static.length > 0
-        ? LOCAL_CLI_MODELS_PROBES.kiro.static
-        : ['gpt-5.6-sol', 'claude-opus-4.8'],
-  },
+  // Kiro 的可用模型由本机 kiro-cli 动态给出（哨兵 --model 报错里的完整目录）；
+  // 这里的 KIRO_MODEL_CATALOG 只是命令不可用时的兜底快照。
+  kiro: { defaultModel: 'gpt-5.6-sol', models: LOCAL_CLI_MODELS_PROBES.kiro.static ?? [] },
   // Cursor 模型由本机 cursor-agent 账号决定，且 effort 编码在模型名后缀里（-high/-xhigh/-max）。
   // 给一份真实有效的变体兜底；本机扫描(`cursor-agent models`)会覆盖为账号完整列表。
   cursor: {
