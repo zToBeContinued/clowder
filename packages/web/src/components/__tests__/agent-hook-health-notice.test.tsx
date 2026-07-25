@@ -2,7 +2,11 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AgentHookHealthNotice, type AgentHookStatusResponse } from '@/components/AgentHookHealthNotice';
+import {
+  AgentHookHealthNotice,
+  type AgentHookStatusResponse,
+  shouldRenderAgentHookHealthNotice,
+} from '@/components/AgentHookHealthNotice';
 import { ProjectSetupCard } from '@/components/ProjectSetupCard';
 
 const missingHealth: AgentHookStatusResponse = {
@@ -33,6 +37,43 @@ const missingHealth: AgentHookStatusResponse = {
     },
   ],
 };
+
+describe('shouldRenderAgentHookHealthNotice', () => {
+  const probe = { error: null, syncing: false, synced: false };
+
+  it('stays hidden when the backend reports no actionable targets', () => {
+    // All-Kiro roster: nothing reads .claude/hooks or .codex/hooks.json, so a sync
+    // button would change nothing.
+    const health: AgentHookStatusResponse = { status: 'unsupported', targets: [] };
+    expect(shouldRenderAgentHookHealthNotice({ ...probe, health })).toBe(false);
+  });
+
+  it('still shows up when there are drifted targets to repair', () => {
+    expect(shouldRenderAgentHookHealthNotice({ ...probe, health: missingHealth })).toBe(true);
+  });
+
+  it('stays hidden once everything is configured', () => {
+    const health: AgentHookStatusResponse = {
+      status: 'configured',
+      targets: [
+        {
+          name: 'codex-hooks',
+          status: 'configured',
+          drifted: false,
+          reason: 'configured',
+          targetPath: '/home/user/hooks.json',
+        },
+      ],
+    };
+    expect(shouldRenderAgentHookHealthNotice({ ...probe, health })).toBe(false);
+  });
+
+  it('surfaces transient states regardless of targets', () => {
+    const health: AgentHookStatusResponse = { status: 'unsupported', targets: [] };
+    expect(shouldRenderAgentHookHealthNotice({ ...probe, health, syncing: true })).toBe(true);
+    expect(shouldRenderAgentHookHealthNotice({ ...probe, health, error: 'boom' })).toBe(true);
+  });
+});
 
 describe('AgentHookHealthNotice', () => {
   let container: HTMLDivElement;

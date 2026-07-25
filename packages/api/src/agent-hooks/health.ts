@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { catRegistry } from '@cat-cafe/shared';
 import { claudeSettingsHealth, syncClaudeSettings } from './claude-settings.js';
 import {
   applySync,
@@ -167,7 +168,32 @@ function targetHealth(target: SyncTarget): HealthResult {
   }
 }
 
+/**
+ * Every sync target writes into `.claude/hooks/` or `.codex/hooks.json`, which only
+ * Claude Code and Codex CLI read. A roster without those clients (e.g. all-Kiro) can
+ * never benefit from syncing, so reporting "missing" there is noise: the files are
+ * genuinely absent, but nothing would consume them.
+ *
+ * Returns an empty target list in that case — the UI already suppresses the notice
+ * when there is nothing actionable.
+ */
+function hasHookConsumingCats(): boolean {
+  try {
+    const configs = Object.values(catRegistry.getAllConfigs());
+    // An empty registry means the catalog has not loaded yet, not that the roster
+    // genuinely has no Claude/Codex cats — stay visible rather than hide a real drift.
+    if (configs.length === 0) return true;
+    return configs.some((config) => config.clientId === 'anthropic' || config.clientId === 'openai');
+  } catch {
+    // Registry unavailable for any other reason — same conservative default.
+    return true;
+  }
+}
+
 export async function getAgentHookStatus(options: AgentHookOptions): Promise<AgentHookStatusResponse> {
+  if (!hasHookConsumingCats()) {
+    return { status: 'unsupported', targets: [] };
+  }
   const targets = buildSelectedAgentHookTargets(options);
   const results = [...targets.map(targetHealth), claudeSettingsHealth(options.targetRoot)];
   return {
@@ -177,6 +203,9 @@ export async function getAgentHookStatus(options: AgentHookOptions): Promise<Age
 }
 
 export async function syncAgentHooks(options: AgentHookOptions): Promise<AgentHookStatusResponse> {
+  if (!hasHookConsumingCats()) {
+    return { status: 'unsupported', targets: [] };
+  }
   for (const target of buildSelectedAgentHookTargets(options)) {
     applySync(target, false);
   }

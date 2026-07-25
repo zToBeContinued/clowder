@@ -66,7 +66,10 @@ function statusText(status: AgentHookHealthDisplayStatus): string {
 
 export function shouldRenderAgentHookHealthNotice({ health, error, syncing, synced }: RenderProbe): boolean {
   if ([error, syncing, synced].some(Boolean)) return true;
-  return !!health && health.status !== 'configured';
+  if (!health || health.status === 'configured') return false;
+  // No targets means the backend found nothing this roster can act on (no Claude/Codex
+  // cats). Showing a sync prompt there would offer a button that changes nothing.
+  return targetsFor(health).length > 0;
 }
 
 function toneFor(status: AgentHookHealthStatus | 'syncing' | 'synced' | 'error') {
