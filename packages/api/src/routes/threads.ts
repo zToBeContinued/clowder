@@ -22,11 +22,12 @@ import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryS
 import { generateSortableId, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadReadStateStore } from '../domains/cats/services/stores/ports/ThreadReadStateStore.js';
-import type {
-  BootcampStateV1,
-  IThreadStore,
-  Thread,
-  ThreadRoutingPolicyV1,
+import {
+  type BootcampStateV1,
+  DEFAULT_THREAD_ID,
+  type IThreadStore,
+  type Thread,
+  type ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { auditDangerousActionBestEffort, requireDangerousActionConfirmation } from '../utils/dangerous-action-guard.js';
@@ -231,6 +232,35 @@ const updateThreadSchema = z
 
 export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (app, opts) => {
   const { threadStore, messageStore, taskProgressStore } = opts;
+
+  /**
+   * Hard-delete a thread and every store that keys off its id.
+   *
+   * Dependent cleanups are best-effort: leaving orphaned messages behind is worse than a
+   * partial cleanup, so a failing side store must not abort the thread removal itself.
+   * Returns whether the thread record was actually removed.
+   */
+  async function purgeThreadCascade(threadId: string, userId: string): Promise<boolean> {
+    const cleanups: Array<[string, () => unknown]> = [
+      ['messages', () => messageStore?.deleteByThread(threadId)],
+      ['tasks', () => opts.taskStore?.deleteByThread(threadId)],
+      ['memory', () => opts.memoryStore?.deleteThread(threadId)],
+      ['drafts', () => opts.draftStore?.deleteByThread(userId, threadId)],
+      ['readState', () => opts.readStateStore?.deleteByThread(threadId)],
+      ['deliveryCursors', () => opts.deliveryCursorStore?.deleteByThreadForUser(userId, threadId)],
+      ['guideSession', () => opts.guideSessionStore?.delete(threadId)],
+    ];
+
+    for (const [name, run] of cleanups) {
+      try {
+        await run();
+      } catch (err) {
+        log.warn({ err, threadId, store: name }, 'purge cascade cleanup failed (non-blocking)');
+      }
+    }
+
+    return await threadStore.delete(threadId);
+  }
 
   // POST /api/threads - 创建对话
   app.post('/api/threads', async (request, reply) => {
@@ -758,6 +788,118 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     } finally {
       guard?.release();
     }
+  });
+
+  /**
+   * Permanently remove one already-soft-deleted thread and its dependent data.
+   *
+   * Gated on `deletedAt` so this can never be used to skip the soft-delete step: a thread
+   * must first land in the trash bin (where it is recoverable) before it can be purged.
+   * Unlike soft delete, there is no undo, so it also requires the dangerous-action
+   * confirmation header.
+   */
+  app.delete<{ Params: { id: string } }>('/api/threads/:id/purge', async (request, reply) => {
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const { id } = request.params;
+    if (id === DEFAULT_THREAD_ID) {
+      reply.status(400);
+      return { error: 'Cannot purge the default thread', code: 'THREAD_NOT_PURGEABLE' };
+    }
+
+    const thread = await threadStore.get(id);
+    if (!thread) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+    if (!thread.deletedAt) {
+      reply.status(409);
+      return {
+        error: 'Thread must be in the trash bin before it can be permanently deleted',
+        code: 'THREAD_NOT_DELETED',
+      };
+    }
+
+    const confirmation = requireDangerousActionConfirmation(request, 'thread.purge', '永久删除对话');
+    if (!confirmation.ok) {
+      void auditDangerousActionBestEffort({
+        request,
+        actorId: userId,
+        action: 'thread.purge',
+        targetType: 'thread',
+        targetId: id,
+        threadId: id,
+        severity: 'high',
+        result: 'blocked',
+        confirmation: confirmation.confirmation,
+        reason: confirmation.code,
+        metadata: { threadTitle: thread.title ?? null, projectPath: thread.projectPath ?? null },
+      });
+      reply.status(428);
+      return { error: confirmation.error, code: confirmation.code };
+    }
+
+    const purged = await purgeThreadCascade(id, userId);
+    if (!purged) {
+      reply.status(400);
+      return { error: 'Cannot purge this thread', code: 'THREAD_NOT_PURGEABLE' };
+    }
+
+    void auditDangerousActionBestEffort({
+      request,
+      actorId: userId,
+      action: 'thread.purge',
+      targetType: 'thread',
+      targetId: id,
+      threadId: id,
+      severity: 'high',
+      result: 'succeeded',
+      confirmation: confirmation.confirmation,
+      metadata: { threadTitle: thread.title ?? null, projectPath: thread.projectPath ?? null },
+    });
+
+    reply.status(204);
+    return;
+  });
+
+  /** Permanently remove every soft-deleted thread of the caller. */
+  app.delete('/api/threads/trash', async (request, reply) => {
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const confirmation = requireDangerousActionConfirmation(request, 'thread.purge', '清空回收站');
+    if (!confirmation.ok) {
+      reply.status(428);
+      return { error: confirmation.error, code: confirmation.code };
+    }
+
+    const deleted = await threadStore.listDeleted(userId);
+    let purged = 0;
+    for (const thread of deleted) {
+      if (thread.id === DEFAULT_THREAD_ID) continue;
+      if (await purgeThreadCascade(thread.id, userId)) purged += 1;
+    }
+
+    void auditDangerousActionBestEffort({
+      request,
+      actorId: userId,
+      action: 'thread.purge',
+      targetType: 'thread',
+      targetId: 'trash-bin',
+      severity: 'high',
+      result: 'succeeded',
+      confirmation: confirmation.confirmation,
+      metadata: { purged, candidates: deleted.length },
+    });
+
+    return { purged };
   });
 
   /**

@@ -7,7 +7,8 @@ import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
-import { softDeleteThreadWithUndo } from '@/utils/thread-delete';
+import { emptyTrash, purgeThread, softDeleteThreadWithUndo } from '@/utils/thread-delete';
+import { useConfirm } from '../useConfirm';
 import { scrollToMessage } from '@/utils/scrollToMessage';
 import {
   isSavedMessagesViewOpen,
@@ -151,6 +152,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
   const [showTrash, setShowTrash] = useState(false);
   const [trashedThreads, setTrashedThreads] = useState<Thread[]>([]);
   const [isLoadingTrash, setIsLoadingTrash] = useState(false);
+  const confirm = useConfirm();
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set());
 
   // F095 Phase E: scroll anchor for reorder stability
@@ -359,6 +361,48 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
       return next;
     });
   }, [loadTrash]);
+
+  const handlePurge = useCallback(
+    async (threadId: string, title: string | null) => {
+      const label = title?.trim() || '未命名对话';
+      const ok = await confirm({
+        title: '永久删除',
+        message: `「${label}」及其所有消息将被永久删除，无法恢复。`,
+        confirmLabel: '永久删除',
+        variant: 'danger',
+      });
+      if (!ok) return;
+
+      const error = await purgeThread(threadId);
+      const addToast = useToastStore.getState().addToast;
+      if (error) {
+        addToast({ type: 'error', title: '永久删除失败', message: error, duration: 4000 });
+        return;
+      }
+      addToast({ type: 'success', title: '已永久删除', message: label, duration: 2400 });
+      await loadTrash();
+    },
+    [confirm, loadTrash],
+  );
+
+  const handleEmptyTrash = useCallback(async () => {
+    const ok = await confirm({
+      title: '清空回收站',
+      message: `回收站中的 ${trashedThreads.length} 个对话及其所有消息将被永久删除，无法恢复。`,
+      confirmLabel: '清空',
+      variant: 'danger',
+    });
+    if (!ok) return;
+
+    const result = await emptyTrash();
+    const addToast = useToastStore.getState().addToast;
+    if ('error' in result) {
+      addToast({ type: 'error', title: '清空失败', message: result.error, duration: 4000 });
+      return;
+    }
+    addToast({ type: 'success', title: '回收站已清空', message: `永久删除 ${result.purged} 个对话`, duration: 2400 });
+    await loadTrash();
+  }, [confirm, loadTrash, trashedThreads.length]);
 
   const handleRestore = useCallback(
     async (threadId: string) => {
@@ -1090,8 +1134,27 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                   >
                     恢复
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => handlePurge(t.id, t.title ?? null)}
+                    className="sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 text-[10px] text-conn-red-text hover:text-conn-red-text/80 transition-all shrink-0"
+                    data-testid={`purge-btn-${t.id}`}
+                    title="永久删除，无法恢复"
+                  >
+                    永久删除
+                  </button>
                 </div>
               ))}
+              {trashedThreads.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleEmptyTrash}
+                  className="mt-1 w-full px-3 py-1.5 text-left text-[10px] text-conn-red-text transition-colors hover:bg-[var(--clowder-sidebar-hover-bg)]"
+                  data-testid="empty-trash-btn"
+                >
+                  清空回收站（{trashedThreads.length}）
+                </button>
+              )}
             </div>
           )}
         </div>

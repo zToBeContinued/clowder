@@ -89,6 +89,43 @@ export async function softDeleteThreadWithUndo(
   return null;
 }
 
+/**
+ * Permanently remove one trashed thread. Returns null on success, else an error message.
+ *
+ * No undo affordance here on purpose: unlike the soft delete this is irreversible, so the
+ * cost is asymmetric and the caller must confirm up front instead.
+ */
+export async function purgeThread(threadId: string): Promise<string | null> {
+  try {
+    const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/purge`, {
+      method: 'DELETE',
+      headers: { 'X-Clowder-Dangerous-Action-Confirmed': 'thread.purge' },
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      return body.error ?? '永久删除失败，请稍后重试';
+    }
+    return null;
+  } catch {
+    return '网络请求未完成，请稍后重试';
+  }
+}
+
+/** Permanently remove every trashed thread. Returns the purged count, or an error message. */
+export async function emptyTrash(): Promise<{ purged: number } | { error: string }> {
+  try {
+    const response = await apiFetch('/api/threads/trash', {
+      method: 'DELETE',
+      headers: { 'X-Clowder-Dangerous-Action-Confirmed': 'thread.purge' },
+    });
+    const body = (await response.json().catch(() => ({}))) as { purged?: number; error?: string };
+    if (!response.ok) return { error: body.error ?? '清空回收站失败，请稍后重试' };
+    return { purged: typeof body.purged === 'number' ? body.purged : 0 };
+  } catch {
+    return { error: '网络请求未完成，请稍后重试' };
+  }
+}
+
 async function restoreThread(threadId: string, onRestored?: (threadId: string) => void): Promise<void> {
   const addToast = useToastStore.getState().addToast;
   try {
