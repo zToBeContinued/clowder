@@ -1,7 +1,22 @@
 import type { CliEffortValue } from '@cat-cafe/shared';
 import type { AcpProviderProfile } from './types.js';
 
-export const KIRO_MCP_WHITELIST = ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals'] as const;
+/**
+ * MCP servers offered to every Kiro ACP session.
+ *
+ * `cat-cafe*` are built-in and auto-resolved from projectRoot. `codegraph` is an
+ * external entry read from projectRoot/.mcp.json — it lets cats answer structural
+ * questions from an index instead of reading whole files into context, which is the
+ * main driver of Kiro's ContextWindowOverflow. Projects without a `.codegraph/`
+ * index simply get a "not indexed" reply, so listing it globally is safe.
+ */
+export const KIRO_MCP_WHITELIST = [
+  'cat-cafe',
+  'cat-cafe-collab',
+  'cat-cafe-memory',
+  'cat-cafe-signals',
+  'codegraph',
+] as const;
 
 export interface KiroAcpProfileInput {
   defaultModel?: string;

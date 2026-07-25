@@ -46,7 +46,15 @@ describe('kiro-acp-profile', () => {
     assert.equal(createKiroAcpProfile({ defaultModel: '   ' }).model, undefined);
   });
 
-  it('whitelists only the four builtin Clowder MCP servers', () => {
-    assert.deepEqual(KIRO_MCP_WHITELIST, ['cat-cafe', 'cat-cafe-collab', 'cat-cafe-memory', 'cat-cafe-signals']);
+  it('whitelists the four builtin Clowder MCP servers plus codegraph', () => {
+    // codegraph lets cats answer structural questions from an index instead of reading
+    // whole files into context — the main driver of Kiro's ContextWindowOverflow.
+    assert.deepEqual(KIRO_MCP_WHITELIST, [
+      'cat-cafe',
+      'cat-cafe-collab',
+      'cat-cafe-memory',
+      'cat-cafe-signals',
+      'codegraph',
+    ]);
   });
 });
