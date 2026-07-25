@@ -146,6 +146,16 @@ export interface Thread {
   voiceMode?: boolean;
   /** F095 Phase D: Soft-delete timestamp. null/undefined = not deleted. */
   deletedAt?: number | null;
+  /**
+   * Source thread this one was branched from.
+   *
+   * Branch provenance previously existed only on the parent *message*
+   * (`extra.slockThread.branchThreadId`), which is one-directional and only written for
+   * non-edited branches — so a branch could not tell who its parent was without scanning
+   * every message of every thread. Undefined for threads created directly, and for
+   * branches made before this field existed.
+   */
+  parentThreadId?: string | null;
   /** F087: CVO Bootcamp onboarding state. */
   bootcampState?: BootcampStateV1;
   /** F171: First-Run Quest onboarding state. */
@@ -316,6 +326,15 @@ export interface IThreadStore {
   updatePreferredCats(threadId: string, catIds: CatId[]): void | Promise<void>;
   updateParticipatingCats(threadId: string, catIds: CatId[]): void | Promise<void>;
   updateIsDM(threadId: string, isDM: boolean): void | Promise<void>;
+  /**
+   * Record (or clear) which thread this one was branched from.
+   *
+   * Optional: branch provenance is advisory, and callers fall back to the legacy
+   * `extra.slockThread` links. Lightweight stores may omit it.
+   */
+  updateParentThread?(threadId: string, parentThreadId: string | null): void | Promise<void>;
+  /** Direct, non-deleted children of a thread. Empty when the parent has no branches. */
+  listByParent?(parentThreadId: string): Thread[] | Promise<Thread[]>;
   updatePhase(threadId: string, phase: ThreadPhase): void | Promise<void>;
   linkBacklogItem(threadId: string, backlogItemId: string): void | Promise<void>;
   /**
@@ -625,6 +644,24 @@ export class ThreadStore implements IThreadStore {
     } else {
       delete thread.isDM;
     }
+  }
+
+  updateParentThread(threadId: string, parentThreadId: string | null): void {
+    const thread = this.get(threadId);
+    if (!thread) return;
+    if (parentThreadId) {
+      thread.parentThreadId = parentThreadId;
+    } else {
+      delete thread.parentThreadId;
+    }
+  }
+
+  listByParent(parentThreadId: string): Thread[] {
+    const result: Thread[] = [];
+    for (const thread of this.threads.values()) {
+      if (thread.parentThreadId === parentThreadId && !thread.deletedAt) result.push(thread);
+    }
+    return result;
   }
 
   updatePhase(threadId: string, phase: ThreadPhase): void {

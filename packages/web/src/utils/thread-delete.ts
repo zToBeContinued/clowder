@@ -27,12 +27,31 @@ export interface SoftDeleteThreadOptions {
   onRestored?: (threadId: string) => void;
 }
 
+/**
+ * Branches are NOT cascade-deleted: each holds a full copy of the messages and is usually
+ * an independent work unit. Counting them lets the toast say so, instead of letting the
+ * user think the delete failed when the project group reappears with orphaned branches.
+ */
+async function countBranches(threadId: string): Promise<number> {
+  try {
+    const response = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}/branches`);
+    if (!response.ok) return 0;
+    const body = (await response.json().catch(() => null)) as { branches?: unknown[] } | null;
+    return Array.isArray(body?.branches) ? body.branches.length : 0;
+  } catch {
+    // Advisory only — never block a delete because the branch probe failed.
+    return 0;
+  }
+}
+
 /** Returns null on success, or a user-facing error message. */
 export async function softDeleteThreadWithUndo(
   threadId: string,
   options: SoftDeleteThreadOptions = {},
 ): Promise<string | null> {
   if (!threadId || threadId === 'default') return '该对话不可删除';
+
+  const branchCount = await countBranches(threadId);
 
   let response: Response;
   try {
@@ -54,10 +73,11 @@ export async function softDeleteThreadWithUndo(
   }));
 
   const label = options.title?.trim();
+  const branchNote = branchCount > 0 ? `；${branchCount} 个分支已保留` : '';
   useToastStore.getState().addToast({
     type: 'success',
     title: label ? `已删除「${label}」` : '频道已删除',
-    message: '已移入回收站，可在侧边栏底部找回',
+    message: `已移入回收站，可在侧边栏底部找回${branchNote}`,
     duration: UNDO_TOAST_DURATION_MS,
     action: {
       label: '撤销',

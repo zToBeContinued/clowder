@@ -760,6 +760,49 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
     }
   });
 
+  /**
+   * Direct branches of a thread.
+   *
+   * Deleting a parent does NOT cascade: each branch carries a full copy of the messages
+   * and is usually an independent work unit. The UI uses this to tell the user branches
+   * were left behind, instead of letting them silently reappear as an orphaned group.
+   */
+  app.get<{ Params: { id: string } }>('/api/threads/:id/branches', async (request, reply) => {
+    const userId = resolveUserId(request, {});
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const { id } = request.params;
+    const thread = await threadStore.get(id);
+    if (!thread) {
+      reply.status(404);
+      return { error: 'Thread not found' };
+    }
+
+    const byParentField = threadStore.listByParent ? await threadStore.listByParent(id) : [];
+    if (byParentField.length > 0) {
+      return { branches: byParentField.map((branch) => ({ id: branch.id, title: branch.title })) };
+    }
+
+    // Branches created before parentThreadId existed only recorded provenance on the
+    // parent message. Fall back to those links so historical threads work without a
+    // migration. Edited branches never wrote slockThread and remain undiscoverable.
+    if (!messageStore) return { branches: [] };
+    const messages = await messageStore.getByThread(id, 10000);
+    const legacy: Array<{ id: string; title: string | null }> = [];
+    const seen = new Set<string>();
+    for (const message of messages) {
+      const branchThreadId = message.extra?.slockThread?.branchThreadId;
+      if (!branchThreadId || seen.has(branchThreadId)) continue;
+      seen.add(branchThreadId);
+      const branch = await threadStore.get(branchThreadId);
+      if (branch && !branch.deletedAt) legacy.push({ id: branch.id, title: branch.title });
+    }
+    return { branches: legacy };
+  });
+
   // F095 Phase D: POST /api/threads/:id/restore — restore a soft-deleted thread
   app.post<{ Params: { id: string } }>('/api/threads/:id/restore', async (request, reply) => {
     const { id } = request.params;

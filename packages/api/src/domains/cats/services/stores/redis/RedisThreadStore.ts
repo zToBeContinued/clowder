@@ -404,6 +404,32 @@ export class RedisThreadStore implements IThreadStore {
     }
   }
 
+  async updateParentThread(threadId: string, parentThreadId: string | null): Promise<void> {
+    const key = ThreadKeys.detail(threadId);
+    if (parentThreadId) {
+      await this.setDetailFields(key, 'parentThreadId', parentThreadId);
+    } else {
+      await this.deleteDetailFields(key, 'parentThreadId');
+    }
+  }
+
+  /**
+   * Scans the caller's thread index rather than keeping a reverse index: branch listing
+   * happens on explicit user actions (e.g. deleting a parent), not on hot paths.
+   */
+  async listByParent(parentThreadId: string): Promise<Thread[]> {
+    const parent = await this.get(parentThreadId);
+    if (!parent) return [];
+    const ids = await this.loadUserThreadIds(parent.createdBy);
+    const children: Thread[] = [];
+    for (const id of ids) {
+      if (id === parentThreadId) continue;
+      const thread = await this.get(id);
+      if (thread && thread.parentThreadId === parentThreadId && !thread.deletedAt) children.push(thread);
+    }
+    return children;
+  }
+
   async updatePhase(threadId: string, phase: ThreadPhase): Promise<void> {
     const key = ThreadKeys.detail(threadId);
     await this.setDetailFields(key, 'phase', phase);
@@ -1053,6 +1079,9 @@ export class RedisThreadStore implements IThreadStore {
     if (thread.backlogItemId) {
       result.backlogItemId = thread.backlogItemId;
     }
+    if (thread.parentThreadId) {
+      result.parentThreadId = thread.parentThreadId;
+    }
     if (thread.preferredCats && thread.preferredCats.length > 0) {
       result.preferredCats = JSON.stringify(thread.preferredCats);
     }
@@ -1116,6 +1145,9 @@ export class RedisThreadStore implements IThreadStore {
     }
     if (data.backlogItemId) {
       result.backlogItemId = data.backlogItemId;
+    }
+    if (data.parentThreadId) {
+      result.parentThreadId = data.parentThreadId;
     }
     if (data.preferredCats) {
       try {

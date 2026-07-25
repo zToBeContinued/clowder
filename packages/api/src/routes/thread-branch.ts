@@ -167,6 +167,13 @@ export const threadBranchRoutes: FastifyPluginAsync<ThreadBranchRoutesOptions> =
     // ④ Create new thread with "(分支)" suffix
     const branchTitle = sourceThread.title ? `${sourceThread.title} (分支)` : '分支对话';
     const newThread = await threadStore.create(userId, branchTitle, sourceThread.projectPath);
+    // Branch provenance on the thread itself: the parent message's slockThread link is
+    // one-directional and absent for edited branches, so it cannot answer "who is my parent".
+    // Advisory only — a store without this method must not fail branch creation, and the
+    // /branches endpoint still falls back to the legacy slockThread scan.
+    if (typeof threadStore.updateParentThread === 'function') {
+      await threadStore.updateParentThread(newThread.id, id);
+    }
 
     // ⑤ Copy participants + messages inside guarded block; rollback on any failure
     try {
