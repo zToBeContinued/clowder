@@ -46,6 +46,23 @@ const GLOBAL_FALLBACK_BUDGET: ContextBudget = {
   maxContentLengthPerMsg: 100000,
 };
 
+/**
+ * Kiro rejects oversized input server-side (HTTP 400 ValidationException,
+ * CONTENT_LENGTH_EXCEEDS_THRESHOLD) *before* the request reaches a model, and the
+ * failure is not retryable. Its threshold sits well below GLOBAL_FALLBACK_BUDGET, so
+ * dynamically created Kiro cats without an explicit contextBudget would keep tripping
+ * it. Clamp them locally instead: trimming history is recoverable, a 400 is not.
+ *
+ * These numbers are derived from observed overflow reports, not from published Kiro
+ * limits — revisit if overflows still occur.
+ */
+const KIRO_FALLBACK_BUDGET: ContextBudget = {
+  maxPromptTokens: 60000,
+  maxContextTokens: 32000,
+  maxMessages: 40,
+  maxContentLengthPerMsg: 12000,
+};
+
 // Cache from resolved runtime cat config
 let cachedJsonBudgets: Record<string, ContextBudget> | null = null;
 
@@ -57,7 +74,12 @@ function loadBudgetsFromJson(): Record<string, ContextBudget> {
     cachedJsonBudgets = {};
     for (const breed of config.breeds) {
       const defaultVariant = getDefaultVariant(breed);
-      const breedBudget = defaultVariant.contextBudget;
+      // Explicit config always wins; the Kiro clamp only fills the gap where a cat has
+      // no budget of its own and would otherwise inherit a fallback far above what
+      // Kiro's server accepts. Dynamic cats carry no variant.catId, so this breed-level
+      // resolution is the path that actually applies to them.
+      const breedBudget =
+        defaultVariant.contextBudget ?? (defaultVariant.clientId === 'kiro' ? KIRO_FALLBACK_BUDGET : undefined);
       if (breedBudget) {
         cachedJsonBudgets[breed.catId] = breedBudget;
       }
@@ -67,7 +89,11 @@ function loadBudgetsFromJson(): Record<string, ContextBudget> {
       // breed default budget when not explicitly specified.
       for (const variant of breed.variants) {
         if (!variant.catId) continue;
-        const effective = variant.contextBudget ?? breedBudget;
+        // Explicit config always wins; the Kiro clamp only fills the gap where a
+        // dynamic cat has no budget of its own and would otherwise inherit a
+        // fallback far above what Kiro's server accepts.
+        const effective =
+          variant.contextBudget ?? breedBudget ?? (variant.clientId === 'kiro' ? KIRO_FALLBACK_BUDGET : undefined);
         if (effective) {
           cachedJsonBudgets[variant.catId] = effective;
         }
