@@ -21,12 +21,15 @@ async function createTestStore() {
   const { SqliteEvidenceStore } = await import('../dist/domains/memory/SqliteEvidenceStore.js');
   const store = new SqliteEvidenceStore(dbPath);
   await store.initialize();
+  // Windows 不允许删除仍被打开的文件：句柄不关，afterEach 的 rm 会以 EBUSY 失败。
+  openStores.push(store);
   return { store };
 }
 
 // ─── Temp directory management ───────────────────────────────────────
 
 const tmpDirs = [];
+const openStores = [];
 
 async function createTmpDir() {
   const dir = await mkdtemp(join(tmpdir(), 'pack-knowledge-'));
@@ -35,6 +38,15 @@ async function createTmpDir() {
 }
 
 afterEach(async () => {
+  // 先关 SQLite 再删目录，顺序反了在 Windows 上会 EBUSY。
+  for (const store of openStores) {
+    try {
+      store.close();
+    } catch {
+      /* 已关闭或从未打开 */
+    }
+  }
+  openStores.length = 0;
   for (const dir of tmpDirs) {
     await rm(dir, { recursive: true, force: true });
   }

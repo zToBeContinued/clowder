@@ -614,10 +614,11 @@ async function main(): Promise<void> {
   // P1 fix: resolve paths relative to repo root, not CWD (which may be packages/api)
   //
   // 这里曾用「cwd/docs/features 是否存在」来探测仓库根。API 进程的 cwd 就是
-  // packages/api，而 packages/api/docs/features/ 恰好存在（.gitkeep + TEMPLATE.md
-  // 都被 git 跟踪），于是 repoRoot 被判成 packages/api，evidence.sqlite / world.sqlite
-  // / docsRoot / markersDir 全落在包目录里，仓库根的 docs/markers/ 反而一直是空的。
-  // 改用 findMonorepoRoot（认 pnpm-workspace.yaml），与本文件其余十几处保持一致。
+  // packages/api，而当时 packages/api/docs/features/ 恰好存在（治理脚手架在包目录里
+  // 跑过一次留下的骨架），于是 repoRoot 被判成 packages/api：evidence.sqlite /
+  // world.sqlite / docsRoot / markersDir 全落在包目录，仓库根的 docs/markers/ 反而
+  // 一直没被创建。那份误生成的骨架已清理，探测方式也改成 findMonorepoRoot
+  // （认 pnpm-workspace.yaml），与本文件其余十几处保持一致 —— 别再改回目录探测。
   const { resolve } = await import('node:path');
   const repoRoot = findMonorepoRoot(process.cwd());
 
