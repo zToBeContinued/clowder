@@ -7,20 +7,12 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import { catRegistry, createCatId } from '@cat-cafe/shared';
 import type { SessionStore } from '@cat-cafe/shared/utils';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 
 const log = createModuleLogger('delivery-cursor-store');
 
 const MAX_CURSORS = 5000;
-const FALLBACK_CATS: readonly CatId[] = [createCatId('opus'), createCatId('codex'), createCatId('gemini')];
-
-/** Get all cat IDs dynamically from registry, with static fallback */
-function getAllCats(): readonly CatId[] {
-  const ids = catRegistry.getAllIds();
-  return ids.length > 0 ? ids.map((id) => createCatId(id)) : FALLBACK_CATS;
-}
 
 function cursorKey(userId: string, catId: CatId, threadId: string): string {
   return `${userId}:${catId}:${threadId}`;
@@ -196,17 +188,12 @@ export class DeliveryCursorStore {
     let deleted = 0;
 
     if (this.sessionStore) {
-      for (const catId of getAllCats()) {
-        try {
-          deleted += await this.sessionStore.deleteDeliveryCursor(userId, catId, threadId);
-        } catch (err) {
-          log.warn({ err }, 'deleteDeliveryCursor failed, continue cleanup in-memory');
-        }
-        try {
-          deleted += await this.sessionStore.deleteMentionAckCursor(userId, catId, threadId);
-        } catch (err) {
-          log.warn({ err }, 'deleteMentionAckCursor failed, continue cleanup in-memory');
-        }
+      // SCAN-based, not roster-based: cats that have left the roster still own cursor
+      // keys, and enumerating getAllCats() would leave them behind forever.
+      try {
+        deleted += await this.sessionStore.deleteCursorsByThread(userId, threadId);
+      } catch (err) {
+        log.warn({ err }, 'deleteCursorsByThread failed, continue cleanup in-memory');
       }
     }
 

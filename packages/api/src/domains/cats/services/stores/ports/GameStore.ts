@@ -24,4 +24,10 @@ export interface IGameStore {
 
   /** List all active games across all threads (for recovery on startup) */
   listActiveGames(): Promise<GameRuntime[]>;
+
+  /**
+   * Delete every game of a thread — active and historical (cascade on thread purge).
+   * Returns the number of game records removed.
+   */
+  deleteByThread(threadId: string): Promise<number>;
 }

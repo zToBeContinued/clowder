@@ -78,6 +78,25 @@ export class RedisGameStore implements IGameStore {
     return games;
   }
 
+  async deleteByThread(threadId: string): Promise<number> {
+    const activeKey = GameKeys.threadActive(threadId);
+    const historyKey = GameKeys.threadHistory(threadId);
+
+    const gameIds = new Set(await this.redis.zrange(historyKey, 0, -1));
+    const activeGameId = await this.redis.get(activeKey);
+    if (activeGameId) gameIds.add(activeGameId);
+
+    const pipeline = this.redis.multi();
+    for (const gameId of gameIds) {
+      pipeline.del(GameKeys.detail(gameId));
+    }
+    pipeline.del(activeKey);
+    pipeline.del(historyKey);
+    await pipeline.exec();
+
+    return gameIds.size;
+  }
+
   async endGame(gameId: string, winner: string): Promise<void> {
     const existing = await this.redis.get(GameKeys.detail(gameId));
     if (!existing) throw new Error(`Game ${gameId} not found`);

@@ -52,6 +52,11 @@ export interface ISessionChainStore {
   incrementCompressionCount(id: string): number | null | Promise<number | null>;
   /** F118: List IDs of all sessions currently in 'sealing' status (for global reaper). */
   listSealingSessions(): string[] | Promise<string[]>;
+  /**
+   * Hard-delete every session of a thread across all cats (cascade on thread purge).
+   * Returns the number of session records removed.
+   */
+  deleteByThread(threadId: string): number | Promise<number>;
 }
 
 const MAX_RECORDS = 1000;
@@ -205,6 +210,16 @@ export class SessionChainStore implements ISessionChainStore {
       if (record.status === 'sealing') ids.push(id);
     }
     return ids;
+  }
+
+  deleteByThread(threadId: string): number {
+    const victims: string[] = [];
+    for (const [id, record] of this.records) {
+      if (record.threadId === threadId) victims.push(id);
+    }
+    // removeRecord() already cleans the cli / active / chain indexes.
+    for (const id of victims) this.removeRecord(id);
+    return victims.length;
   }
 
   /**

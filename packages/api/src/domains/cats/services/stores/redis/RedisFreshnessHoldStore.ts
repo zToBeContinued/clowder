@@ -369,6 +369,28 @@ export class RedisFreshnessHoldStore implements IFreshnessHoldStore {
     return transitioned;
   }
 
+  async deleteByThread(userId: string, threadId: string): Promise<number> {
+    const indexKey = FreshnessHoldKeys.userThread(userId, threadId);
+    const ids = await this.redis.zrange(indexKey, 0, -1);
+
+    const pipeline = this.redis.multi();
+    for (const id of ids) {
+      const detailKey = FreshnessHoldKeys.detail(id);
+      // The submission pointer is keyed by invocation+submissionKey, so it can only be
+      // resolved while the detail hash is still readable.
+      const [invocationId, submissionKey] = await this.redis.hmget(detailKey, 'invocationId', 'submissionKey');
+      if (invocationId && submissionKey) {
+        pipeline.del(FreshnessHoldKeys.submission(invocationId, submissionKey));
+      }
+      pipeline.del(detailKey);
+      pipeline.zrem(FreshnessHoldKeys.DEADLINES, id);
+    }
+    pipeline.del(indexKey);
+    await pipeline.exec();
+
+    return ids.length;
+  }
+
   private hydrate(data: Record<string, string>): FreshnessHoldRecord {
     return {
       id: data.id ?? '',

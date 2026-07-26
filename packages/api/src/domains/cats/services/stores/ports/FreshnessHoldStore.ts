@@ -80,6 +80,11 @@ export interface IFreshnessHoldStore {
   discard(id: string, input: ClaimFreshnessReviewInput): Promise<FreshnessHoldRecord | null>;
   /** 将所有到期 held/reviewing 记录转为 needs_attention，返回成功迁移数量。 */
   expireDue(now: number): Promise<number>;
+  /**
+   * 删除某用户某线程的所有 hold 记录（对话被永久删除时级联）。返回删除数量。
+   * hold 里存着未发布的 draft 正文，所以"永久删除"必须连它一起清掉。
+   */
+  deleteByThread(userId: string, threadId: string): Promise<number>;
 }
 
 export interface FreshnessHoldStoreOptions {
@@ -254,6 +259,19 @@ export class FreshnessHoldStore implements IFreshnessHoldStore {
       }
     }
     return transitioned;
+  }
+
+  async deleteByThread(userId: string, threadId: string): Promise<number> {
+    let deleted = 0;
+    for (const [id, record] of this.records) {
+      if (record.userId !== userId || record.threadId !== threadId) continue;
+      this.records.delete(id);
+      // The submission index is keyed by invocation+submissionKey, so it has to be
+      // cleaned via the record we are about to drop.
+      this.submissionIndex.delete(submissionIndexKey(record.invocationId, record.submissionKey));
+      deleted += 1;
+    }
+    return deleted;
   }
 
   private moveToNeedsAttention(record: FreshnessHoldRecord, reason: FreshnessAttentionReason, now: number): void {

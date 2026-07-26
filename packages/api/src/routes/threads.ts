@@ -18,8 +18,12 @@ import { AuditEventTypes, getEventAuditLog } from '../domains/cats/services/orch
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import type { DeliveryCursorStore } from '../domains/cats/services/stores/ports/DeliveryCursorStore.js';
 import type { IDraftStore } from '../domains/cats/services/stores/ports/DraftStore.js';
+import type { IFreshnessHoldStore } from '../domains/cats/services/stores/ports/FreshnessHoldStore.js';
+import type { IGameStore } from '../domains/cats/services/stores/ports/GameStore.js';
 import type { IMemoryStore } from '../domains/cats/services/stores/ports/MemoryStore.js';
 import { generateSortableId, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';
+import type { ISummaryStore } from '../domains/cats/services/stores/ports/SummaryStore.js';
 import type { ITaskStore } from '../domains/cats/services/stores/ports/TaskStore.js';
 import type { IThreadReadStateStore } from '../domains/cats/services/stores/ports/ThreadReadStateStore.js';
 import {
@@ -29,6 +33,7 @@ import {
   type Thread,
   type ThreadRoutingPolicyV1,
 } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import type { IConnectorThreadBindingStore } from '../infrastructure/connectors/ConnectorThreadBindingStore.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { auditDangerousActionBestEffort, requireDangerousActionConfirmation } from '../utils/dangerous-action-guard.js';
 import { validateProjectPath } from '../utils/project-path.js';
@@ -63,6 +68,23 @@ export interface ThreadsRoutesOptions {
   backlogStore?: IBacklogStore;
   /** B-4: Cascade delete guide session when thread is deleted */
   guideSessionStore?: import('../domains/guides/GuideSessionRepository.js').IGuideSessionStore;
+  /** F24: cascade delete session chains (+ transcript pointers) on permanent delete */
+  sessionChainStore?: Pick<ISessionChainStore, 'deleteByThread'>;
+  /** F24 Phase C: cascade delete on-disk transcripts on permanent delete */
+  transcriptWriter?: { deleteThread(threadId: string): Promise<boolean> };
+  /** Cascade delete thread summaries (拍立得) on permanent delete */
+  summaryStore?: Pick<ISummaryStore, 'deleteByThread'>;
+  /** F101: cascade delete games of the thread on permanent delete */
+  gameStore?: Pick<IGameStore, 'deleteByThread'>;
+  /** Cascade delete freshness holds (they carry unpublished draft text) */
+  freshnessHoldStore?: Pick<IFreshnessHoldStore, 'deleteByThread'>;
+  /** F088: cascade unbind connector↔thread bindings on permanent delete */
+  connectorBindingStore?: Pick<IConnectorThreadBindingStore, 'getByThread' | 'remove'>;
+  /**
+   * F102: drop the thread from the memory index (evidence doc + passages + summary
+   * watermark + embedding vector) on permanent delete.
+   */
+  threadEvidenceCleanup?: (threadId: string) => Promise<void>;
 }
 
 /** F087: Bootcamp state Zod schema (F171 v2 flow) */
@@ -249,17 +271,45 @@ export const threadsRoutes: FastifyPluginAsync<ThreadsRoutesOptions> = async (ap
       ['readState', () => opts.readStateStore?.deleteByThread(threadId)],
       ['deliveryCursors', () => opts.deliveryCursorStore?.deleteByThreadForUser(userId, threadId)],
       ['guideSession', () => opts.guideSessionStore?.delete(threadId)],
+      ['taskProgress', () => taskProgressStore?.deleteThread(threadId)],
+      // Session records carry continuity capsules (thread/cat/handoff context), so a
+      // permanent delete that skips them does not actually erase the conversation.
+      ['sessionChain', () => opts.sessionChainStore?.deleteByThread(threadId)],
+      // Transcripts live on disk: clearing Redis alone leaves the raw events readable.
+      ['transcripts', () => opts.transcriptWriter?.deleteThread(threadId)],
+      ['summaries', () => opts.summaryStore?.deleteByThread(threadId)],
+      ['games', () => opts.gameStore?.deleteByThread(threadId)],
+      // Holds carry unpublished draft text.
+      ['freshnessHolds', () => opts.freshnessHoldStore?.deleteByThread(userId, threadId)],
+      ['connectorBindings', () => unbindConnectors(threadId)],
+      // Indexed passages carry the message text verbatim and are searchable.
+      ['memoryIndex', () => opts.threadEvidenceCleanup?.(threadId)],
     ];
 
+    const failures: string[] = [];
     for (const [name, run] of cleanups) {
       try {
         await run();
       } catch (err) {
+        failures.push(name);
         log.warn({ err, threadId, store: name }, 'purge cascade cleanup failed (non-blocking)');
       }
     }
+    if (failures.length > 0) {
+      // Surfaced as an error because a partial purge leaves data the user believes gone.
+      log.error({ threadId, stores: failures }, 'purge cascade completed with orphaned data');
+    }
 
     return await threadStore.delete(threadId);
+  }
+
+  /** Drop every connector↔thread binding pointing at a purged thread. */
+  async function unbindConnectors(threadId: string): Promise<void> {
+    const store = opts.connectorBindingStore;
+    if (!store) return;
+    for (const binding of await store.getByThread(threadId)) {
+      await store.remove(binding.connectorId, binding.externalChatId);
+    }
   }
 
   // POST /api/threads - 创建对话

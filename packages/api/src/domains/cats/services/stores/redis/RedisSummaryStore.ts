@@ -100,6 +100,20 @@ export class RedisSummaryStore implements ISummaryStore {
     return true;
   }
 
+  async deleteByThread(threadId: string): Promise<number> {
+    const threadKey = SummaryKeys.thread(threadId);
+    const ids = await this.redis.zrange(threadKey, 0, -1);
+
+    const pipeline = this.redis.multi();
+    for (const id of ids) {
+      pipeline.del(SummaryKeys.detail(id));
+    }
+    pipeline.del(threadKey);
+    await pipeline.exec();
+
+    return ids.length;
+  }
+
   private serializeSummary(summary: ThreadSummary): Record<string, string> {
     return {
       id: summary.id,

@@ -258,3 +258,95 @@ describe('RedisSessionChainStore', { skip: redisIsolationSkipReason(REDIS_URL) }
     assert.equal(sealed.sealedAt, sealedAt);
   });
 });
+
+describe('RedisSessionChainStore.deleteByThread', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
+  let redis;
+  let store;
+  let prefix = '';
+  let connected = false;
+
+  const SESSION_PATTERNS = ['session:*', 'session-chain:*', 'session-active:*', 'session-cli:*'];
+
+  before(async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'RedisSessionChainStore.deleteByThread');
+
+    const { RedisSessionChainStore } = await import(
+      '../dist/domains/cats/services/stores/redis/RedisSessionChainStore.js'
+    );
+    const { createRedisClient } = await import('@cat-cafe/shared/utils');
+
+    redis = createRedisClient({ url: REDIS_URL });
+    try {
+      await redis.ping();
+      connected = true;
+    } catch {
+      console.warn('[redis-session-chain-store.test] Redis unreachable, skipping deleteByThread tests');
+      await redis.quit().catch(() => {});
+      return;
+    }
+    prefix = redis.options.keyPrefix ?? '';
+    store = new RedisSessionChainStore(redis);
+  });
+
+  after(async () => {
+    if (redis && connected) {
+      await cleanupPrefixedRedisKeys(redis, SESSION_PATTERNS);
+      await redis.quit();
+    }
+  });
+
+  beforeEach(async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    await cleanupPrefixedRedisKeys(redis, SESSION_PATTERNS);
+  });
+
+  it('removes records, chains, active pointers and cli indexes of every cat', async () => {
+    const threadId = 'thread-doomed';
+    const first = await store.create({ cliSessionId: 'cli-a1', threadId, catId: 'opus', userId: 'user-1' });
+    await store.update(first.id, { status: 'sealed' });
+    await store.create({ cliSessionId: 'cli-a2', threadId, catId: 'opus', userId: 'user-1' });
+    await store.create({ cliSessionId: 'cli-b1', threadId, catId: 'sonnet', userId: 'user-1' });
+
+    const removed = await store.deleteByThread(threadId);
+
+    assert.equal(removed, 3);
+    assert.deepEqual(await store.getChainByThread(threadId), []);
+    assert.equal(await store.getActive('opus', threadId), null);
+    assert.equal(await store.getByCliSessionId('cli-a1'), null);
+    assert.equal(await store.getByCliSessionId('cli-a2'), null);
+    assert.equal(await store.getByCliSessionId('cli-b1'), null);
+    // keys() does NOT auto-prefix (unlike normal commands) — match on the prefixed pattern.
+    assert.equal((await redis.keys(`${prefix}session-chain:*:${threadId}`)).length, 0);
+    assert.equal((await redis.keys(`${prefix}session-active:*:${threadId}`)).length, 0);
+  });
+
+  it('finds keys by SCAN, so cats missing from the roster are still cleaned', async () => {
+    const threadId = 'thread-doomed';
+    // 'retired-cat' intentionally is not a registry member: enumerating the roster
+    // would skip it and leave permanent orphans (these keys carry no TTL).
+    await store.create({ cliSessionId: 'cli-retired', threadId, catId: 'retired-cat', userId: 'user-1' });
+
+    assert.equal(await store.deleteByThread(threadId), 1);
+    assert.equal((await redis.keys(`${prefix}session*retired-cat*`)).length, 0);
+  });
+
+  it('leaves sessions of other threads untouched', async () => {
+    const survivor = await store.create({
+      cliSessionId: 'cli-keep',
+      threadId: 'thread-keep',
+      catId: 'opus',
+      userId: 'user-1',
+    });
+    await store.create({ cliSessionId: 'cli-drop', threadId: 'thread-doomed', catId: 'opus', userId: 'user-1' });
+
+    await store.deleteByThread('thread-doomed');
+
+    assert.ok(await store.get(survivor.id), 'other threads must survive');
+    assert.ok(await store.getActive('opus', 'thread-keep'));
+    assert.ok(await store.getByCliSessionId('cli-keep'));
+  });
+
+  it('is a no-op for a thread without sessions', async () => {
+    assert.equal(await store.deleteByThread('thread-never-existed'), 0);
+  });
+});

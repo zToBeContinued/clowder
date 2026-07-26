@@ -142,6 +142,42 @@ export class SessionStore {
     return this.redis.del(SessionKeys.mentionAck(userId, catId, threadId));
   }
 
+  /**
+   * Delete every per-cat delivery + mention-ack cursor of one user's thread.
+   *
+   * Cats are discovered by SCAN rather than by enumerating the roster: a cat that has
+   * since been removed from the roster would otherwise never get its cursors cleaned.
+   */
+  async deleteCursorsByThread(userId: string, threadId: string): Promise<number> {
+    const patterns = [SessionKeys.deliveryCursor(userId, '*', threadId), SessionKeys.mentionAck(userId, '*', threadId)];
+    let deleted = 0;
+    for (const pattern of patterns) {
+      deleted += await this.deleteByPattern(pattern);
+    }
+    return deleted;
+  }
+
+  /**
+   * SCAN + DEL every key matching a bare (unprefixed) pattern.
+   *
+   * scanStream does NOT apply keyPrefix (unlike normal commands), so the prefix is added
+   * for matching and stripped again before DEL.
+   */
+  private async deleteByPattern(pattern: string): Promise<number> {
+    const prefix = (this.redis.options as { keyPrefix?: string }).keyPrefix ?? '';
+    let cursor = '0';
+    let deleted = 0;
+    do {
+      const [next, keys] = await this.redis.scan(cursor, 'MATCH', `${prefix}${pattern}`, 'COUNT', 100);
+      cursor = next;
+      if (keys.length > 0) {
+        const bare = keys.map((key) => (prefix && key.startsWith(prefix) ? key.slice(prefix.length) : key));
+        deleted += await this.redis.del(...bare);
+      }
+    } while (cursor !== '0');
+    return deleted;
+  }
+
   async getCatState(catId: string): Promise<Record<string, unknown> | null> {
     const state = await this.redis.get(SessionKeys.catState(catId));
     if (!state) {

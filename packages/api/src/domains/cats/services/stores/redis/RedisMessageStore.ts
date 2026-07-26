@@ -1304,17 +1304,30 @@ export class RedisMessageStore {
 
     // Note: We don't clean up global timeline, user timeline, or mention sets
     // as those will auto-expire via TTL. Cleaning them would be O(n) expensive.
+    //
+    // MessageKeys.freshnessSequence is deliberately kept as an ABA tombstone
+    // (mirrors the in-memory MessageStore): if this thread id is ever reused, a
+    // still-running old invocation must not become fresh again.
 
     await pipeline.exec();
 
-    const matchPattern = `${this.keyPrefix}${MessageKeys.freshnessWhisper(threadId, '*')}`;
+    await this.deleteByPattern(MessageKeys.freshnessWhisper(threadId, '*'));
+    // Idempotency indexes are keyed by (userId, threadId, key) and have no TTL, so
+    // they outlive the messages they point at unless cleaned here. The in-memory
+    // store prunes them in deleteByThread; keep both implementations aligned.
+    await this.deleteByPattern(MessageKeys.idempotency('*', threadId, '*'));
+    return ids.length;
+  }
+
+  /** SCAN + DEL every key matching a bare (unprefixed) pattern. */
+  private async deleteByPattern(pattern: string): Promise<void> {
+    const matchPattern = `${this.keyPrefix}${pattern}`;
     let cursor = '0';
     do {
       const [nextCursor, keys] = await this.redis.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
       cursor = nextCursor;
       if (keys.length > 0) await this.redis.del(...keys.map((entry) => this.stripPrefix(entry)));
     } while (cursor !== '0');
-    return ids.length;
   }
 
   /**

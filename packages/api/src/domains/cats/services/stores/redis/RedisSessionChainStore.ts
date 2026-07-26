@@ -273,6 +273,43 @@ export class RedisSessionChainStore implements ISessionChainStore {
     return ids;
   }
 
+  /**
+   * Hard-delete every session of a thread across all cats.
+   *
+   * Keys are discovered by SCAN rather than by enumerating the cat roster: cats that
+   * have since left the roster would otherwise leave orphaned chain/active keys behind
+   * (none of these keys carry a TTL).
+   */
+  async deleteByThread(threadId: string): Promise<number> {
+    const chainKeys = await this.scanKeys(SessionChainKeys.chain('*', threadId));
+    const activeKeys = await this.scanKeys(SessionChainKeys.active('*', threadId));
+
+    const sessionIds = new Set<string>();
+    for (const chainKey of chainKeys) {
+      for (const id of await this.redis.zrange(chainKey, 0, -1)) sessionIds.add(id);
+    }
+    // Active pointers can survive a chain key loss; take their ids too.
+    for (const activeKey of activeKeys) {
+      const id = await this.redis.get(activeKey);
+      if (id) sessionIds.add(id);
+    }
+
+    // The CLI index is keyed by cliSessionId, so it can only be cleaned while the
+    // detail hash is still readable.
+    const cliKeys: string[] = [];
+    const detailKeys: string[] = [];
+    for (const id of sessionIds) {
+      const detailKey = SessionChainKeys.detail(id);
+      detailKeys.push(detailKey);
+      const cliSessionId = await this.redis.hget(detailKey, 'cliSessionId');
+      if (cliSessionId) cliKeys.push(SessionChainKeys.byCli(cliSessionId));
+    }
+
+    const doomed = [...detailKeys, ...cliKeys, ...chainKeys, ...activeKeys];
+    if (doomed.length > 0) await this.redis.del(...doomed);
+    return sessionIds.size;
+  }
+
   private hydrate(data: Record<string, string>): SessionRecord {
     const contextHealth = safeParseJson<ContextHealth>(data.contextHealth);
     const lastUsage = safeParseJson<SessionUsageSnapshot>(data.lastUsage);

@@ -497,3 +497,103 @@ describe('RedisMessageStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () 
     assert.equal(msgs[1].origin, undefined, 'normal message should have no origin');
   });
 });
+
+describe('RedisMessageStore cascade cleanup', { skip: redisIsolationSkipReason(REDIS_URL) }, () => {
+  let redis;
+  let store;
+  let prefix = '';
+  let connected = false;
+
+  before(async () => {
+    assertRedisIsolationOrThrow(REDIS_URL, 'RedisMessageStore cascade cleanup');
+
+    const { RedisMessageStore } = await import('../dist/domains/cats/services/stores/redis/RedisMessageStore.js');
+    const { createRedisClient } = await import('@cat-cafe/shared/utils');
+
+    redis = createRedisClient({ url: REDIS_URL });
+    try {
+      await redis.ping();
+      connected = true;
+    } catch {
+      console.warn('[redis-message-store.test] Redis unreachable, skipping cascade tests');
+      await redis.quit().catch(() => {});
+      return;
+    }
+    prefix = redis.options.keyPrefix ?? '';
+    store = new RedisMessageStore(redis, { ttlSeconds: 0 });
+  });
+
+  after(async () => {
+    if (redis && connected) {
+      await cleanupPrefixedRedisKeys(redis, ['msg:*']);
+      await redis.quit();
+    }
+  });
+
+  beforeEach(async (t) => {
+    if (!connected) return t.skip('Redis not connected');
+    await cleanupPrefixedRedisKeys(redis, ['msg:*']);
+  });
+
+  it('deleteByThread() removes idempotency pointers of the thread', async () => {
+    const threadId = 'thread-purge-idem';
+    await store.append({
+      userId: 'user1',
+      catId: null,
+      content: 'hello',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+      idempotencyKey: 'retry-token-1',
+    });
+    // keys() does NOT auto-prefix (unlike normal commands) — match on the prefixed pattern.
+    assert.equal((await redis.keys(`${prefix}msg:idem:*:${threadId}:*`)).length, 1);
+
+    await store.deleteByThread(threadId);
+
+    assert.equal(
+      (await redis.keys(`${prefix}msg:idem:*:${threadId}:*`)).length,
+      0,
+      'idempotency pointers have no TTL, so a purge must clean them',
+    );
+  });
+
+  it('deleteByThread() keeps the freshness sequence as an ABA tombstone', async () => {
+    const threadId = 'thread-purge-seq';
+    await store.append({
+      userId: 'user1',
+      catId: null,
+      content: 'hello',
+      mentions: [],
+      timestamp: Date.now(),
+      threadId,
+    });
+
+    await store.deleteByThread(threadId);
+
+    // A still-running old invocation must not become fresh again if this thread id
+    // is ever reused (mirrors the in-memory MessageStore contract).
+    assert.equal(await redis.exists(`msg:freshness:seq:${threadId}`), 1);
+  });
+
+  it('deleteByThread() leaves other threads idempotency pointers alone', async () => {
+    const doomed = 'thread-purge-a';
+    const survivor = 'thread-purge-b';
+    for (const threadId of [doomed, survivor]) {
+      await store.append({
+        userId: 'user1',
+        catId: null,
+        content: 'hello',
+        mentions: [],
+        timestamp: Date.now(),
+        threadId,
+        idempotencyKey: 'retry-token-1',
+      });
+    }
+
+    await store.deleteByThread(doomed);
+
+    assert.equal((await redis.keys(`${prefix}msg:idem:*:${doomed}:*`)).length, 0);
+    assert.equal((await redis.keys(`${prefix}msg:idem:*:${survivor}:*`)).length, 1);
+  });
+});

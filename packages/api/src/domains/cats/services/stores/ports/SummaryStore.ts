@@ -16,6 +16,8 @@ export interface ISummaryStore {
   get(summaryId: string): ThreadSummary | null | Promise<ThreadSummary | null>;
   listByThread(threadId: string): ThreadSummary[] | Promise<ThreadSummary[]>;
   delete(summaryId: string): boolean | Promise<boolean>;
+  /** Delete every summary of a thread (cascade on thread purge). Returns the count. */
+  deleteByThread(threadId: string): number | Promise<number>;
 }
 
 /**
@@ -63,6 +65,17 @@ export class SummaryStore implements ISummaryStore {
 
   delete(summaryId: string): boolean {
     return this.summaries.delete(summaryId);
+  }
+
+  deleteByThread(threadId: string): number {
+    let deleted = 0;
+    for (const [id, summary] of this.summaries) {
+      if (summary.threadId === threadId) {
+        this.summaries.delete(id);
+        deleted += 1;
+      }
+    }
+    return deleted;
   }
 
   /** Current summary count (for testing) */

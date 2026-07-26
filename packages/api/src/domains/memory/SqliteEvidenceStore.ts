@@ -728,10 +728,33 @@ export class SqliteEvidenceStore implements IEvidenceStore {
     });
   }
 
+  /**
+   * Delete an evidence doc and its passages.
+   *
+   * evidence_passages has no FK to evidence_docs (only a doc_anchor convention), so
+   * dropping the doc alone would leave the per-message text — and its passage_fts
+   * entries — behind forever. The FTS delete trigger keeps the index in sync.
+   */
   async deleteByAnchor(anchor: string): Promise<void> {
     return this.writeQueue.enqueue(() => {
       this.ensureOpen();
       this.db?.prepare('DELETE FROM evidence_docs WHERE anchor = ?').run(anchor);
+      this.db?.prepare('DELETE FROM evidence_passages WHERE doc_anchor = ?').run(anchor);
+    });
+  }
+
+  /**
+   * Drop everything the memory index holds about a thread (cascade on thread purge).
+   *
+   * Without this the thread doc, its per-message passages and the summary compaction
+   * watermark survive a permanent delete until the next full index rebuild — and the
+   * passages would survive even that.
+   */
+  async deleteThreadEvidence(threadId: string): Promise<void> {
+    await this.deleteByAnchor(`thread-${threadId}`);
+    await this.writeQueue.enqueue(() => {
+      this.ensureOpen();
+      this.db?.prepare('DELETE FROM summary_state WHERE thread_id = ?').run(threadId);
     });
   }
 

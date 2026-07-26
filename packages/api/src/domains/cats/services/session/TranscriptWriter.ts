@@ -12,7 +12,7 @@
  *   { v:1, t:number, threadId, catId, sessionId, cliSessionId, invocationId?, eventNo, event }
  */
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type CollaborationContinuityCapsuleV1,
@@ -82,6 +82,8 @@ export class TranscriptWriter {
   private readonly indexStride: number;
   /** sessionId → buffered events */
   private buffers = new Map<string, BufferedEvent[]>();
+  /** sessionId → threadId, so a thread purge can drop pending buffers too */
+  private bufferedThreadIds = new Map<string, string>();
 
   constructor(opts: TranscriptWriterOptions) {
     this.dataDir = opts.dataDir;
@@ -95,6 +97,7 @@ export class TranscriptWriter {
       buf = [];
       this.buffers.set(session.sessionId, buf);
     }
+    this.bufferedThreadIds.set(session.sessionId, session.threadId);
     buf.push({
       eventNo: buf.length,
       timestamp: Date.now(),
@@ -172,6 +175,7 @@ export class TranscriptWriter {
 
     // Clear buffer
     this.buffers.delete(session.sessionId);
+    this.bufferedThreadIds.delete(session.sessionId);
   }
 
   /**
@@ -326,6 +330,29 @@ export class TranscriptWriter {
         return 'read';
       default:
         return null;
+    }
+  }
+
+  /**
+   * Remove every transcript on disk for a thread (cascade on thread purge).
+   *
+   * Transcripts hold the raw session events, so a permanent delete that only clears
+   * Redis would leave the conversation fully readable on disk. Returns whether a
+   * directory was actually removed.
+   */
+  async deleteThread(threadId: string): Promise<boolean> {
+    const threadDir = join(this.dataDir, 'threads', threadId);
+    // Drop pending buffers too, otherwise a later flush would recreate the directory.
+    for (const [sessionId, bufferedThreadId] of this.bufferedThreadIds) {
+      if (bufferedThreadId !== threadId) continue;
+      this.buffers.delete(sessionId);
+      this.bufferedThreadIds.delete(sessionId);
+    }
+    try {
+      await rm(threadDir, { recursive: true, force: true });
+      return true;
+    } catch {
+      return false;
     }
   }
 

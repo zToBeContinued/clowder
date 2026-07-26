@@ -16,10 +16,6 @@ import { resolveAnthropicRuntimeProfile, resolveForClient } from './config/accou
 import { generateCliConfigs, readCapabilitiesConfig } from './config/capabilities/capability-orchestrator.js';
 import { resolveStartupCliConfigContext } from './config/capabilities/startup-cli-config.js';
 import { resolveBoundAccountRefForCat } from './config/cat-account-binding.js';
-import {
-  getCliRuntimeProfile,
-  resolveCliRuntimeCommand,
-} from './config/cli-runtime-profile-store.js';
 import { getCatContextBudget } from './config/cat-budgets.js';
 import {
   bootstrapDefaultCatCatalog,
@@ -31,6 +27,7 @@ import {
   isCatAvailable,
   toAllCatConfigs,
 } from './config/cat-config-loader.js';
+import { getCliRuntimeProfile, resolveCliRuntimeCommand } from './config/cli-runtime-profile-store.js';
 import { isFreshnessHoldEnabledFor, loadFreshnessHoldRollout } from './config/freshness-hold-rollout.js';
 import { resolveFrontendBaseUrl, resolveFrontendCorsOrigins } from './config/frontend-origin.js';
 import { initRuntimeOverrides } from './config/session-strategy-overrides.js';
@@ -160,8 +157,8 @@ import {
   callbacksRoutes,
   capabilitiesRoutes,
   catsRoutes,
-  cliRuntimeProfilesRoutes,
   claudeRescueRoutes,
+  cliRuntimeProfilesRoutes,
   commandsRoutes,
   communityIssueRoutes,
   configRoutes,
@@ -1244,9 +1241,7 @@ async function main(): Promise<void> {
           service = new GrokAgentService({ catId, cliCommand });
           break;
         case 'cursor': {
-          const { CursorAgentService } = await import(
-            './domains/cats/services/agents/providers/CursorAgentService.js'
-          );
+          const { CursorAgentService } = await import('./domains/cats/services/agents/providers/CursorAgentService.js');
           service = new CursorAgentService({ catId, cliCommand, model: config.defaultModel });
           break;
         }
@@ -1318,9 +1313,7 @@ async function main(): Promise<void> {
   const { createCliRuntimeProfileSubscriber } = await import('./config/cli-runtime-profile-subscriber.js');
   const cliRuntimeProfileSubscriber = createCliRuntimeProfileSubscriber({
     async onReload(changedProfileIds) {
-      app.log.info(
-        `[api] CLI runtime profiles changed [${changedProfileIds.join(', ')}], syncing agent registry...`,
-      );
+      app.log.info(`[api] CLI runtime profiles changed [${changedProfileIds.join(', ')}], syncing agent registry...`);
       await syncAgentRegistry(catRegistry.getAllConfigs());
     },
     log: app.log,
@@ -1822,6 +1815,18 @@ async function main(): Promise<void> {
     auditStore: authAuditStore,
     socketManager,
   });
+  // F142: shared connector binding store — reused by threadsRoutes (purge cascade),
+  // threadCatsRoutes AND the connector gateway.
+  const { RedisConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
+  );
+  const { MemoryConnectorThreadBindingStore } = await import(
+    './infrastructure/connectors/ConnectorThreadBindingStore.js'
+  );
+  const connectorBindingStore = redisClient
+    ? new RedisConnectorThreadBindingStore(redisClient)
+    : new MemoryConnectorThreadBindingStore();
+
   await app.register(threadsRoutes, {
     threadStore,
     messageStore,
@@ -1836,6 +1841,16 @@ async function main(): Promise<void> {
     backlogStore,
     ...(readStateStore ? { readStateStore } : {}),
     guideSessionStore,
+    sessionChainStore,
+    transcriptWriter,
+    summaryStore,
+    ...(f101GameStore ? { gameStore: f101GameStore } : {}),
+    freshnessHoldStore: holdStore,
+    connectorBindingStore,
+    threadEvidenceCleanup: async (threadId: string) => {
+      await memoryServices.store.deleteThreadEvidence(threadId);
+      memoryServices.vectorStore?.delete(`thread-${threadId}`);
+    },
   });
   await app.register(threadBranchRoutes, {
     threadStore,
@@ -1843,16 +1858,6 @@ async function main(): Promise<void> {
     socketManager,
   });
   await app.register(threadExportRoutes, { threadStore });
-  // F142: shared connector binding store — reused by threadCatsRoutes AND connector gateway
-  const { RedisConnectorThreadBindingStore } = await import(
-    './infrastructure/connectors/RedisConnectorThreadBindingStore.js'
-  );
-  const { MemoryConnectorThreadBindingStore } = await import(
-    './infrastructure/connectors/ConnectorThreadBindingStore.js'
-  );
-  const connectorBindingStore = redisClient
-    ? new RedisConnectorThreadBindingStore(redisClient)
-    : new MemoryConnectorThreadBindingStore();
   {
     const allCatConfigs = catRegistry.getAllConfigs();
     await app.register(threadCatsRoutes, {
