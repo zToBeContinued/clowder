@@ -130,6 +130,55 @@ describe('KiroAcpAdapter', () => {
     assert.equal(calls.release, 1);
   });
 
+  it('classifies a mid-stream server 500 as a retryable provider_transient failure', async () => {
+    const { calls, pool } = createHarness({
+      async *promptStream(sessionId) {
+        calls.promptStream.push({ sessionId });
+        throw new AcpProtocolError(
+          -32603,
+          'Internal error',
+          'InternalServerError: Encountered an unexpected error when processing the request, please try again.',
+        );
+      },
+    });
+    const adapter = new KiroAcpAdapter({ catId: 'kiro-cat', pool, projectRoot: '/clowder' });
+
+    const messages = await collect(adapter.invoke('hello'));
+    const error = messages.find((message) => message.type === 'error');
+
+    assert.equal(error.errorCode, 'provider_transient');
+    assert.match(error.error, /Kiro 服务端瞬时故障/);
+    assert.match(error.error, /Encountered an unexpected error/);
+    assert.equal(calls.release, 1);
+  });
+
+  it('keeps context-window overflow out of the transient retry path', async () => {
+    const { pool } = createHarness({
+      async *promptStream() {
+        throw new AcpProtocolError(-32603, 'Internal error', {
+          reason: 'CONTENT_LENGTH_EXCEEDS_THRESHOLD',
+          message: 'Input content length exceeds threshold.',
+        });
+      },
+    });
+    const adapter = new KiroAcpAdapter({ catId: 'kiro-cat', pool, projectRoot: '/clowder' });
+
+    const error = (await collect(adapter.invoke('hello'))).find((message) => message.type === 'error');
+    assert.equal(error.errorCode, 'context_window_overflow');
+  });
+
+  it('keeps a missing session out of the transient retry path', async () => {
+    const { pool } = createHarness({
+      async *promptStream() {
+        throw new AcpProtocolError(-32603, 'Internal error', 'Session not found: kiro-gone');
+      },
+    });
+    const adapter = new KiroAcpAdapter({ catId: 'kiro-cat', pool, projectRoot: '/clowder' });
+
+    const error = (await collect(adapter.invoke('hello'))).find((message) => message.type === 'error');
+    assert.equal(error.errorCode, 'prompt_failure');
+  });
+
   it('filters SSE while retaining stdio and HTTP MCP servers', async () => {
     const { calls, pool } = createHarness();
     const adapter = new KiroAcpAdapter({

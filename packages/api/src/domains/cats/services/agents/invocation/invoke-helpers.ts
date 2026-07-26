@@ -94,6 +94,22 @@ export function isTransientAcpPromptFailure(message: string | undefined): boolea
   return /Premature close|ECONNRESET|socket hang up/i.test(message);
 }
 
+/**
+ * Provider 侧瞬时故障错误码。
+ *
+ * 与文本匹配的 transient 判定不同，这个码由 adapter 自己判定并标注 —— adapter 能看到
+ * 结构化的协议错误（code + data），比在上层猜字符串可靠。上层据此做一次带退避的重试。
+ */
+export const TRANSIENT_PROVIDER_ERROR_CODE = 'provider_transient';
+
+/** Retry backoff for provider 5xx. 立即重试常落在同一故障窗口，给服务端一点恢复时间。 */
+export const TRANSIENT_PROVIDER_RETRY_DELAY_MS =
+  Number(process.env.CAT_CAFE_TRANSIENT_PROVIDER_RETRY_DELAY_MS) || 2_000;
+
+export function isTransientProviderError(errorCode: string | undefined): boolean {
+  return errorCode === TRANSIENT_PROVIDER_ERROR_CODE;
+}
+
 export function isPromptTokenLimitExceededError(message: string | undefined): boolean {
   if (!message) return false;
   return /(prompt token count|input tokens?).*exceeds the limit of \d+/i.test(message);

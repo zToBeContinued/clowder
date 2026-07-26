@@ -1,7 +1,7 @@
 import type { CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
-import { isContextWindowOverflowError } from '../../invocation/invoke-helpers.js';
+import { isContextWindowOverflowError, TRANSIENT_PROVIDER_ERROR_CODE } from '../../invocation/invoke-helpers.js';
 import { AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool } from './AcpProcessPool.js';
 import { transformAcpEvent } from './acp-event-transformer.js';
@@ -199,6 +199,39 @@ function isSupportedKiroMcpServer(server: AcpMcpServer): boolean {
   return !('type' in server && server.type === 'sse');
 }
 
+/**
+ * Kiro 服务端瞬时故障标记。
+ *
+ * Kiro runtimeservice 在响应流中途抛 500 时，Kiro CLI 只把 JSON-RPC message 写成
+ * 笼统的 `Internal error`，真实原因落在 `data` 或 CLI 自己的 kiro-chat.log 里：
+ *   `InternalServerError { message: "Encountered an unexpected error when processing
+ *    the request, please try again." }` / `kind: Other { reason_code: "RecvErrorUnknown" }`
+ * 这类错误重试可恢复，必须与同样走 -32603 的不可重试情形区分开。
+ */
+const KIRO_TRANSIENT_INTERNAL_RE =
+  /Internal error|InternalServerError|Encountered an unexpected error|RecvErrorUnknown|ServiceUnavailable|InternalFailure/i;
+
+/** -32603 下同样到达、但重试不会好转的情形：会话已消失 / 输入超长被服务端拒收。 */
+const KIRO_NON_RETRYABLE_INTERNAL_RE = /Session not found/i;
+
+function stringifyAcpErrorData(data: unknown): string {
+  if (data === undefined || data === null) return '';
+  if (typeof data === 'string') return data;
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return String(data);
+  }
+}
+
+function isTransientKiroInternalError(error: unknown): boolean {
+  if (!(error instanceof AcpProtocolError) || error.code !== -32603) return false;
+  const haystack = `${error.message} ${stringifyAcpErrorData(error.data)}`;
+  if (KIRO_NON_RETRYABLE_INTERNAL_RE.test(haystack)) return false;
+  if (isContextWindowOverflowError(haystack)) return false;
+  return KIRO_TRANSIENT_INTERNAL_RE.test(haystack);
+}
+
 function classifyKiroError(error: unknown, requestedSessionId?: string): { errorCode: string; message: string } {
   if (
     requestedSessionId &&
@@ -219,7 +252,10 @@ function classifyKiroError(error: unknown, requestedSessionId?: string): { error
   }
   // Kiro 服务端在请求进入模型前就以 400 拒收超长输入，重试不会好转，只能压上下文。
   // 单独分类是为了让用户看到可操作提示，而不是笼统的“请求失败”。
-  if (isContextWindowOverflowError(message)) {
+  // JSON-RPC message 常常只是笼统的 `Internal error`，真实 reason 落在 `data` 上，
+  // 所以判定要看 message + data —— 否则超长输入会被误当成可重试故障。
+  const errorDetail = error instanceof AcpProtocolError ? stringifyAcpErrorData(error.data) : '';
+  if (isContextWindowOverflowError(`${message} ${errorDetail}`)) {
     return {
       errorCode: 'context_window_overflow',
       message: `Kiro 上下文超出服务端上限，本轮被拒收：${message}。请降低该成员的 contextBudget、关闭 sessionChain，或新开 thread 重新分派。`,
@@ -230,6 +266,15 @@ function classifyKiroError(error: unknown, requestedSessionId?: string): { error
   }
   if (/\bmcp\b/i.test(message)) {
     return { errorCode: 'mcp_pollution', message: `Kiro MCP 初始化或调用失败：${message}` };
+  }
+  // Kiro 服务端瞬时 5xx。上层（invoke-single-cat）按 errorCode 做一次带退避的重试，
+  // 本次尝试若已产出内容则不重试，错误照常上抛。
+  if (isTransientKiroInternalError(error)) {
+    const detail = errorDetail.slice(0, 300);
+    return {
+      errorCode: TRANSIENT_PROVIDER_ERROR_CODE,
+      message: `Kiro 服务端瞬时故障（稍后自动重试）：${message}${detail ? `（${detail}）` : ''}`,
+    };
   }
   return { errorCode: 'prompt_failure', message: `Kiro ACP 请求失败：${message}` };
 }

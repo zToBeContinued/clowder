@@ -148,7 +148,9 @@ import {
   isPromptTokenLimitExceededError,
   isTransientAcpPromptFailure,
   isTransientCliExitCode1,
+  isTransientProviderError,
   preflightRace,
+  TRANSIENT_PROVIDER_RETRY_DELAY_MS,
 } from './invoke-helpers.js';
 import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
@@ -183,6 +185,25 @@ function abortableNext<T>(iter: AsyncIterator<T>, signal: AbortSignal): Promise<
         reject(err);
       },
     );
+  });
+}
+
+/**
+ * Sleep that respects the invocation AbortSignal.
+ * Used for retry backoff — a cancelled invocation must not sit in a timer.
+ */
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new Error('aborted'));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -2158,6 +2179,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       let suppressedTimeoutError: AgentMessage | undefined;
       let shouldRetryWithoutSession = false;
       let shouldRetryOnTransientCliExit = false;
+      let transientRetryDelayMs = 0;
       let attemptHasContentOutput = false;
       // Substantive = real model output (text/tool), excludes system_info/session_init/error/done.
       // Used for timeout-retry: system_info (e.g. timeout_diagnostics) must NOT block retry.
@@ -2205,9 +2227,15 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           allowTransientRetry &&
           !attemptHasContentOutput &&
           msg.type === 'error' &&
-          (isTransientCliExitCode1(msg.error) || isTransientAcpPromptFailure(msg.error))
+          (isTransientCliExitCode1(msg.error) ||
+            isTransientAcpPromptFailure(msg.error) ||
+            isTransientProviderError(msg.errorCode))
         ) {
           suppressedTransientCliError = msg;
+          // Provider 5xx：退避后再重试；本地 CLI bootstrap 退出保持立即重试。
+          if (isTransientProviderError(msg.errorCode)) {
+            transientRetryDelayMs = TRANSIENT_PROVIDER_RETRY_DELAY_MS;
+          }
           continue;
         }
         // #774 self-heal: CLI timeout during session resume with no substantive output
@@ -2367,20 +2395,26 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         continue;
       }
       if (shouldRetryOnTransientCliExit && attempt + 1 < maxAttempts) {
+        const transientReason = transientRetryDelayMs > 0 ? 'transient_provider_error' : 'transient_cli_exit';
         log.info(
           {
             catId,
             threadId,
             invocationId,
-            reason: 'transient_cli_exit',
-            retryReason: 'transient_cli_exit',
+            reason: transientReason,
+            retryReason: transientReason,
             attempt: attempt + 1,
             retryAttempt: attempt + 2,
             elapsedMs: Date.now() - attemptStartedAt,
+            backoffMs: transientRetryDelayMs,
             hadSessionId: Boolean(options.sessionId),
           },
-          'cat retrying invoke (transient CLI exit)',
+          'cat retrying invoke (%s)',
+          transientReason,
         );
+        if (transientRetryDelayMs > 0) {
+          await abortableDelay(transientRetryDelayMs, signal);
+        }
         allowTransientRetry = false;
         continue;
       }
