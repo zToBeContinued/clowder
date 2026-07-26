@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
 import type { InvocationRegistry } from '../domains/cats/services/agents/invocation/InvocationRegistry.js';
+import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
+import type { MarkerQueueRouter } from '../domains/memory/MarkerQueueRouter.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
 
@@ -13,6 +15,13 @@ interface CallbackMemoryRoutesDeps {
   reflectionService: IReflectionService;
   freshnessGate?: FreshnessEgressGate;
   registry: Pick<InvocationRegistry, 'isLatest'>;
+  /**
+   * 按 thread 所属项目路由 marker。缺省时全部落到 `markerQueue`（旧行为），
+   * 那会把外部项目的知识写进本仓库的 docs/markers/。
+   */
+  markerQueueRouter?: MarkerQueueRouter;
+  /** 解析 thread.projectPath 用；与 markerQueueRouter 同时提供才生效。 */
+  threadStore?: Pick<IThreadStore, 'get'>;
 }
 
 const searchEvidenceQuerySchema = z.object({
@@ -28,6 +37,16 @@ const retainMemorySchema = z.object({
   tags: z.union([z.string(), z.array(z.string())]).optional(),
   metadata: z.record(z.string()).optional(),
 });
+
+/**
+ * 选择该 thread 的 marker 队列：外部项目的知识写回它自己的项目，不进本仓库知识库。
+ * 拿不到 thread（已删除/store 报错）时退回本地队列 —— 丢 marker 比静默失败更糟。
+ */
+async function resolveMarkerQueue(deps: CallbackMemoryRoutesDeps, threadId: string): Promise<IMarkerQueue> {
+  if (!deps.markerQueueRouter || !deps.threadStore) return deps.markerQueue;
+  const thread = await Promise.resolve(deps.threadStore.get(threadId)).catch(() => null);
+  return deps.markerQueueRouter.resolve(thread?.projectPath);
+}
 
 export async function registerCallbackMemoryRoutes(
   app: FastifyInstance,
@@ -107,7 +126,8 @@ export async function registerCallbackMemoryRoutes(
     if (freshness.outcome === 'stale' || freshness.outcome === 'replayed') return freshness.response;
 
     try {
-      await deps.markerQueue.submit({
+      const queue = await resolveMarkerQueue(deps, record.threadId);
+      await queue.submit({
         content,
         source: `callback:${record.catId}:${record.invocationId}`,
         status: 'captured',

@@ -612,13 +612,14 @@ async function main(): Promise<void> {
 
   // F102: Memory services — SQLite-only
   // P1 fix: resolve paths relative to repo root, not CWD (which may be packages/api)
-  const { existsSync } = await import('node:fs');
+  //
+  // 这里曾用「cwd/docs/features 是否存在」来探测仓库根。API 进程的 cwd 就是
+  // packages/api，而 packages/api/docs/features/ 恰好存在（.gitkeep + TEMPLATE.md
+  // 都被 git 跟踪），于是 repoRoot 被判成 packages/api，evidence.sqlite / world.sqlite
+  // / docsRoot / markersDir 全落在包目录里，仓库根的 docs/markers/ 反而一直是空的。
+  // 改用 findMonorepoRoot（认 pnpm-workspace.yaml），与本文件其余十几处保持一致。
   const { resolve } = await import('node:path');
-  const repoRoot = existsSync(resolve(process.cwd(), 'docs', 'features'))
-    ? process.cwd()
-    : existsSync(resolve(process.cwd(), '..', '..', 'docs', 'features'))
-      ? resolve(process.cwd(), '..', '..')
-      : process.cwd();
+  const repoRoot = findMonorepoRoot(process.cwd());
 
   const { initRepoIdentity, isSameRepo } = await import('./utils/is-same-repo.js');
   initRepoIdentity(repoRoot);
@@ -671,6 +672,10 @@ async function main(): Promise<void> {
   // F152: Wire evidence store into /ready probe
   evidenceStoreRef = memoryServices.evidenceStore;
   app.log.info('[api] F102: SQLite memory services initialized');
+
+  // 外部项目 thread 产出的 marker 写回它自己的项目，不进本仓库的 docs/markers/。
+  const { MarkerQueueRouter } = await import('./domains/memory/MarkerQueueRouter.js');
+  const markerQueueRouter = new MarkerQueueRouter(memoryServices.markerQueue, repoRoot);
 
   // Thread index repair: rebuild ZSet indexes from thread detail hashes if sparse.
   // Prevents "all threads disappeared" after unclean shutdown.
@@ -1774,6 +1779,7 @@ async function main(): Promise<void> {
     invocationQueue,
     evidenceStore: memoryServices.evidenceStore,
     markerQueue: memoryServices.markerQueue,
+    markerQueueRouter,
     reflectionService: memoryServices.reflectionService,
     limbRegistry,
     limbPairingStore,

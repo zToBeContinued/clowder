@@ -41,6 +41,7 @@ import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/store
 import { canViewMessage, isSystemUserMessage } from '../domains/cats/services/stores/visibility.js';
 import { getVoiceBlockSynthesizer } from '../domains/cats/services/tts/VoiceBlockSynthesizer.js';
 import type { IEvidenceStore, IMarkerQueue, IReflectionService } from '../domains/memory/interfaces.js';
+import type { MarkerQueueRouter } from '../domains/memory/MarkerQueueRouter.js';
 import { buildVoteNotification } from '../domains/votes/vote-utils.js';
 import { buildThreadDeepLink } from '../infrastructure/connectors/connector-command-helpers.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
@@ -164,6 +165,8 @@ export interface CallbackRoutesOptions {
   /** F102: DI memory services — SQLite-backed evidence store */
   evidenceStore: IEvidenceStore;
   markerQueue: IMarkerQueue;
+  /** 按 thread 所属项目路由 marker，避免外部项目的知识写进本仓库 docs/markers/。 */
+  markerQueueRouter?: MarkerQueueRouter;
   reflectionService: IReflectionService;
   holdBallDeps?: HoldBallRouteDeps;
   /** Queue auto-dequeue on A2A invocation completion */
@@ -2897,6 +2900,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     evidenceStore: opts.evidenceStore,
     markerQueue: opts.markerQueue,
     reflectionService: opts.reflectionService,
+    ...(opts.markerQueueRouter ? { markerQueueRouter: opts.markerQueueRouter } : {}),
+    ...(opts.threadStore ? { threadStore: opts.threadStore } : {}),
     ...(opts.freshnessGate ? { freshnessGate: opts.freshnessGate } : {}),
   });
 
