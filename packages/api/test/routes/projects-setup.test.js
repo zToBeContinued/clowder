@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
@@ -79,9 +79,13 @@ describe('POST /api/projects/setup', () => {
 
     const projectName = basename(testRoot);
     const projectDir = join(testRoot, '.cat-cafe', 'projects', projectName);
+    // The route reports the realpath-resolved path (validateProjectPath resolves it), while
+    // Windows hands out an 8.3 short path here (…\ADMINI~1\… vs …\Administrator\…).
+    const resolvedProjectDir = join(await realpath(testRoot), '.cat-cafe', 'projects', projectName);
     assert.equal(body.projectInit.projectName, projectName);
     assert.ok(
-      body.projectInit.projectDir.endsWith(projectDir.replace(/^\/private/, '')),
+      body.projectInit.projectDir.endsWith(projectDir.replace(/^\/private/, '')) ||
+        body.projectInit.projectDir.endsWith(resolvedProjectDir),
       `projectDir should end with expected path, got ${body.projectInit.projectDir}`,
     );
 
