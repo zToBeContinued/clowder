@@ -84,6 +84,7 @@ import {
   isHistoryGovernanceObserveEnabled,
   isUserFacingSystemInfoContent,
   parseCompactBoundarySystemInfo,
+  persistParallelHandoffSuppressedNotice,
   persistSilentCompletionNotice,
   publishFreshnessDraft,
   readHistoryForGovernanceObservation,
@@ -1816,6 +1817,8 @@ export async function* routeParallel(
         // 不 emit a2a_followup_available 提示，避免引导用户/猫猫误以为 @ 真的转移了球权。
         // 若文本里仍出现 @句柄，仅记录 suppressedInParallel 日志用于观测。
         if (isFinal) {
+          /** target cat → cats that tried to hand off to it */
+          const suppressedByTarget = new Map<string, string[]>();
           for (const [cid, text] of catText.entries()) {
             const ms = parseA2AMentions(text, cid as CatId);
             if (ms.length > 0) {
@@ -1823,6 +1826,24 @@ export async function* routeParallel(
                 { threadId, cat: cid, suppressedMentions: ms, suppressedInParallel: true },
                 'F167 L2: parallel-mode @ mentions suppressed (no routing, no followup hint)',
               );
+              for (const target of ms) {
+                const from = suppressedByTarget.get(target) ?? [];
+                from.push(cid);
+                suppressedByTarget.set(target, from);
+              }
+            }
+          }
+          // Suppression itself is correct; silence about it is not. Without this the
+          // thread just stops after "handing off to @X" and looks crashed.
+          if (suppressedByTarget.size > 0) {
+            try {
+              await persistParallelHandoffSuppressedNotice(deps, {
+                threadId,
+                suppressed: suppressedByTarget,
+                triggerMessageId: currentUserMessageId,
+              });
+            } catch (err) {
+              log.warn({ threadId, err }, 'parallel handoff suppressed notice failed (non-blocking)');
             }
           }
         }

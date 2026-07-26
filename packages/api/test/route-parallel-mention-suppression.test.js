@@ -118,3 +118,101 @@ describe('F167 L2: routeParallel mention suppression', () => {
     }
   });
 });
+
+describe('F167 L2: suppressed handoff is announced to the user', () => {
+  function findNotice(appendCalls) {
+    return appendCalls.find((c) => c.source?.connector === 'parallel-handoff-suppressed');
+  }
+
+  test('persists one system notice naming who wanted to hand off to whom', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createDeps(
+      {
+        opus: createMentionService('opus', '拆解完了\n@codex 你来实现'),
+        codex: createMentionService('codex', '收到\n@opus 收口给你'),
+      },
+      { appendCalls },
+    );
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], 'ideate', 'user1', 'thread-notice')) {
+    }
+
+    const notice = findNotice(appendCalls);
+    assert.ok(notice, 'a suppressed handoff must not leave the thread silently stopped');
+    assert.equal(notice.userId, 'system');
+    assert.equal(notice.catId, null);
+    // Must not re-enter routing itself, or the notice would recreate the cascade F167 prevents.
+    assert.deepStrictEqual(notice.mentions, []);
+    assert.equal(notice.source.meta.presentation, 'system_notice');
+    assert.equal(notice.source.meta.reason, 'parallel_mode_no_routing');
+    assert.match(notice.content, /并行轮次结束/);
+    assert.match(notice.content, /@codex/);
+    assert.match(notice.content, /@opus/);
+    assert.deepStrictEqual(notice.source.meta.suppressedHandoffs, { codex: ['opus'], opus: ['codex'] });
+  });
+
+  test('stays silent when no cat tried to hand off', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createDeps(
+      {
+        opus: createMentionService('opus', '独立意见 A'),
+        codex: createMentionService('codex', '独立意见 B'),
+      },
+      { appendCalls },
+    );
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex'], 'ideate', 'user1', 'thread-quiet')) {
+    }
+
+    assert.equal(findNotice(appendCalls), undefined, 'no handoff means no notice');
+  });
+
+  test('emits a single notice for several cats handing off to the same target', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createDeps(
+      {
+        opus: createMentionService('opus', '@sonnet 交给你'),
+        codex: createMentionService('codex', '@sonnet 也交给你'),
+        sonnet: createMentionService('sonnet', '我先看看'),
+      },
+      { appendCalls },
+    );
+
+    for await (const _ of routeParallel(deps, ['opus', 'codex', 'sonnet'], 'ideate', 'user1', 'thread-fanin')) {
+    }
+
+    const notices = appendCalls.filter((c) => c.source?.connector === 'parallel-handoff-suppressed');
+    assert.equal(notices.length, 1, 'one round produces at most one notice');
+    assert.deepStrictEqual(notices[0].source.meta.suppressedHandoffs, { sonnet: ['opus', 'codex'] });
+  });
+
+  test('a failing notice never breaks the round', async () => {
+    const { routeParallel } = await import('../dist/domains/cats/services/agents/routing/route-parallel.js');
+    const appendCalls = [];
+    const deps = createDeps(
+      {
+        opus: createMentionService('opus', '@codex 交给你'),
+        codex: createMentionService('codex', '收到'),
+      },
+      { appendCalls },
+    );
+    const realAppend = deps.messageStore.append;
+    deps.messageStore.append = async (payload) => {
+      if (payload.source?.connector === 'parallel-handoff-suppressed') throw new Error('append exploded');
+      return realAppend(payload);
+    };
+
+    const events = [];
+    for await (const msg of routeParallel(deps, ['opus', 'codex'], 'ideate', 'user1', 'thread-boom')) {
+      events.push(msg);
+    }
+
+    assert.ok(
+      events.some((e) => e.type === 'done' && e.isFinal),
+      'the round must still terminate normally',
+    );
+  });
+});

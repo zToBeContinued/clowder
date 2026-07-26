@@ -1295,6 +1295,69 @@ export async function persistA2APendingNotice(
   });
 }
 
+/**
+ * F167 L2: tell the user that a parallel round ended with unrouted @ handoffs.
+ *
+ * Parallel rounds deliberately do not route cat→cat @ mentions (that would let six cats
+ * @ each other into a cascade). Staying silent about it, though, makes the thread look
+ * crashed: the last cat says "handing off to @X" and then nothing ever happens. This
+ * notice states plainly that the round is over and the ball is with the user.
+ */
+export async function persistParallelHandoffSuppressedNotice(
+  deps: Pick<RouteStrategyDeps, 'messageStore' | 'socketManager'>,
+  args: {
+    threadId: string;
+    /** target cat handle → cats that tried to hand off to it */
+    suppressed: ReadonlyMap<string, readonly string[]>;
+    /** Undefined on legacy (non-incremental) routes; dedupe then falls back to the round timestamp. */
+    triggerMessageId: string | undefined;
+  },
+): Promise<void> {
+  if (args.suppressed.size === 0) return;
+
+  const timestamp = Date.now();
+  const parts = [...args.suppressed.entries()].map(
+    ([targetCatId, fromCatIds]) => `${fromCatIds.join('、')} → @${targetCatId}`,
+  );
+  const targets = [...args.suppressed.keys()].map((id) => `@${id}`).join(' ');
+  const content = `[并行轮次结束]: 本轮的交接未自动传球（${parts.join('；')}）。并行模式下猫猫之间的 @ 不路由，需要你发一句 ${targets} 才会继续。`;
+  const source = {
+    connector: 'parallel-handoff-suppressed',
+    label: '并行轮次结束',
+    icon: 'info',
+    meta: {
+      presentation: 'system_notice',
+      noticeTone: 'info',
+      threadId: args.threadId,
+      suppressedHandoffs: Object.fromEntries(args.suppressed),
+      reason: 'parallel_mode_no_routing',
+    },
+  } as const;
+
+  const stored = await deps.messageStore.append({
+    userId: 'system',
+    catId: null,
+    threadId: args.threadId,
+    content,
+    mentions: [],
+    timestamp,
+    source,
+    // Keyed on the triggering user message so a replay of the same round cannot
+    // duplicate the notice.
+    idempotencyKey: `parallel-handoff-suppressed:${args.triggerMessageId ?? `${args.threadId}:${timestamp}`}`,
+  });
+  deps.socketManager?.broadcastToRoom(`thread:${args.threadId}`, 'connector_message', {
+    threadId: args.threadId,
+    message: {
+      id: stored.id,
+      type: 'connector',
+      content: stored.content,
+      source: stored.source,
+      timestamp: stored.timestamp,
+    },
+  });
+}
+
 export async function persistA2ADeferredNotice(
   deps: Pick<RouteStrategyDeps, 'messageStore' | 'socketManager'>,
   args: {
