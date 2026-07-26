@@ -274,6 +274,12 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
         }
         projectInitResult = await runProjectInit(catCafeRoot, validated, projectName);
         if (!projectInitResult.ok) {
+          // Without this the 500 is only visible in the browser console, which made a
+          // real failure ("scaffold already exists") look like an unexplained crash.
+          app.log.error(
+            { projectPath: validated, projectName, error: projectInitResult.error },
+            'project init scaffold failed',
+          );
           reply.status(500);
           return { ok: false, error: projectInitResult.error };
         }
@@ -337,6 +343,7 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
           : undefined,
       };
     } catch (err) {
+      app.log.error({ err, projectPath: validated, mode }, 'project setup failed');
       reply.status(500);
       return { ok: false, error: err instanceof Error ? err.message : 'Governance bootstrap failed' };
     }

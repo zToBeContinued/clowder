@@ -10,6 +10,20 @@ const { completeCapsuleForSeal, buildCapsuleFromRouteState } = await import(
   '../dist/domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js'
 );
 
+/**
+ * Wait until the recorded task has at least `count` events.
+ * Fast-lane terminal events land after a real child-process spawn, so a fixed sleep is
+ * flaky on slower machines.
+ */
+async function waitForTaskEvents(updatedTasks, count, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if ((updatedTasks.at(-1)?.events.length ?? 0) >= count) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`timed out waiting for ${count} task events, got ${updatedTasks.at(-1)?.events.length ?? 0}`);
+}
+
 /** Build a stub deps object for QueueProcessor */
 function stubDeps(overrides = {}) {
   return {
@@ -525,11 +539,14 @@ describe('QueueProcessor', () => {
     }
   });
 
-  it('CAT_CAFE_FAST_LANE=1 fails closed when project-init refuses to overwrite existing project', async () => {
+  it('CAT_CAFE_FAST_LANE=1 fails closed when the project-init script exits non-zero', async () => {
     const previous = process.env.CAT_CAFE_FAST_LANE;
     process.env.CAT_CAFE_FAST_LANE = '1';
     const projectRoot = await mkdtemp(join(tmpdir(), 'cat-fast-lane-existing-'));
-    await mkdir(join(projectRoot, '.cat-cafe', 'projects', 'existing'), { recursive: true });
+    // .cat-cafe/projects as a FILE makes the script's mkdir fail after spawn. An
+    // already-existing project dir is no longer a failure — the scaffold is idempotent.
+    await mkdir(join(projectRoot, '.cat-cafe'), { recursive: true });
+    await writeFile(join(projectRoot, '.cat-cafe', 'projects'), 'not a directory', 'utf-8');
     try {
       const sourceTask = {
         id: 'task-source',
@@ -567,17 +584,67 @@ describe('QueueProcessor', () => {
 
       const result = await fastProcessor.processNext('t1', 'u1');
       assert.equal(result.started, true);
-      await new Promise((r) => setTimeout(r, 200));
+      // The terminal event lands after a real node spawn, so poll instead of sleeping a
+      // fixed amount — spawn latency varies a lot across machines.
+      await waitForTaskEvents(updatedTasks, 3);
 
       assert.equal(fastDeps.router.routeExecution.mock.calls.length, 0, 'post-spawn failure must not rerun slow lane');
       const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
       assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_failed']);
       const failed = updatedTasks.at(-1).events.at(-1);
-      assert.match(failed.data.stderr, /拒绝覆盖/);
+      assert.match(failed.data.stderr, /ENOTDIR|not a directory/i);
       const errorMessage = fastDeps.socketManager.broadcastAgentMessage.mock.calls.find(
         (call) => call.arguments[0].type === 'error',
       );
-      assert.match(errorMessage.arguments[0].error, /拒绝覆盖/);
+      assert.ok(errorMessage, 'a fast-lane failure must be broadcast to the user');
+    } finally {
+      if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
+      else process.env.CAT_CAFE_FAST_LANE = previous;
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('CAT_CAFE_FAST_LANE=1 treats an already-scaffolded project as success', async () => {
+    const previous = process.env.CAT_CAFE_FAST_LANE;
+    process.env.CAT_CAFE_FAST_LANE = '1';
+    const projectRoot = await mkdtemp(join(tmpdir(), 'cat-fast-lane-idempotent-'));
+    await mkdir(join(projectRoot, '.cat-cafe', 'projects', 'existing'), { recursive: true });
+    try {
+      const sourceTask = { id: 'task-source', threadId: 't1', sourceMessageId: 'msg-task', events: [] };
+      const updatedTasks = [];
+      const fastDeps = stubDeps({
+        messageStore: {
+          append: mock.fn(async () => ({ id: 'msg-stub' })),
+          getById: mock.fn(async () => null),
+          markDelivered: mock.fn(async () => null),
+        },
+        gitArtifactCollector: mock.fn(async () => ({ files: [], totalAdded: 0, totalRemoved: 0 })),
+        taskStore: {
+          listByThread: mock.fn(async () => [updatedTasks.at(-1) ?? sourceTask]),
+          update: mock.fn(async (_taskId, input) => {
+            const previousTask = updatedTasks.at(-1) ?? sourceTask;
+            const updated = { ...sourceTask, events: [...previousTask.events, ...(input.events ?? [])] };
+            updatedTasks.push(updated);
+            return updated;
+          }),
+        },
+      });
+      const fastProcessor = new QueueProcessor(fastDeps);
+      const entry = enqueueEntry(fastDeps.queue, {
+        content: `/project-init existing --root ${projectRoot}`,
+        targetCats: ['opus'],
+      });
+      fastDeps.queue.backfillMessageId('t1', 'u1', entry.id, 'msg-task');
+
+      const result = await fastProcessor.processNext('t1', 'u1');
+      assert.equal(result.started, true);
+      await waitForTaskEvents(updatedTasks, 3);
+
+      // The scaffold is project-level and shared by every channel of that project, so
+      // "already there" is the desired end state. Failing here used to break channel
+      // creation with a 500 that no retry could clear.
+      const eventTypes = updatedTasks.at(-1).events.map((event) => event.type);
+      assert.deepEqual(eventTypes, ['fast_lane_decision', 'fast_lane_started', 'fast_lane_completed']);
     } finally {
       if (previous === undefined) delete process.env.CAT_CAFE_FAST_LANE;
       else process.env.CAT_CAFE_FAST_LANE = previous;

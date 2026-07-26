@@ -72,7 +72,11 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const projectDir = resolve(args.root, '.cat-cafe', 'projects', args.name);
   if (existsSync(projectDir)) {
-    throw new Error(`项目目录已存在，拒绝覆盖：${projectDir}`);
+    // Idempotent by design: the scaffold is project-level and shared by every channel of
+    // that project, so "already there" is the desired end state, not an error. Failing
+    // here used to break channel creation with an unretryable 500.
+    console.log(`already initialized .cat-cafe/projects/${args.name}`);
+    return;
   }
 
   const variables = {
@@ -85,7 +89,10 @@ async function main() {
   await writeNewFile(resolve(projectDir, 'brief.md'), await renderTemplate('brief.template.md', variables));
   await writeNewFile(resolve(projectDir, 'progress.md'), await renderTemplate('progress.template.md', variables));
   await writeNewFile(resolve(projectDir, 'decisions.md'), await renderTemplate('decisions.template.md', variables));
-  await writeNewFile(resolve(projectDir, 'handoff-index.md'), await renderTemplate('handoff-index.template.md', variables));
+  await writeNewFile(
+    resolve(projectDir, 'handoff-index.md'),
+    await renderTemplate('handoff-index.template.md', variables),
+  );
   await writeNewFile(resolve(projectDir, 'handoff-log.md'), await renderTemplate('handoff-log.template.md', variables));
   if (args.security) {
     await writeNewFile(resolve(projectDir, 'security.md'), await renderTemplate('security.template.md', variables));
