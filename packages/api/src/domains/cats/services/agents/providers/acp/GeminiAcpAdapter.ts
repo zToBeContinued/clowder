@@ -306,7 +306,7 @@ function makeIdleWarning(
     catId,
     content: JSON.stringify({
       type: 'warning',
-      message: `Gemini 已开始回复但后续停滞 (idle ${Math.round(idleSinceMs / 1000)}s)`,
+      message: `${catId} 已开始回复但后续停滞 (idle ${Math.round(idleSinceMs / 1000)}s)`,
     }),
     metadata,
     timestamp: Date.now(),
@@ -325,7 +325,7 @@ function makeToolWaitWarning(
     catId,
     content: JSON.stringify({
       type: 'info',
-      message: `Gemini 正在等待工具返回 (${Math.round(idleSinceMs / 1000)}s)`,
+      message: `${catId} 正在等待工具返回 (${Math.round(idleSinceMs / 1000)}s)`,
     }),
     metadata,
     timestamp: Date.now(),

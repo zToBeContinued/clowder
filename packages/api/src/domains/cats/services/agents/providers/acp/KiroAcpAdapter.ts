@@ -178,8 +178,8 @@ export class KiroAcpAdapter implements AgentService {
         type: type === 'stream_idle_warning' ? 'warning' : 'info',
         message:
           type === 'stream_idle_warning'
-            ? `Kiro 回复流暂时停滞（${idleSeconds}s）`
-            : `Kiro 正在等待工具返回（${idleSeconds}s）`,
+            ? `${this.catId} 回复流暂时停滞（${idleSeconds}s）`
+            : `${this.catId} 正在等待工具返回（${idleSeconds}s）`,
       }),
       metadata,
       timestamp: Date.now(),
