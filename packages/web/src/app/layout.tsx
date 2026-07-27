@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Space_Grotesk } from 'next/font/google';
 import { AppShell } from '@/components/AppShell';
-import { BrakeModal } from '@/components/BrakeModal';
+
 import { ChunkLoadRefreshGuard } from '@/components/ChunkLoadRefreshGuard';
 import { GuideOverlay } from '@/components/GuideOverlay';
 import { SessionBootstrap } from '@/components/SessionBootstrap';
@@ -79,7 +79,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <ConfirmProvider>
             <AppShell>{children}</AppShell>
           </ConfirmProvider>
-          <BrakeModal />
           <GuideOverlay />
           <ToastContainer />
         </ThemeProvider>
