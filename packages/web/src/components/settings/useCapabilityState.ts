@@ -125,6 +125,46 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
     [fetchItems, projectPath],
   );
 
+  const mountSkills = useCallback(
+    async (skillNames: string[], providers?: string[]) => {
+      try {
+        const body: Record<string, unknown> = { skillNames };
+        if (projectPath) body.projectPath = projectPath;
+        if (providers?.length) body.providers = providers;
+        const res = await apiFetch('/api/skills/mount', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) await fetchItems(projectPath ?? undefined);
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    [fetchItems, projectPath],
+  );
+
+  const unmountSkills = useCallback(
+    async (skillNames: string[], providers?: string[]) => {
+      try {
+        const body: Record<string, unknown> = { skillNames };
+        if (projectPath) body.projectPath = projectPath;
+        if (providers?.length) body.providers = providers;
+        const res = await apiFetch('/api/skills/unmount', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (res.ok) await fetchItems(projectPath ?? undefined);
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    [fetchItems, projectPath],
+  );
+
   return {
     items,
     catFamilies,
@@ -139,6 +179,8 @@ export function useCapabilityState(filterType: 'skill' | 'mcp') {
     handleToggle,
     handleRemoveMcp,
     handleDisableSkill,
+    mountSkills,
+    unmountSkills,
     refetch: () => fetchItems(projectPath ?? undefined),
   };
 }

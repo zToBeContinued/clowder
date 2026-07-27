@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, lstat, mkdir, symlink, readlink, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,7 @@ import type { SkillConflict } from '../config/governance/skill-conflict.js';
 import { detectConflicts } from '../config/governance/skill-conflict.js';
 import { resolveConflict, syncSkills, validateSkillName } from '../config/governance/skill-sync.js';
 import type { SkillsStaleness } from '../config/governance/skills-state.js';
-import { checkStaleness, readSkillsState } from '../config/governance/skills-state.js';
+import { checkStaleness, readSkillsState, writeSkillsState } from '../config/governance/skills-state.js';
 import {
   type PersonalSkillIndexEntry,
   readPersonalSkillIndexFromEnv,
@@ -401,5 +401,190 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
 
     await resolveConflict(projectRoot, homedir(), body.skillName, body.choice);
     return { ok: true, skillName: body.skillName, choice: body.choice };
+  });
+
+  // ── Mount: add individual skills on-demand (hot-reload, no restart needed) ──
+  app.post('/api/skills/mount', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+
+    const body = (request.body ?? {}) as {
+      skillNames?: string[];
+      projectPath?: string;
+      providers?: string[];
+    };
+
+    if (!Array.isArray(body.skillNames) || body.skillNames.length === 0) {
+      reply.status(400);
+      return { error: 'skillNames is required and must be a non-empty array' };
+    }
+
+    // Validate all skill names
+    for (const name of body.skillNames) {
+      try {
+        validateSkillName(name);
+      } catch {
+        reply.status(400);
+        return { error: `Invalid skill name: "${name}". Must be lowercase letters, digits, and hyphens.` };
+      }
+    }
+
+    const skillsSrc = CAT_CAFE_SKILLS_SRC;
+    const repoRoot = dirname(skillsSrc);
+    let projectRoot = repoRoot;
+    if (body.projectPath) {
+      const validated = await validateProjectPath(body.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path' };
+      }
+      projectRoot = validated;
+    }
+
+    // Determine which providers to mount for (default: claude only)
+    const allProviders = ['claude', 'codex', 'gemini', 'kimi'] as const;
+    const requestedProviders = body.providers?.length
+      ? body.providers.filter((p): p is typeof allProviders[number] => (allProviders as readonly string[]).includes(p))
+      : (['claude'] as const);
+
+    const mounted: string[] = [];
+    const skipped: string[] = [];
+    const notFound: string[] = [];
+
+    const IS_WIN32 = process.platform === 'win32';
+
+    for (const skillName of body.skillNames) {
+      const sourceSkillDir = join(skillsSrc, skillName);
+      // Check source skill exists
+      try {
+        const s = await lstat(join(sourceSkillDir, 'SKILL.md'));
+        if (!s.isFile()) { notFound.push(skillName); continue; }
+      } catch {
+        notFound.push(skillName);
+        continue;
+      }
+
+      let anyMounted = false;
+      for (const provider of requestedProviders) {
+        const providerSkillsDir = join(projectRoot, `.${provider}`, 'skills');
+        await mkdir(providerSkillsDir, { recursive: true });
+        const linkPath = join(providerSkillsDir, skillName);
+
+        // Check if already correct
+        try {
+          const stat = await lstat(linkPath);
+          if (stat.isSymbolicLink()) {
+            const target = await readlink(linkPath);
+            const resolvedTarget = resolve(dirname(linkPath), target);
+            if (resolvedTarget === sourceSkillDir || target === sourceSkillDir) {
+              continue; // Already correctly mounted
+            }
+            await rm(linkPath); // Wrong target, remove first
+          }
+        } catch {
+          // Doesn't exist — good, we'll create
+        }
+
+        const linkTarget = IS_WIN32 ? sourceSkillDir : relative(dirname(linkPath), sourceSkillDir);
+        await symlink(linkTarget, linkPath, IS_WIN32 ? 'junction' : undefined);
+        anyMounted = true;
+      }
+      if (anyMounted) mounted.push(skillName); else skipped.push(skillName);
+    }
+
+    // Update skills-state.json to reflect new mounted skills
+    const state = await readSkillsState(projectRoot);
+    if (state) {
+      const managedSet = new Set(state.managedSkillNames);
+      for (const name of mounted) managedSet.add(name);
+      await writeSkillsState(projectRoot, {
+        ...state,
+        managedSkillNames: [...managedSet].sort(),
+        lastSyncedAt: new Date().toISOString(),
+      });
+    }
+
+    return { ok: true, mounted, skipped, notFound, providers: requestedProviders };
+  });
+
+  // ── Unmount: remove individual skills ──
+  app.delete('/api/skills/unmount', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required (session cookie or X-Cat-Cafe-User header)' };
+    }
+
+    const body = (request.body ?? {}) as {
+      skillNames?: string[];
+      projectPath?: string;
+      providers?: string[];
+    };
+
+    if (!Array.isArray(body.skillNames) || body.skillNames.length === 0) {
+      reply.status(400);
+      return { error: 'skillNames is required and must be a non-empty array' };
+    }
+
+    for (const name of body.skillNames) {
+      try {
+        validateSkillName(name);
+      } catch {
+        reply.status(400);
+        return { error: `Invalid skill name: "${name}". Must be lowercase letters, digits, and hyphens.` };
+      }
+    }
+
+    const skillsSrc = CAT_CAFE_SKILLS_SRC;
+    const repoRoot = dirname(skillsSrc);
+    let projectRoot = repoRoot;
+    if (body.projectPath) {
+      const validated = await validateProjectPath(body.projectPath);
+      if (!validated) {
+        reply.status(400);
+        return { error: 'Invalid project path' };
+      }
+      projectRoot = validated;
+    }
+
+    const allProviders = ['claude', 'codex', 'gemini', 'kimi'] as const;
+    const requestedProviders = body.providers?.length
+      ? body.providers.filter((p): p is typeof allProviders[number] => (allProviders as readonly string[]).includes(p))
+      : (['claude', 'codex', 'gemini', 'kimi'] as const);
+
+    const unmounted: string[] = [];
+
+    for (const skillName of body.skillNames) {
+      let anyRemoved = false;
+      for (const provider of requestedProviders) {
+        const linkPath = join(projectRoot, `.${provider}`, 'skills', skillName);
+        try {
+          const stat = await lstat(linkPath);
+          if (stat.isSymbolicLink()) {
+            await rm(linkPath);
+            anyRemoved = true;
+          }
+        } catch {
+          // Doesn't exist — fine
+        }
+      }
+      if (anyRemoved) unmounted.push(skillName);
+    }
+
+    // Update skills-state.json to remove unmounted skills
+    const state = await readSkillsState(projectRoot);
+    if (state) {
+      const unmountedSet = new Set(unmounted);
+      await writeSkillsState(projectRoot, {
+        ...state,
+        managedSkillNames: state.managedSkillNames.filter((n) => !unmountedSet.has(n)),
+        lastSyncedAt: new Date().toISOString(),
+      });
+    }
+
+    return { ok: true, unmounted, providers: requestedProviders };
   });
 };

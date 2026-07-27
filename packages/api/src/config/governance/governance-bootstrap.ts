@@ -48,8 +48,40 @@ const PROVIDER_HOOKS_DIRS: Record<Provider, string> = {
   kimi: '.kimi/hooks',
 };
 
+/** Skill tier classification — core skills are always synced, optional on-demand. */
+export type SkillTier = 'core' | 'optional';
+
+/** Core skills that are synced by default to every project. */
+export const CORE_SKILLS: readonly string[] = [
+  'tdd',
+  'debugging',
+  'quality-gate',
+  'deep-research',
+  'feat-lifecycle',
+  'merge-gate',
+  'request-review',
+  'receive-review',
+  'writing-plans',
+  'workspace-navigator',
+  'project-workflow',
+  'knowledge-engineering',
+] as const;
+
 export interface BootstrapOptions {
   dryRun: boolean;
+  /**
+   * Only generate files/symlinks for these providers.
+   * If omitted or empty, defaults to ALL providers (legacy behavior).
+   */
+  activeProviders?: Provider[];
+  /**
+   * Which skill tier to sync.
+   * - 'none': do NOT sync any skills (default — on-demand mount via API)
+   * - 'core': only sync CORE_SKILLS
+   * - 'all': sync all discovered skills (legacy behavior)
+   * Defaults to 'none'.
+   */
+  skillTier?: 'none' | 'core' | 'all';
 }
 
 export class GovernanceBootstrapService {
@@ -68,15 +100,27 @@ export class GovernanceBootstrapService {
     const packVersion = GOVERNANCE_PACK_VERSION;
     const checksum = computePackChecksum();
 
-    // 1. Managed blocks in provider instruction files
+    // Determine active providers — default to all for backward compatibility
+    const activeProviders: Provider[] =
+      opts.activeProviders && opts.activeProviders.length > 0
+        ? opts.activeProviders
+        : (Object.keys(PROVIDER_FILES) as Provider[]);
+
+    // 1. Managed blocks in provider instruction files (only for active providers)
     for (const [provider, filename] of Object.entries(PROVIDER_FILES) as [Provider, string][]) {
+      if (!activeProviders.includes(provider)) continue;
       const action = await this.writeManagedBlock(targetProject, provider, filename, opts.dryRun);
       actions.push(action);
     }
 
-    // 2. Per-skill symlinks for all supported providers (ADR-025)
-    const skillNames = await this.discoverSkillNames();
-    for (const [_provider, skillsDir] of Object.entries(PROVIDER_SKILLS_DIRS) as [Provider, string][]) {
+    // 2. Per-skill symlinks (only for active providers, filtered by tier)
+    const skillTier = opts.skillTier ?? 'none';
+    const allSkillNames = skillTier === 'none' ? [] : await this.discoverSkillNames();
+    const skillNames =
+      skillTier === 'core' ? allSkillNames.filter((n) => CORE_SKILLS.includes(n)) : allSkillNames;
+
+    for (const [provider, skillsDir] of Object.entries(PROVIDER_SKILLS_DIRS) as [Provider, string][]) {
+      if (!activeProviders.includes(provider)) continue;
       const skillActions = await this.symlinkSkillsPerSkill(targetProject, skillsDir, skillNames, opts.dryRun);
       actions.push(...skillActions);
     }
@@ -93,8 +137,9 @@ export class GovernanceBootstrapService {
       });
     }
 
-    // 2b. Hooks symlinks for providers that have source hooks
+    // 2b. Hooks symlinks (only for active providers)
     for (const [provider, hooksDir] of Object.entries(PROVIDER_HOOKS_DIRS) as [Provider, string][]) {
+      if (!activeProviders.includes(provider)) continue;
       const action = await this.symlinkHooks(targetProject, provider, hooksDir, opts.dryRun);
       if (action) actions.push(action);
     }

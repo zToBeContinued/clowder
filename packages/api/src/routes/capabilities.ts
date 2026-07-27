@@ -1058,7 +1058,12 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
     const { GovernanceBootstrapService } = await import('../config/governance/governance-bootstrap.js');
     const service = new GovernanceBootstrapService(catCafeRoot);
-    const report = await service.bootstrap(validated, { dryRun: false });
+    const reqBody = request.body as { projectPath?: string; activeProviders?: string[]; skillTier?: 'none' | 'core' | 'all' } | undefined;
+    const report = await service.bootstrap(validated, {
+      dryRun: false,
+      activeProviders: reqBody?.activeProviders as import('../config/governance/governance-pack.js').Provider[] | undefined,
+      skillTier: reqBody?.skillTier ?? 'none',
+    });
 
     return { ok: true, report };
   });

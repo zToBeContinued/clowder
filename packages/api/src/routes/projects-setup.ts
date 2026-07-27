@@ -183,6 +183,10 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
       mode?: string;
       gitCloneUrl?: string;
       initProject?: boolean;
+      /** Only generate governance for these providers (e.g. ['claude', 'codex']). Omit = all. */
+      activeProviders?: string[];
+      /** 'none' (default, no skills — mount on demand), 'core' (12 essential), or 'all' (legacy full sync). */
+      skillTier?: 'none' | 'core' | 'all';
     } | null;
 
     const projectPath = body?.projectPath;
@@ -258,7 +262,11 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
     try {
       const { GovernanceBootstrapService } = await import('../config/governance/governance-bootstrap.js');
       const service = new GovernanceBootstrapService(catCafeRoot);
-      const report = await service.bootstrap(validated, { dryRun: false });
+      const report = await service.bootstrap(validated, {
+        dryRun: false,
+        activeProviders: body?.activeProviders as import('../config/governance/governance-pack.js').Provider[] | undefined,
+        skillTier: body?.skillTier ?? 'none',
+      });
 
       // ── Optional project fact-source scaffold (lazy generation) ──
       let projectInitResult: ProjectInitResult | undefined;

@@ -1090,8 +1090,8 @@ export async function tryGovernanceBootstrap(
   }
 
   if (existing.confirmedByUser) {
-    // Already confirmed — auto-sync (idempotent)
-    await service.bootstrap(projectRoot, { dryRun: false });
+    // Already confirmed — auto-sync (idempotent, no skills by default — mount on demand)
+    await service.bootstrap(projectRoot, { dryRun: false, skillTier: 'none' });
     return { bootstrapped: true, needsConfirmation: false };
   }
 
