@@ -664,6 +664,14 @@ export const ENV_VARS: EnvDefinition[] = [
     hubVisible: false,
   },
   {
+    name: 'CAT_CAFE_TRANSIENT_PROVIDER_RETRY_DELAY_MS',
+    defaultValue: '30000',
+    description: 'Kiro 服务端瞬时故障（如限流 throttle）时的重试退避时间（毫秒）。改完即时生效，无需重启。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'WEB_PUSH_TIMEOUT_MS',
     defaultValue: '(未设置)',
     description: 'Web Push 超时时间',

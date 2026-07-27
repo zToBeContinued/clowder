@@ -151,7 +151,7 @@ import {
   isTransientCliExitCode1,
   isTransientProviderError,
   preflightRace,
-  TRANSIENT_PROVIDER_RETRY_DELAY_MS,
+  getTransientProviderRetryDelayMs,
 } from './invoke-helpers.js';
 import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
@@ -2244,7 +2244,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           suppressedTransientCliError = msg;
           // Provider 5xx：退避后再重试；本地 CLI bootstrap 退出保持立即重试。
           if (isTransientProviderError(msg.errorCode)) {
-            transientRetryDelayMs = TRANSIENT_PROVIDER_RETRY_DELAY_MS;
+            transientRetryDelayMs = getTransientProviderRetryDelayMs();
           }
           continue;
         }

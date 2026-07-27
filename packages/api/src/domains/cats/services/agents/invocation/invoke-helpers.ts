@@ -102,9 +102,15 @@ export function isTransientAcpPromptFailure(message: string | undefined): boolea
  */
 export const TRANSIENT_PROVIDER_ERROR_CODE = 'provider_transient';
 
-/** Retry backoff for provider 5xx. 立即重试常落在同一故障窗口，给服务端一点恢复时间。 */
-export const TRANSIENT_PROVIDER_RETRY_DELAY_MS =
-  Number(process.env.CAT_CAFE_TRANSIENT_PROVIDER_RETRY_DELAY_MS) || 2_000;
+/** Retry backoff for provider 5xx. 立即重试常落在同一故障窗口，给服务端一点恢复时间。
+ * 支持 UI 热更新：每次取值时实时读 process.env，不缓存。
+ */
+export function getTransientProviderRetryDelayMs(): number {
+  const raw = Number(process.env.CAT_CAFE_TRANSIENT_PROVIDER_RETRY_DELAY_MS);
+  return (Number.isFinite(raw) && raw > 0) ? raw : 30_000;
+}
+/** @deprecated 保留兼容引用，实际使用 getTransientProviderRetryDelayMs() */
+export const TRANSIENT_PROVIDER_RETRY_DELAY_MS = 30_000;
 
 export function isTransientProviderError(errorCode: string | undefined): boolean {
   return errorCode === TRANSIENT_PROVIDER_ERROR_CODE;
