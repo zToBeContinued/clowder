@@ -25,11 +25,11 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
       <div className="flex items-start gap-2">
         <span className="text-conn-amber-text mt-0.5 text-lg">🔐</span>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-cafe">
-            {catLabel} 请求权限: <code className="text-xs bg-conn-amber-bg px-1 py-0.5 rounded">{request.action}</code>
+          <div className="text-sm font-medium text-[var(--conn-amber-hover)]">
+            {catLabel} 请求权限: <code className="text-xs bg-[var(--conn-amber-ring)] text-[var(--conn-amber-hover)] px-1 py-0.5 rounded font-semibold">{request.action}</code>
           </div>
-          <p className="text-xs text-cafe-secondary mt-1">{request.reason}</p>
-          {request.context && <p className="text-xs text-cafe-secondary mt-1 italic">{request.context}</p>}
+          <p className="text-xs text-[var(--conn-amber-hover)] mt-1 opacity-90">{request.reason}</p>
+          {request.context && <p className="text-xs text-[var(--conn-amber-hover)] mt-1 italic opacity-80">{request.context}</p>}
         </div>
       </div>
 
@@ -38,19 +38,19 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
           <>
             <button
               onClick={() => onRespond(request.requestId, true, 'once')}
-              className="px-3 py-1 text-xs bg-[var(--color-conn-emerald-text)] text-[var(--cafe-surface)] rounded-md hover:opacity-90 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-conn-emerald-text)] text-white rounded-md hover:opacity-90 transition-colors shadow-sm"
             >
               允许 (仅此次)
             </button>
             <button
               onClick={() => setExpanded(true)}
-              className="px-3 py-1 text-xs bg-[var(--console-pill-bg)] text-cafe-secondary rounded-md hover:bg-[var(--console-hover-bg)] transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--conn-amber-ring)] text-[var(--conn-amber-hover)] rounded-md hover:opacity-80 transition-colors shadow-sm"
             >
               更多选项...
             </button>
             <button
               onClick={() => onRespond(request.requestId, false, 'once')}
-              className="px-3 py-1 text-xs bg-conn-red-bg text-conn-red-text rounded-md hover:opacity-80 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-conn-red-text)] text-white rounded-md hover:opacity-80 transition-colors shadow-sm"
             >
               拒绝
             </button>
@@ -59,37 +59,37 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => onRespond(request.requestId, true, 'once')}
-              className="px-3 py-1 text-xs bg-[var(--color-conn-emerald-text)] text-[var(--cafe-surface)] rounded-md hover:opacity-90 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-conn-emerald-text)] text-white rounded-md hover:opacity-90 transition-colors shadow-sm"
             >
               允许 (仅此次)
             </button>
             <button
               onClick={() => onRespond(request.requestId, true, 'thread')}
-              className="px-3 py-1 text-xs bg-[var(--color-conn-emerald-text)] text-[var(--cafe-surface)] rounded-md hover:opacity-90 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-conn-emerald-text)] text-white rounded-md hover:opacity-90 transition-colors shadow-sm"
             >
               允许 (此对话)
             </button>
             <button
               onClick={() => onRespond(request.requestId, true, 'global')}
-              className="px-3 py-1 text-xs bg-[var(--color-conn-emerald-text)] text-[var(--cafe-surface)] rounded-md hover:opacity-90 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-conn-emerald-text)] text-white rounded-md hover:opacity-90 transition-colors shadow-sm"
             >
               允许 (全局)
             </button>
             <button
               onClick={() => onRespond(request.requestId, false, 'once')}
-              className="px-3 py-1 text-xs bg-conn-red-bg text-conn-red-text rounded-md hover:opacity-80 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-conn-red-text)] text-white rounded-md hover:opacity-80 transition-colors shadow-sm"
             >
               拒绝 (仅此次)
             </button>
             <button
               onClick={() => onRespond(request.requestId, false, 'global')}
-              className="px-3 py-1 text-xs bg-[var(--color-conn-red-text)] text-[var(--cafe-surface)] rounded-md hover:opacity-90 transition-colors"
+              className="px-3 py-1 text-xs font-medium bg-[var(--color-conn-red-text)] text-white rounded-md hover:opacity-90 transition-colors shadow-sm"
             >
               拒绝 (全局)
             </button>
             <button
               onClick={() => setExpanded(false)}
-              className="px-3 py-1 text-xs text-cafe-secondary hover:text-cafe-secondary transition-colors"
+              className="px-3 py-1 text-xs font-medium text-[var(--conn-amber-hover)] hover:opacity-70 transition-colors"
             >
               收起
             </button>
