@@ -64,14 +64,8 @@ const stream =
             level: 'trace',
           },
           {
-            target: 'pino-roll',
-            options: {
-              file: resolve(LOG_DIR, 'api.log'),
-              frequency: 'daily',
-              dateFormat: 'yyyy-MM-dd',
-              limit: { count: RETENTION_FILES },
-              mkdir: true,
-            },
+            target: 'pino/file',
+            options: { destination: resolve(LOG_DIR, 'api.log'), mkdir: true, append: true },
             level: 'trace',
           },
         ],
