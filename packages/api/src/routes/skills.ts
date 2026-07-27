@@ -286,10 +286,14 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     );
 
     // ADR-025 Phase 2: staleness + conflicts
+    // Skip staleness for clowder's own repo (it IS the source — always "fresh")
+    const isSelfRepo = projectRoot === dirname(skillsSrc);
     const state = await readSkillsState(projectRoot);
     const managedNames = state?.managedSkillNames ?? sourceSkills;
     const [staleness, conflicts] = await Promise.all([
-      checkStaleness(projectRoot, skillsSrc),
+      isSelfRepo
+        ? Promise.resolve({ stale: false, currentHash: '', recordedHash: '', newSkills: [], removedSkills: [] } as import('../config/governance/skills-state.js').SkillsStaleness)
+        : checkStaleness(projectRoot, skillsSrc),
       detectConflicts(projectRoot, home, managedNames),
     ]);
 
