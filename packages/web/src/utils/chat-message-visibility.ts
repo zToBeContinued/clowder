@@ -13,7 +13,6 @@ const INTERNAL_RUNTIME_JSON_TYPES = new Set([
   'handoff_draft_window',
   'session_handoff_write_failed',
   'session_seal_requested',
-  'info',
 ]);
 // TODO(task #377): Delete both legacy collections together after the default-thread
 // retention window no longer contains these ten exact IDs. Never broaden this
@@ -45,6 +44,22 @@ function isInternalRuntimeJsonLine(line: string): boolean {
   }
 }
 
+/** Convert {"type":"info","message":"xxx"} JSON lines to formatted status text */
+function formatRuntimeInfoJson(line: string): string | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed) as { type?: string; message?: string };
+    if (parsed?.type === 'info' && typeof parsed.message === 'string') {
+      return `⏳ ${parsed.message}`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function sanitizeAgentVisibleContent(content: string): string {
   const lines = content.split(/\r?\n/);
   const cleaned: string[] = [];
@@ -57,6 +72,12 @@ export function sanitizeAgentVisibleContent(content: string): string {
     if (SHARED_STATE_PREFLIGHT_LINE_RE.test(line)) continue;
     if (TOOL_TELEMETRY_LINE_RE.test(line)) continue;
     if (isInternalRuntimeJsonLine(line)) continue;
+    // Format {"type":"info",...} as human-readable status instead of raw JSON
+    const formatted = formatRuntimeInfoJson(line);
+    if (formatted !== null) {
+      cleaned.push(formatted);
+      continue;
+    }
     cleaned.push(line);
   }
 
