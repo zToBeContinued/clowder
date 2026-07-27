@@ -50,26 +50,10 @@ if (!existsSync(LOG_DIR)) {
   mkdirSync(LOG_DIR, { recursive: true });
 }
 
-const stream =
-  process.env.NODE_ENV === 'test'
-    ? pino.multistream([
-        { level: 'trace', stream: pino.destination(1) },
-        { level: 'trace', stream: pino.destination({ dest: resolve(LOG_DIR, 'api.log'), mkdir: true }) },
-      ])
-    : pino.transport({
-        targets: [
-          {
-            target: 'pino/file',
-            options: { destination: 1 },
-            level: 'trace',
-          },
-          {
-            target: 'pino/file',
-            options: { destination: resolve(LOG_DIR, 'api.log'), mkdir: true, append: true },
-            level: 'trace',
-          },
-        ],
-      });
+const stream = pino.multistream([
+  { level: LOG_LEVEL as pino.Level, stream: pino.destination(1) }, // stdout
+  { level: LOG_LEVEL as pino.Level, stream: pino.destination({ dest: resolve(LOG_DIR, 'api.log'), mkdir: true, append: true, sync: false }) },
+]);
 
 export const logger = pino(
   {
