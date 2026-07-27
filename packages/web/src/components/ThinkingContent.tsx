@@ -111,7 +111,7 @@ export function ThinkingContent({
   const surfaceInner = tintedDark(accent, 0.18);
 
   return (
-    <div className="mt-2 mb-1 overflow-hidden" style={{ backgroundColor: surface, borderRadius: 10 }}>
+    <div className="mt-2 mb-1 w-full min-w-0 overflow-hidden" style={{ backgroundColor: surface, borderRadius: 10 }}>
       <button
         type="button"
         onClick={() => {
@@ -138,8 +138,8 @@ export function ThinkingContent({
         <div style={{ backgroundColor: surfaceInner }}>
           <div style={{ height: 1, backgroundColor: DIVIDER }} />
           <div
-            style={{ padding: '8px 12px 10px 12px', color: 'rgba(255,255,255,0.72)' }}
-            className="text-xs leading-relaxed cli-output-md"
+            style={{ padding: '8px 12px 10px 12px', color: 'rgba(255,255,255,0.85)' }}
+            className="text-xs leading-relaxed cli-output-md w-full min-w-0 break-words whitespace-pre-wrap"
           >
             <MarkdownContent content={content} className={className} />
           </div>
