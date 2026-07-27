@@ -120,6 +120,7 @@ import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
 import { CatSupervisor } from './infrastructure/cats/CatSupervisor.js';
 import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
+import { appendThreadLog } from './infrastructure/thread-logger.js';
 import { parseManifestSlashCommands } from './infrastructure/commands/manifest-commands.js';
 import { buildThreadDeepLink } from './infrastructure/connectors/connector-command-helpers.js';
 import {
@@ -475,6 +476,15 @@ async function main(): Promise<void> {
   const messageStore = createMessageStore(redis, {
     onAppend: (msg) => {
       appendListener?.(msg);
+      // Thread logger: 按 threadId 写消息流水
+      void appendThreadLog({
+        threadId: msg.threadId,
+        messageId: msg.id,
+        timestamp: msg.timestamp,
+        type: 'assistant',
+        contentPreview: msg.content.slice(0, 150),
+        contentLength: msg.content.length,
+      });
     },
   });
   const holdStore = createFreshnessHoldStore(redis, { maxReviews: 2 });

@@ -13,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { createInvocationLogger } from '../../../../../infrastructure/invocation-logger.js';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent, type ToolPolicy } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -426,6 +427,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   log.info({ invocationId, catId, threadId, userId }, 'Created invocation');
   const hostProjectRoot = findMonorepoRoot(process.cwd());
+  const invLogger = createInvocationLogger(catId, invocationId, threadId);
 
   // F22 R2 P1-1: Expose invocationId to caller (route-serial/parallel) so they can
   // use it for RichBlockBuffer.consume() instead of getLatestId() which is wrong
@@ -2192,6 +2194,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         const iterResult = await abortableNext(serviceIter, signal);
         if (iterResult.done) break;
         const msg = iterResult.value;
+        // Invocation logger: 记录每条 agent 消息
+        invLogger.logEvent(
+          msg.type === 'text' ? 'text' : msg.type === 'error' ? 'error' : 'event',
+          catId, invocationId, threadId,
+          msg.type === 'text' ? { length: msg.content?.length ?? 0 }
+            : msg.type === 'error' ? { error: msg.error?.slice(0, 200), errorCode: msg.errorCode }
+            : { type: msg.type },
+        );
         // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
         if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal') resetInvocationTimeout();
         if (shouldTrackGeminiResumeFailures && options.sessionId && msg.type === 'error') {
