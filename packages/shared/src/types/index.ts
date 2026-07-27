@@ -541,6 +541,13 @@ export type {
   TaskStatus,
   UpdateTaskInput,
 } from './task.js';
+// Task state machine (毛线球状态机)
+export type { TaskStatusExtended } from './task-state-machine.js';
+export {
+  detectStatusFlapping,
+  TASK_VALID_TRANSITIONS,
+  validateStatusTransition,
+} from './task-state-machine.js';
 // TTS types (F34 TTS Provider)
 export type {
   ITtsProvider,

@@ -439,6 +439,13 @@ export const updateTaskInputSchema = {
   taskId: z.string().min(1).describe('The ID of the task to update'),
   status: z.enum(['todo', 'doing', 'in_review', 'blocked', 'done']).optional().describe('New task status'),
   why: z.string().max(1000).optional().describe('Optional note explaining the status change'),
+  delegateActorId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'Override owner restriction: when the task owner is offline/stuck, another cat can supply its own catId here to update on behalf of the owner. This is audited.',
+    ),
 };
 
 export const claimTaskInputSchema = {
@@ -714,6 +721,7 @@ export async function handleUpdateTask(input: {
   taskId: string;
   status?: string | undefined;
   why?: string | undefined;
+  delegateActorId?: string | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. Task state lives in Redis;
   // local fallback would diverge from server truth. Surface `[degrade]` hint.
@@ -724,6 +732,7 @@ export async function handleUpdateTask(input: {
         taskId: input.taskId,
         ...(input.status ? { status: input.status } : {}),
         ...(input.why ? { why: input.why } : {}),
+        ...(input.delegateActorId ? { delegateActorId: input.delegateActorId } : {}),
       }),
     policy: { kind: 'none' },
   });
@@ -1390,7 +1399,10 @@ export const callbackTools = [
     name: 'cat_cafe_update_task',
     description:
       'Update the status of a task you own. Use to mark tasks as doing/in_review/blocked/done. ' +
-      'GOTCHA: You can only update tasks assigned to you (your catId). ' +
+      'STATE MACHINE: done is terminal — cannot go back to doing/todo (create a retryOf task instead). ' +
+      'failed can only go back to todo. blocked can go to doing/todo/failed. ' +
+      'DELEGATION: If owner is stuck/offline, supply delegateActorId with your catId to override (audited). ' +
+      'GOTCHA: You can only update tasks assigned to you (your catId) unless using delegateActorId. ' +
       'TIP: Include a "why" note when marking as blocked — it helps others understand the situation.',
     inputSchema: updateTaskInputSchema,
     handler: handleUpdateTask,

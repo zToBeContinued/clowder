@@ -9,7 +9,7 @@
  */
 
 import type { CatId, ConnectorSource, CreateTaskInput, TaskEvent, TaskItem, UpdateTaskInput } from '@cat-cafe/shared';
-import { catIdSchema } from '@cat-cafe/shared';
+import { catIdSchema, validateStatusTransition } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -589,6 +589,25 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     }
 
     const previous = await taskStore.get(id);
+    if (!previous) {
+      reply.status(404);
+      return { error: 'Task not found' };
+    }
+
+    // 状态机验证
+    if (result.data.status && previous.status) {
+      const transition = validateStatusTransition(previous.status, result.data.status);
+      if (!transition.valid) {
+        reply.status(409);
+        return {
+          error: 'Invalid status transition',
+          reason: transition.reason,
+          currentStatus: previous.status,
+          requestedStatus: result.data.status,
+        };
+      }
+    }
+
     const updated = await taskStore.update(id, toUpdateInput(result.data));
     if (!updated) {
       reply.status(404);
