@@ -70,7 +70,7 @@ let lastSessionFailureToastAt = 0;
 
 function notifySessionFailure() {
   const now = Date.now();
-  if (now - lastSessionFailureToastAt < 3000) return;
+  if (now - lastSessionFailureToastAt < 10000) return;
   lastSessionFailureToastAt = now;
   useToastStore.getState().addToast({
     type: 'error',
@@ -134,11 +134,17 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   if (res.status === 401) {
     // Session expired (API restart, cookie cleared). Re-establish and retry once.
     sessionGate = null;
-    await ensureSession();
+    try {
+      await ensureSession();
+    } catch {
+      notifySessionFailure();
+      return res;
+    }
     const retryRes = await fetch(`${API_URL}${path}`, {
       ...normalized,
       credentials: 'include',
     });
+    // Only notify if retry also fails with 401 — silent recovery is normal after restart
     if (retryRes.status === 401) {
       notifySessionFailure();
     }
