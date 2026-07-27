@@ -1215,11 +1215,11 @@ export function ChatInput({
           {ghostSuggestion && !pathCompletion.isOpen && (
             <div
               data-testid="ghost-suggestion"
-              className="absolute inset-0 pointer-events-none p-3 text-sm whitespace-pre-wrap break-words overflow-hidden rounded-xl"
+              className="absolute inset-0 pointer-events-none px-3 pt-2.5 pb-1 whitespace-pre-wrap break-words overflow-hidden rounded-xl [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)]"
               aria-hidden="true"
             >
               <span className="invisible">{input}</span>
-              <span className="text-cafe-muted">{ghostSuggestion.slice(input.length)}</span>
+              <span className="text-cafe-muted opacity-50">{ghostSuggestion.slice(input.length)}</span>
             </div>
           )}
         </div>
