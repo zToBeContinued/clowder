@@ -13,6 +13,7 @@ const INTERNAL_RUNTIME_JSON_TYPES = new Set([
   'handoff_draft_window',
   'session_handoff_write_failed',
   'session_seal_requested',
+  'info',
 ]);
 // TODO(task #377): Delete both legacy collections together after the default-thread
 // retention window no longer contains these ten exact IDs. Never broaden this
