@@ -36,8 +36,10 @@ export class InvocationLogger {
 
   constructor(catId: string, invocationId: string, threadId: string) {
     const ts = formatTimestamp(Date.now());
-    const dir = resolve(LOG_BASE, catId);
-    const filename = `${ts}_${invocationId.slice(0, 12)}.log`;
+    const safeCatId = catId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeInvId = invocationId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 12);
+    const dir = resolve(LOG_BASE, safeCatId);
+    const filename = `${ts}_${safeInvId}.log`;
     this.logPath = resolve(dir, filename);
 
     // 写入头部信息

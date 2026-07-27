@@ -35,11 +35,14 @@ function formatLogLine(entry: ThreadLogEntry): string {
  */
 export async function appendThreadLog(entry: ThreadLogEntry): Promise<void> {
   try {
+    // 安全：threadId 只保留安全字符，防止路径穿越
+    const safeId = entry.threadId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    if (!safeId) return;
     if (!dirCreated) {
       await mkdir(LOG_BASE, { recursive: true });
       dirCreated = true;
     }
-    const logPath = resolve(LOG_BASE, `${entry.threadId}.log`);
+    const logPath = resolve(LOG_BASE, `${safeId}.log`);
     await appendFile(logPath, formatLogLine(entry));
   } catch {
     // 日志写入失败不应影响主流程

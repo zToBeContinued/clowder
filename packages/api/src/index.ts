@@ -481,7 +481,7 @@ async function main(): Promise<void> {
         threadId: msg.threadId,
         messageId: msg.id,
         timestamp: msg.timestamp,
-        type: 'assistant',
+        type: 'assistant', // onAppend 不提供 type，但大多数 append 是 assistant 消息
         contentPreview: msg.content.slice(0, 150),
         contentLength: msg.content.length,
       });
