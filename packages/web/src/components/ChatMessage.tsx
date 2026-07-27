@@ -695,7 +695,7 @@ export function ChatMessage({
         )}
         {deliveryOnlyDegraded && (isAssistantContinuation || !catStyle) && deliveryOnlyMetadataBadge}
         <div
-          className={`overflow-visible ${
+          className={`overflow-visible w-full min-w-0 ${
             catStyle ? (catStyle.font ?? '') : ''
           } ${showSchedulerAccent ? SCHEDULER_ACCENT_BUBBLE_CLASS : ''}`}
         >
