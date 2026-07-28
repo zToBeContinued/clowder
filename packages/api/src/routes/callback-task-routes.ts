@@ -34,6 +34,14 @@ const updateTaskSchema = z.object({
   why: z.string().max(1000).optional(),
   /** 代切权限：当 owner 失联时，总负责人/派工方可用此字段代为切换状态 */
   delegateActorId: z.string().min(1).optional(),
+  /** 交付证据：猫可在切 done/in_review 时同步填写 */
+  evidence: z.object({
+    tests: z.string().max(2000).optional(),
+    build: z.string().max(2000).optional(),
+    screenshot: z.string().max(2000).optional(),
+    review: z.string().max(2000).optional(),
+    lesson: z.string().max(2000).optional(),
+  }).optional(),
 });
 
 const claimTaskSchema = z.object({
@@ -89,7 +97,7 @@ export function registerCallbackTaskRoutes(
       return { error: 'Invalid request body', details: parsed.error.issues };
     }
 
-    const { taskId, status, failureClass, failureReason, why, delegateActorId } = parsed.data;
+    const { taskId, status, failureClass, failureReason, why, delegateActorId, evidence } = parsed.data;
 
     const existing = await taskStore.get(taskId);
     if (!existing) {
@@ -161,6 +169,7 @@ export function registerCallbackTaskRoutes(
     if (failureClass) updateData.failureClass = failureClass;
     if (failureReason) updateData.failureReason = failureReason;
     if (why) updateData.why = why;
+    if (evidence) updateData.evidence = { ...evidence, updatedAt: Date.now() };
     // 代切时记录真实 actor 和代切者
     if (isDelegating) {
       updateData.eventCatId = delegateActorId;

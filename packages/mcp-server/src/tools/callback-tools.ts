@@ -446,6 +446,19 @@ export const updateTaskInputSchema = {
     .describe(
       'Override owner restriction: when the task owner is offline/stuck, another cat can supply its own catId here to update on behalf of the owner. This is audited.',
     ),
+  evidence: z
+    .object({
+      tests: z.string().max(2000).optional().describe('测试通过证据（命令+结果摘要）'),
+      build: z.string().max(2000).optional().describe('构建/编译通过证据'),
+      screenshot: z.string().max(2000).optional().describe('截图/产出物链接或描述'),
+      review: z.string().max(2000).optional().describe('复审结论摘要'),
+      lesson: z.string().max(2000).optional().describe('经验教训/后续改进方向'),
+    })
+    .optional()
+    .describe(
+      '交付证据：任务完成时填写，面板显示为"交付证据 N/5"。每个字段独立可选，填了就计数。' +
+        '建议在切 done/in_review 时同步填写，让铲屎官一眼看到产出。',
+    ),
 };
 
 export const claimTaskInputSchema = {
@@ -722,6 +735,13 @@ export async function handleUpdateTask(input: {
   status?: string | undefined;
   why?: string | undefined;
   delegateActorId?: string | undefined;
+  evidence?: {
+    tests?: string | undefined;
+    build?: string | undefined;
+    screenshot?: string | undefined;
+    review?: string | undefined;
+    lesson?: string | undefined;
+  } | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. Task state lives in Redis;
   // local fallback would diverge from server truth. Surface `[degrade]` hint.
@@ -733,6 +753,7 @@ export async function handleUpdateTask(input: {
         ...(input.status ? { status: input.status } : {}),
         ...(input.why ? { why: input.why } : {}),
         ...(input.delegateActorId ? { delegateActorId: input.delegateActorId } : {}),
+        ...(input.evidence ? { evidence: input.evidence } : {}),
       }),
     policy: { kind: 'none' },
   });
