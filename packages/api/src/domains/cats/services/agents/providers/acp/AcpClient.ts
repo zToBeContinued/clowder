@@ -18,6 +18,7 @@ import { createInterface, type Interface as ReadlineInterface } from 'node:readl
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
 import { resolveCliCommandOrBare } from '../../../../../../utils/cli-resolve.js';
 import { resolveWindowsSpawnPlan } from '../../../../../../utils/cli-spawn-win.js';
+import { forgetAcpChild, getAcpChildRegistryDir, recordAcpChild } from './acp-child-registry.js';
 import type {
   AcpAgentRequest,
   AcpContentBlock,
@@ -119,6 +120,8 @@ export class AcpClient {
   private initResult: AcpInitializeResult | null = null;
   private closed = false;
   private exited = false;
+  /** 已登记到孤儿回收表的 pid —— close() 时注销，避免下次启动去追一个早已正常退出的 pid。 */
+  private registeredPid: number | null = null;
   private readonly capacityListeners = new Set<(signal: AcpCapacitySignal) => void>();
   /** Client-level capacity signal — always captured regardless of listeners.
    *  Fallback for delayed stderr arriving after invoke listener is removed. */
@@ -166,6 +169,19 @@ export class AcpClient {
     }
 
     this.child = doSpawn(command, args, spawnOpts) as ChildProcess;
+
+    // 登记 pid，让下次启动能回收本轮的孤儿（父进程被 TerminateProcess 掉时
+    // onClose/closeAll 整段不会执行，carrier 会常驻并攥着会话锁）。
+    // 尽力而为：登记失败不影响 spawn；记录 spawn 时刻用于回收前的身份校验，防 PID 复用误杀。
+    if (this.child.pid !== undefined) {
+      this.registeredPid = this.child.pid;
+      void recordAcpChild(getAcpChildRegistryDir(), {
+        pid: this.child.pid,
+        command,
+        spawnedAtMs: Date.now(),
+        cwd: this.config.cwd,
+      });
+    }
 
     this.child.stderr?.on('data', (chunk: Buffer) => {
       const text = chunk.toString().trimEnd();
@@ -543,6 +559,14 @@ export class AcpClient {
       });
     }
     this.rejectAllPending(new Error('ACP client closed'));
+
+    // 走到这里说明是受控关闭，子进程已被收掉 —— 注销登记，
+    // 否则下次启动会把一个早已正常退出的 pid 当孤儿去探测。
+    if (this.registeredPid !== null) {
+      const pid = this.registeredPid;
+      this.registeredPid = null;
+      await forgetAcpChild(getAcpChildRegistryDir(), pid);
+    }
   }
 
   get pid(): number | undefined {

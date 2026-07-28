@@ -1087,6 +1087,33 @@ async function main(): Promise<void> {
   // ── F149/F161: provider profile → current ACP process pool ──
   const acpPoolRegistry = new AcpPoolRegistry<AcpProcessPoolType>();
 
+  // 开机自愈：回收上一轮残留的 ACP carrier 子进程。
+  //
+  // 为什么必须有：Windows 上父进程常被 TerminateProcess 掉（点窗口 X、
+  // stop-windows.ps1 的 Stop-Process -Force），node 的 SIGTERM handler 不会跑，
+  // onClose → acpPoolRegistry.closeAll() 整段被跳过，carrier 就变成常驻孤儿，
+  // 还攥着 Kiro 的会话独占锁 → 后续 `Session is active in another process`。
+  // 回收前会做身份校验（创建时间 + 映像名），PID 复用的无关进程绝不会被杀。
+  {
+    const { setAcpChildRegistryDir, resolveAcpChildRegistryDir, reapOrphanAcpChildren } = await import(
+      './domains/cats/services/agents/providers/acp/acp-child-registry.js'
+    );
+    const { platformReapDeps } = await import('./domains/cats/services/agents/providers/acp/acp-child-probe.js');
+    const acpChildDir = resolveAcpChildRegistryDir(findMonorepoRoot());
+    setAcpChildRegistryDir(acpChildDir);
+    try {
+      const outcome = await reapOrphanAcpChildren(acpChildDir, platformReapDeps);
+      if (outcome.reaped.length > 0) {
+        app.log.warn(
+          `[api] reaped ${outcome.reaped.length} orphan ACP carrier process(es) from a previous run: ${outcome.reaped.join(', ')}`,
+        );
+      }
+    } catch (err) {
+      // 清扫失败绝不能挡住启动
+      app.log.warn(`[api] ACP orphan sweep failed: ${String(err)}`);
+    }
+  }
+
   // ── F32-b: AgentRegistry (catId → AgentService) — one instance per cat ──
   // Each cat gets its own AgentService instance with its catId + model.
   const agentRegistry = new AgentRegistry();
