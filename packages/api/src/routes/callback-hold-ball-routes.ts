@@ -45,8 +45,39 @@ const HOLD_BALL_SOURCE = {
  */
 const HOLD_BALL_TASK_ID_PREFIX = 'hold-ball-';
 
-export const MAX_HOLDS_PER_WINDOW = 3;
-export const HOLD_WINDOW_MS = 3_600_000;
+/** 未配置时的回退值 —— 也是 env-registry 里登记的默认值。 */
+export const DEFAULT_MAX_HOLDS_PER_WINDOW = 3;
+export const DEFAULT_HOLD_WINDOW_MS = 3_600_000;
+
+/** @deprecated 保留兼容既有引用；实际取值走 getMaxHoldsPerWindow() */
+export const MAX_HOLDS_PER_WINDOW = DEFAULT_MAX_HOLDS_PER_WINDOW;
+/** @deprecated 保留兼容既有引用；实际取值走 getHoldWindowMs() */
+export const HOLD_WINDOW_MS = DEFAULT_HOLD_WINDOW_MS;
+
+/**
+ * 每个 (threadId, catId) 在滚动窗口内允许的最大持球次数。
+ *
+ * 支持 UI 热更新：每次取值都实时读 process.env，不缓存 —— 铲屎官在「环境 & 文件」
+ * 页面改完即时生效，无需重启服务。非法值（非整数 / < 1）静默回退到默认值，
+ * 避免一个手滑的输入把持球机制彻底关掉或卡死。
+ */
+export function getMaxHoldsPerWindow(): number {
+  const raw = Number(process.env.CAT_CAFE_HOLD_BALL_MAX_PER_WINDOW);
+  return Number.isInteger(raw) && raw >= 1 ? raw : DEFAULT_MAX_HOLDS_PER_WINDOW;
+}
+
+/** 滚动窗口长度（毫秒）。同样实时读 env，支持热更新。 */
+export function getHoldWindowMs(): number {
+  const raw = Number(process.env.CAT_CAFE_HOLD_BALL_WINDOW_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_HOLD_WINDOW_MS;
+}
+
+/** 把窗口毫秒渲染成人话，用于给猫的 429 提示（窗口现在可配，不能再写死「~1h」）。 */
+function formatWindow(ms: number): string {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000}min`;
+  return `${Math.round(ms / 1_000)}s`;
+}
 
 const holdCounts = new Map<string, { count: number; lastAt: number }>();
 
@@ -54,7 +85,7 @@ export function getHoldCount(threadId: string, catId: string, now: number = Date
   const key = `${threadId}:${catId}`;
   const entry = holdCounts.get(key);
   if (!entry) return 0;
-  if (now - entry.lastAt > HOLD_WINDOW_MS) {
+  if (now - entry.lastAt > getHoldWindowMs()) {
     holdCounts.delete(key);
     return 0;
   }
@@ -64,7 +95,7 @@ export function getHoldCount(threadId: string, catId: string, now: number = Date
 export function incrementHoldCount(threadId: string, catId: string, now: number = Date.now()): number {
   const key = `${threadId}:${catId}`;
   const entry = holdCounts.get(key);
-  if (!entry || now - entry.lastAt > HOLD_WINDOW_MS) {
+  if (!entry || now - entry.lastAt > getHoldWindowMs()) {
     holdCounts.set(key, { count: 1, lastAt: now });
     return 1;
   }
@@ -108,20 +139,23 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
     const { threadId, catId, userId } = actor;
     const catIdStr = catId as string;
 
+    // 限额与窗口都是运行时可配（UI 热更新），所以这里每次请求实时取值。
+    const maxHolds = getMaxHoldsPerWindow();
+    const windowMs = getHoldWindowMs();
     const currentCount = getHoldCount(threadId, catIdStr);
-    if (currentCount >= MAX_HOLDS_PER_WINDOW) {
+    if (currentCount >= maxHolds) {
       log.warn(
-        { threadId, catId: catIdStr, currentCount, windowMs: HOLD_WINDOW_MS },
+        { threadId, catId: catIdStr, currentCount, maxHolds, windowMs },
         'F167 C1: hold_ball rejected — maxHoldsPerWindow reached',
       );
       reply.status(429);
       return {
         error:
-          `maxHoldsPerWindow (${MAX_HOLDS_PER_WINDOW} per ~1h window) reached. ` +
+          `maxHoldsPerWindow (${maxHolds} per ~${formatWindow(windowMs)} window) reached. ` +
           'You MUST pass the ball now: @ another cat or @co-creator.',
         holdsInWindow: currentCount,
-        maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
-        windowMs: HOLD_WINDOW_MS,
+        maxHoldsPerWindow: maxHolds,
+        windowMs,
       };
     }
 
@@ -271,7 +305,8 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
         wakeAfterMs,
         taskId,
         holdsInWindow: newCount,
-        windowMs: HOLD_WINDOW_MS,
+        maxHolds,
+        windowMs,
       },
       'F167 C1: hold_ball registered — wake-up scheduled',
     );
@@ -281,8 +316,8 @@ export function registerCallbackHoldBallRoutes(app: FastifyInstance, deps: HoldB
       held: true,
       taskId,
       holdsInWindow: newCount,
-      maxHoldsPerWindow: MAX_HOLDS_PER_WINDOW,
-      windowMs: HOLD_WINDOW_MS,
+      maxHoldsPerWindow: maxHolds,
+      windowMs,
       wakeAt: new Date(fireAt).toISOString(),
     };
   });

@@ -544,6 +544,24 @@ export const ENV_VARS: EnvDefinition[] = [
     sensitive: false,
   },
   {
+    name: 'CAT_CAFE_HOLD_BALL_MAX_PER_WINDOW',
+    defaultValue: '3',
+    description:
+      '持球（hold_ball）限额：同一「对话 × 猫」在滚动窗口内最多持球几次，超出返回 429 强制传球。改完即时生效，无需重启。非法值（非整数或 < 1）自动回退为 3。',
+    category: 'a2a',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CAT_CAFE_HOLD_BALL_WINDOW_MS',
+    defaultValue: '3600000',
+    description:
+      '持球限额的滚动窗口长度（毫秒）：3600000 = 1 小时，7200000 = 2 小时，1800000 = 30 分钟。每次持球都会把窗口往后滑。改完即时生效，无需重启。非法值（非正数）自动回退为 3600000。',
+    category: 'a2a',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'GOVERNANCE_DEGRADATION_ENABLED',
     defaultValue: 'true',
     description: '降级策略总开关',
@@ -670,6 +688,17 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'governance',
     sensitive: false,
     runtimeEditable: true,
+  },
+  {
+    name: 'CAT_CAFE_SERVICE_ITER_CLOSE_TIMEOUT_MS',
+    defaultValue: '5000',
+    description:
+      '内部安全阀：invocation 收尾时关闭 provider 生成器的等待上限（毫秒）。生成器卡在无法 resolve 的 await 上时，靠这个超时避免清理死锁（超时会打 error 日志并提示租约可能泄漏）。模块加载时读取一次，改动需重启。',
+    category: 'governance',
+    sensitive: false,
+    hubVisible: false,
+    runtimeEditable: false,
+    restartRequired: true,
   },
   {
     name: 'WEB_PUSH_TIMEOUT_MS',
