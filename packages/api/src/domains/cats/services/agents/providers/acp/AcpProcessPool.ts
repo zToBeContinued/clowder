@@ -61,6 +61,13 @@ interface PoolEntry {
   lastUsedAt: number;
   state: 'initializing' | 'ready' | 'closing';
   idleTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * True once the entry has been removed from `entries` (eviction / idle TTL / zombie
+   * cleanup / closeAll). Metrics are reconciled at detach time, so a late `release()`
+   * from a still-running lease holder must not touch them again — otherwise
+   * activeLeaseCount goes negative and idleProcessCount leaks upward.
+   */
+  detached: boolean;
 }
 
 function serializeKey(key: PoolKey): string {
@@ -198,6 +205,7 @@ export class AcpProcessPool {
       for (const entry of entries) {
         this.clearIdleTimer(entry);
         entry.state = 'closing';
+        entry.detached = true;
         await entry.client.close().catch(() => {});
       }
       entries.length = 0;
@@ -218,10 +226,11 @@ export class AcpProcessPool {
       release: () => {
         if (released) return;
         released = true;
-        entry.leaseCount--;
+        entry.leaseCount = Math.max(0, entry.leaseCount - 1);
+        // Entry already left the pool — its metrics were reconciled at detach time.
+        if (entry.detached) return;
         this._metrics.activeLeaseCount--;
-        if (entry.leaseCount <= 0) {
-          entry.leaseCount = 0;
+        if (entry.leaseCount === 0) {
           this._metrics.idleProcessCount++;
           this.startIdleTimer(entry, poolKey);
         }
@@ -237,6 +246,7 @@ export class AcpProcessPool {
       lastUsedAt: Date.now(),
       state: 'initializing',
       idleTimer: null,
+      detached: false,
     };
     try {
       await client.initialize();
@@ -269,6 +279,7 @@ export class AcpProcessPool {
 
     this.clearIdleTimer(oldest.entry);
     oldest.entry.state = 'closing';
+    oldest.entry.detached = true;
     oldest.entry.client.close().catch(() => {});
     const entries = this.entries.get(oldest.key)!;
     entries.splice(oldest.idx, 1);
@@ -291,6 +302,7 @@ export class AcpProcessPool {
       if (idx < 0) return;
 
       entry.state = 'closing';
+      entry.detached = true;
       entry.client.close().catch(() => {});
       entries.splice(idx, 1);
       if (entries.length === 0) this.entries.delete(key);
@@ -316,6 +328,10 @@ export class AcpProcessPool {
           if (entry.state === 'closing') continue;
           if (!entry.client.isAlive) {
             this.clearIdleTimer(entry);
+            entry.state = 'closing';
+            entry.detached = true;
+            // Process is gone, but close() still tears down stdio/pending-request state.
+            entry.client.close().catch(() => {});
             entries.splice(i, 1);
             this._metrics.liveProcessCount--;
             if (entry.leaseCount > 0) {
@@ -324,7 +340,7 @@ export class AcpProcessPool {
               this._metrics.idleProcessCount--;
             }
             this._metrics.zombieCleanupCount++;
-            log.warn({ key }, 'Zombie process cleaned up');
+            log.warn({ key, leaseCount: entry.leaseCount }, 'Zombie process cleaned up');
           }
         }
         if (entries.length === 0) this.entries.delete(key);

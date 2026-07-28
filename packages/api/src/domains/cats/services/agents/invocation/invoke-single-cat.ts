@@ -160,6 +160,13 @@ import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './
 const sessionMutex = new SessionMutex();
 const SESSION_MUTEX_WAIT_TIMEOUT_MS = Number(process.env.CAT_CAFE_SESSION_MUTEX_WAIT_TIMEOUT_MS) || 90_000;
 
+/**
+ * Upper bound on closing the provider generator during invocation cleanup.
+ * Generous enough for a real teardown (kill child, flush stdio), short enough that a
+ * wedged provider cannot stall the invocation's finally block.
+ */
+const SERVICE_ITER_CLOSE_TIMEOUT_MS = Number(process.env.CAT_CAFE_SERVICE_ITER_CLOSE_TIMEOUT_MS) || 5_000;
+
 function isFilesystemPermissionError(err: unknown): boolean {
   const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
   const message = err instanceof Error ? err.message : String(err ?? '');
@@ -595,6 +602,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
 
   // F118: Declared before try so it's accessible in finally
   let sessionMutexRelease: (() => void) | undefined;
+
+  // #ACP-LEASE-LEAK: the provider generator owns pooled resources (ACP process lease,
+  // subprocess handles) and only frees them in its own `finally`. That `finally` runs
+  // only when the generator is resumed to completion or explicitly `.return()`ed.
+  // We break out of the message loop on retry / abort / timeout while the generator is
+  // still suspended on a `yield`, so the iterator MUST be closed on every exit path —
+  // otherwise the ACP pool lease is never released and the pool starves
+  // ("Pool at capacity — all processes have active leases").
+  // Declared before try so the outer finally can close it on abort/throw paths.
+  let closeServiceIter: (() => Promise<void>) | null = null;
 
   // F152: Create invocation span for distributed tracing
   // F153 Phase E: If a route span exists, make invocation its child
@@ -2190,6 +2207,41 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // F089: Use abortableNext instead of `for await` so the invocation timeout
       // can break out even when the service generator is stuck on an unresolvable await.
       const serviceIter = service.invoke(effectivePrompt, options)[Symbol.asyncIterator]();
+      {
+        let iterClosed = false;
+        closeServiceIter = async (): Promise<void> => {
+          if (iterClosed) return;
+          iterClosed = true;
+          if (!serviceIter.return) return;
+          // `.return()` only runs the generator's `finally` when it is suspended on a
+          // `yield`. A generator parked on an unresolvable `await` (the exact case F089's
+          // abortableNext exists for) queues the return request forever, so this must never
+          // be awaited unbounded — otherwise invocation cleanup deadlocks.
+          let timer: NodeJS.Timeout | undefined;
+          try {
+            const timedOut = Symbol('close-timeout');
+            const result = await Promise.race([
+              serviceIter.return(undefined).then(() => undefined),
+              new Promise<typeof timedOut>((resolve) => {
+                timer = setTimeout(() => resolve(timedOut), SERVICE_ITER_CLOSE_TIMEOUT_MS);
+                timer.unref?.();
+              }),
+            ]);
+            if (result === timedOut) {
+              // The provider generator is wedged; its own `finally` (pooled lease release,
+              // subprocess teardown) cannot run. Surfaced loudly because it leaks a lease.
+              log.error(
+                { catId, threadId, invocationId, timeoutMs: SERVICE_ITER_CLOSE_TIMEOUT_MS },
+                'service iterator close timed out — provider generator is wedged, resources may leak',
+              );
+            }
+          } catch (err) {
+            log.warn({ catId, threadId, invocationId, err }, 'service iterator close failed');
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        };
+      }
       for (;;) {
         const iterResult = await abortableNext(serviceIter, signal);
         if (iterResult.done) break;
@@ -2350,6 +2402,12 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           }
         }
       }
+
+      // #ACP-LEASE-LEAK: close the provider generator before deciding on retry.
+      // The retry paths break out of the loop on the provider's `done` message while the
+      // generator is still suspended, so without this the pooled lease is never released.
+      await closeServiceIter();
+      closeServiceIter = null;
 
       if (shouldRetryWithoutSession && attempt + 1 < maxAttempts) {
         const retryReason = suppressedPromptLimitError
@@ -2516,6 +2574,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   } finally {
     // F089: Clear invocation hard timeout
     if (invocationTimer) clearTimeout(invocationTimer);
+
+    // #ACP-LEASE-LEAK: abort / timeout / throw / outer-generator-return paths never reach
+    // the post-loop close, so release the provider generator (and its pooled lease) here.
+    if (closeServiceIter) {
+      const close = closeServiceIter;
+      closeServiceIter = null;
+      await close();
+    }
 
     // F118: Release session mutex (idempotent — safe if never acquired)
     sessionMutexRelease?.();

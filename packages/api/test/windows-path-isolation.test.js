@@ -8,6 +8,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -133,6 +134,60 @@ $resolvedPnpmStore = (& pnpm store path | Select-Object -Last 1).Trim()
         assertPathInside(directory, projectRoot, label);
         assert.equal(existsSync(directory), true, `${label} directory must exist`);
       }
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'Windows runtime helper sweeps stale kiro-cli installer downloads from the isolated temp',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const sandbox = createSandbox('runtime-temp-sweep-');
+    try {
+      const projectRoot = join(sandbox, 'temporary project');
+      const scriptsDir = join(projectRoot, 'scripts');
+      const tempRoot = join(projectRoot, '.cat-cafe', 'runtime', 'tmp');
+      mkdirSync(scriptsDir, { recursive: true });
+      mkdirSync(tempRoot, { recursive: true });
+      const helperCopy = join(scriptsDir, 'windows-runtime-env.ps1');
+      copyFileSync(RUNTIME_HELPER, helperCopy);
+
+      // 两天前的安装器残留 → 必须清掉；刚下的 → 必须留着（可能正在用）。
+      // 同时放一个无关的旧临时文件，验证清扫范围是窄的、不会误伤。
+      const staleInstaller = join(tempRoot, 'kiro-installer-11111111-2222-3333-4444-555555555555.msi');
+      const freshInstaller = join(tempRoot, 'kiro-installer-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.msi');
+      const unrelatedStale = join(tempRoot, 'some-other-tool-cache.bin');
+      const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      for (const file of [staleInstaller, freshInstaller, unrelatedStale]) {
+        writeFileSync(file, 'x', 'utf8');
+      }
+      utimesSync(staleInstaller, twoDaysAgo, twoDaysAgo);
+      utimesSync(unrelatedStale, twoDaysAgo, twoDaysAgo);
+
+      const driver = join(sandbox, 'invoke-sweep.ps1');
+      writeFileSync(
+        driver,
+        `param([string]$HelperPath, [string]$ProjectRoot)
+. $HelperPath
+$runtime = Initialize-ClowderWindowsRuntimeEnvironment -ProjectRoot $ProjectRoot
+[ordered]@{ StaleTempRemoved = $runtime.StaleTempRemoved } | ConvertTo-Json -Compress
+`,
+        'utf8',
+      );
+
+      const result = spawnSync(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', driver, '-HelperPath', helperCopy, '-ProjectRoot', projectRoot],
+        { encoding: 'utf8', windowsHide: true },
+      );
+      assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+
+      assert.equal(existsSync(staleInstaller), false, 'stale kiro-cli installer download must be swept');
+      assert.equal(existsSync(freshInstaller), true, 'a fresh installer download must be left alone');
+      assert.equal(existsSync(unrelatedStale), true, 'the sweep must not touch unrelated temp files');
+      assert.equal(parseJsonOutput(result.stdout).StaleTempRemoved, 1, 'helper should report exactly one swept file');
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
