@@ -456,8 +456,9 @@ export const updateTaskInputSchema = {
     })
     .optional()
     .describe(
-      '交付证据：任务完成时填写，面板显示为"交付证据 N/5"。每个字段独立可选，填了就计数。' +
-        '建议在切 done/in_review 时同步填写，让铲屎官一眼看到产出。',
+      '交付证据（面板显示为"交付证据 N/5"）。' +
+        'REQUIRED when status is done or in_review — 切 done/in_review 时 MUST 填写至少 tests 和 review 两项，否则铲屎官无法验收。' +
+        '示例: { tests: "22 passed, 0 failed", review: "宪宪三审 GO" }',
     ),
 };
 
@@ -1423,6 +1424,8 @@ export const callbackTools = [
       'STATE MACHINE: done is terminal — cannot go back to doing/todo (create a retryOf task instead). ' +
       'failed can only go back to todo. blocked can go to doing/todo/failed. ' +
       'DELEGATION: If owner is stuck/offline, supply delegateActorId with your catId to override (audited). ' +
+      'EVIDENCE: When setting status to done or in_review, you MUST include evidence (at least tests + review). ' +
+      '铲屎官看面板靠这个判断你干了什么——不填=没交付。' +
       'GOTCHA: You can only update tasks assigned to you (your catId) unless using delegateActorId. ' +
       'TIP: Include a "why" note when marking as blocked — it helps others understand the situation.',
     inputSchema: updateTaskInputSchema,
