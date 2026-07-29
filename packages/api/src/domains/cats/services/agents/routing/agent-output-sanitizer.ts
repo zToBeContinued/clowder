@@ -70,6 +70,71 @@ const INTERNAL_PROGRESS_LINE_PATTERNS = [
 const USER_FACING_LINE_RE =
   /^(结论|建议|结果|交付|验证|验证证据|原因|下一步|需要确认|风险|修复|改动|已完成|可以|不建议|白话解释|总结|最终判断|核心判断)(?:\s|[：:]|$)/;
 
+/**
+ * kiro-cli 的 turn 包装标记。
+ *
+ * 现场（thread_ms16zvb8ex5mdwem，2026-07-29）：assistant 消息正文末尾追加了下一轮的完整
+ * prompt —— kiro-cli 自己的 `--- CONTEXT ENTRY ---` 包装 + Clowder 的 mission pack 与身份块。
+ * 硬证据是包装里的 `Current time` 比消息自己的 timestamp 晚 5-7 分钟：模型不可能预知未来的
+ * 毫秒级时间，所以这不是续写，而是 kiro-cli 在复用的 ACP session 上把新一轮输入回显成了
+ * text chunk，被 accumulateTextAggregate 纯 append 并进正文后落库。
+ *
+ * 这些标记在 Clowder 侧没有任何生成点（只存在于 kiro-cli 二进制里），所以一旦出现在
+ * agent 正文就必然是回显泄漏，从出现处截断到末尾。
+ */
+const LEAKED_ENVELOPE_CUT_RE = /(?:^|\n)[ \t]*(?:user|assistant)?[ \t]*--- CONTEXT ENTRY BEGIN ---/;
+
+/** 只有结构性配套标记同时出现才算泄漏，避免正文偶然提到单个词就被截断。 */
+const LEAKED_ENVELOPE_CONFIRM_RE = /--- (?:CONTEXT ENTRY END|USER MESSAGE BEGIN) ---/;
+
+/**
+ * 定位 fenced code block 区间。
+ *
+ * 排查这类泄漏时，正文本身就会引用这些标记（通常放在围栏里）。围栏内必须原样保留，
+ * 否则讨论该问题的回复会被自己的清洗规则截断。
+ */
+function findFencedRanges(text: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  const fenceRe = /^[ \t]*(`{3,}|~{3,})[^\n]*$/gm;
+  let openStart: number | null = null;
+  let openChar = '';
+  let match: RegExpExecArray | null;
+
+  while ((match = fenceRe.exec(text)) !== null) {
+    const fenceChar = match[1]![0]!;
+    if (openStart === null) {
+      openStart = match.index;
+      openChar = fenceChar;
+    } else if (fenceChar === openChar) {
+      ranges.push([openStart, match.index + match[0].length]);
+      openStart = null;
+    }
+  }
+  // 未闭合的围栏一直延伸到末尾，否则截断点会落进代码里。
+  if (openStart !== null) ranges.push([openStart, text.length]);
+
+  return ranges;
+}
+
+function stripLeakedPromptEnvelope(text: string): string {
+  if (!LEAKED_ENVELOPE_CONFIRM_RE.test(text)) return text;
+
+  const fenced = findFencedRanges(text);
+  const isFenced = (index: number) => fenced.some(([start, end]) => index >= start && index < end);
+
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const match = LEAKED_ENVELOPE_CUT_RE.exec(text.slice(searchFrom));
+    if (!match) return text;
+
+    const absolute = searchFrom + match.index;
+    if (!isFenced(absolute)) return text.slice(0, absolute);
+    searchFrom = absolute + match[0].length;
+  }
+
+  return text;
+}
+
 function stripInlineArtifacts(text: string): string {
   return text
     .replace(OPENAI_CITATION_RE, '')
@@ -127,7 +192,8 @@ function isUserFacingLine(line: string): boolean {
 export function sanitizeAgentVisibleOutput(content: string): string {
   if (!content) return content;
 
-  const normalized = content.replace(/\r\n/g, '\n');
+  // 先切掉回显泄漏的下一轮 prompt：必须在按空行分块之前做，因为泄漏段本身跨多个块。
+  const normalized = stripLeakedPromptEnvelope(content.replace(/\r\n/g, '\n'));
   const blocks = normalized.split(/\n{2,}/);
   const cleanedBlocks: string[] = [];
   let suppressNarrativeAfterProgress = false;

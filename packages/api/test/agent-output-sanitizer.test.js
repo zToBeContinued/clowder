@@ -222,3 +222,75 @@ describe('agent output sanitizer', () => {
     assert.equal(output, '结论：上下文压力信息只能留在内部运行态。');
   });
 });
+
+describe('leaked prompt envelope (kiro-cli turn wrapper)', () => {
+  async function getSanitizer() {
+    const mod = await import('../dist/domains/cats/services/agents/routing/agent-output-sanitizer.js');
+    return mod.sanitizeAgentVisibleOutput;
+  }
+
+  // 现场取自 thread_ms16zvb8ex5mdwem（2026-07-29）：两条 opus5-architect 的 assistant
+  // 消息末尾都追加了下一轮的完整 prompt。硬证据是包装里的 `Current time` 比消息自己的
+  // timestamp 晚 5-7 分钟 —— 模型不可能预知未来的毫秒级时间，所以这是 kiro-cli 在同一
+  // ACP session 上把新一轮输入回显成了 text chunk，被 accumulateTextAggregate 纯 append
+  // 并进正文后落库。
+  const LEAKED_TAIL = [
+    'user--- CONTEXT ENTRY BEGIN ---',
+    'Current time: Thursday, 2026-07-30T00:47:20.048+08:00',
+    '--- CONTEXT ENTRY END ---',
+    '',
+    '--- USER MESSAGE BEGIN ---',
+    '## Dispatch Mission Context',
+    '',
+    'mission: Quant',
+    'work_item: Quant',
+    'phase: unknown',
+    '',
+    'Identity: Kiro Opus 5/砚砚 (@opus5-architect, model=claude-opus-5)',
+    '当前模式：独立回答。',
+  ].join('\n');
+
+  test('truncates the echoed next-turn prompt from the tail of a real reply', async () => {
+    const sanitize = await getSanitizer();
+    const input = ['结论：akquant 的账务能闭合，C1 已通过。', '', LEAKED_TAIL].join('\n');
+
+    const output = sanitize(input);
+
+    assert.equal(output, '结论：akquant 的账务能闭合，C1 已通过。');
+    assert.ok(!output.includes('CONTEXT ENTRY'));
+    assert.ok(!output.includes('USER MESSAGE BEGIN'));
+    assert.ok(!output.includes('Dispatch Mission Context'));
+    assert.ok(!output.includes('当前模式'));
+  });
+
+  test('keeps the wrapper when a cat is legitimately quoting it inside a code fence', async () => {
+    // 自指保护：讨论这个 bug 时正文里就会出现这些标记。围栏内必须原样保留，
+    // 否则排查这类问题的回复会被自己的清洗规则截断。
+    const sanitize = await getSanitizer();
+    const input = [
+      '结论：这段包装来自 kiro-cli，不是 Clowder 生成的。',
+      '',
+      '```text',
+      LEAKED_TAIL,
+      '```',
+      '',
+      '建议：在写入前按结构标记截断。',
+    ].join('\n');
+
+    const output = sanitize(input);
+
+    assert.ok(output.includes('CONTEXT ENTRY BEGIN'));
+    assert.ok(output.includes('USER MESSAGE BEGIN'));
+    assert.ok(output.includes('建议：在写入前按结构标记截断。'));
+  });
+
+  test('leaves an unrelated horizontal rule untouched', async () => {
+    const sanitize = await getSanitizer();
+    const input = ['结论：第一段。', '', '---', '', '建议：第二段。'].join('\n');
+
+    const output = sanitize(input);
+
+    assert.ok(output.includes('结论：第一段。'));
+    assert.ok(output.includes('建议：第二段。'));
+  });
+});
