@@ -4,7 +4,8 @@
 #  Double-click start-clowder.cmd. This does everything; no manual steps:
 #    1. sets the proxy for the API process and its kiro-cli acp children
 #    2. installs a portable Redis on first run (into .cat-cafe\redis\windows)
-#    3. starts Clowder (API + web) in persistent (Redis) mode
+#    3. keeps kiro-cli current, then sweeps the caches its updater leaves behind
+#    4. starts Clowder (API + web) in persistent (Redis) mode
 #  trust-all-tools is already baked into the Kiro ACP profile, so every Kiro
 #  tool call (incl. nested subagents) is auto-approved -- nothing to confirm.
 # =============================================================================
@@ -168,7 +169,27 @@ try {
     Write-Warn "Continuing - a stale kiro-cli only costs bandwidth, it does not block Clowder."
 }
 
-# --- 4) Start Clowder (default mode = Redis; trust-all is automatic) ---------
+# --- 4) Sweep expired Kiro artifacts outside the repo ------------------------
+#
+# Runs right after the update check on purpose: the updater has just extracted the current
+# kas tree (~505MB per release), so this is the moment the superseded ones become dead
+# weight. Nothing else ever expires them -- neither the IDE nor kiro-cli prunes its own
+# caches, and they all live outside the repo where TEMP redirection cannot reach them.
+#
+# Defaults are conservative and read-only for anything valuable: per-workspace IDE agent
+# state (chat history + revert checkpoints) is left untouched unless the operator passes
+# -AgentStateIdleDays explicitly. Never fatal: a failed sweep must not block startup.
+$sweepScript = Join-Path $repo "scripts\sweep-kiro-artifacts.ps1"
+if (Test-Path -LiteralPath $sweepScript -PathType Leaf) {
+    Write-Step "Sweeping expired Kiro artifacts"
+    try {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $sweepScript -Quiet
+    } catch {
+        Write-Warn "Kiro artifact sweep failed: $($_.Exception.Message)"
+    }
+}
+
+# --- 5) Start Clowder (default mode = Redis; trust-all is automatic) ---------
 Write-Step "Starting Clowder (API + web) ..."
 & node (Join-Path $repo "scripts\start-entry.mjs") start
 if ($LASTEXITCODE -ne 0) {
