@@ -214,6 +214,22 @@ const KIRO_TRANSIENT_INTERNAL_RE =
 /** -32603 下同样到达、但重试不会好转的情形：会话已消失 / 输入超长被服务端拒收。 */
 const KIRO_NON_RETRYABLE_INTERNAL_RE = /Session not found/i;
 
+/**
+ * Kiro CLI 本地凭证失效。
+ *
+ * 现场症状（2026-07-29 kiro-chat.log）：CLI 的 social token 刷新被认证服务端以 500 拒绝
+ *   （`auth::social: Failed to refresh social token: 500 Internal Server Error`），
+ * 之后本地就没有可用 token 了，每次请求在连接层直接失败：
+ *   `ConnectorError { kind: Other(None), source: NoToken }`
+ *   → JSON-RPC 只写成 `Internal error`，data 里是 `An unknown error occurred: dispatch failure`。
+ *
+ * 这条必须先于 transient 判定命中：`Internal error` 会匹配 KIRO_TRANSIENT_INTERNAL_RE，
+ * 于是"没登录"被包装成"服务端瞬时故障（稍后自动重试）"并反复重试，真实原因被完全掩盖。
+ * IDE 与 CLI 的凭证是两套独立存储，同一账号下 IDE 能用不代表 CLI 也能用。
+ */
+const KIRO_AUTH_FAILURE_RE =
+  /NoToken|Not logged in|Failed to refresh (?:social )?token|invalid_grant|ExpiredTokenException|UnauthorizedException|AccessDeniedException/i;
+
 function stringifyAcpErrorData(data: unknown): string {
   if (data === undefined || data === null) return '';
   if (typeof data === 'string') return data;
@@ -228,6 +244,7 @@ function isTransientKiroInternalError(error: unknown): boolean {
   if (!(error instanceof AcpProtocolError) || error.code !== -32603) return false;
   const haystack = `${error.message} ${stringifyAcpErrorData(error.data)}`;
   if (KIRO_NON_RETRYABLE_INTERNAL_RE.test(haystack)) return false;
+  if (KIRO_AUTH_FAILURE_RE.test(haystack)) return false;
   if (isContextWindowOverflowError(haystack)) return false;
   return KIRO_TRANSIENT_INTERNAL_RE.test(haystack);
 }
@@ -255,6 +272,16 @@ function classifyKiroError(error: unknown, requestedSessionId?: string): { error
   // JSON-RPC message 常常只是笼统的 `Internal error`，真实 reason 落在 `data` 上，
   // 所以判定要看 message + data —— 否则超长输入会被误当成可重试故障。
   const errorDetail = error instanceof AcpProtocolError ? stringifyAcpErrorData(error.data) : '';
+  // 凭证失效必须先于 transient 判定：否则 `Internal error` 会把它误判成可重试的服务端 5xx。
+  if (KIRO_AUTH_FAILURE_RE.test(`${message} ${errorDetail}`)) {
+    return {
+      errorCode: 'auth_failure',
+      message:
+        `Kiro CLI 未登录或凭证已失效，重试无效：${message}${errorDetail ? `（${errorDetail.slice(0, 300)}）` : ''}。` +
+        '请在终端执行 `kiro-cli login`（走与 Clowder 相同的代理），用 `kiro-cli whoami` 确认后重启 Clowder。' +
+        '注意 Kiro IDE 与 kiro-cli 的凭证互相独立，IDE 能用不代表 CLI 已登录。',
+    };
+  }
   if (isContextWindowOverflowError(`${message} ${errorDetail}`)) {
     return {
       errorCode: 'context_window_overflow',

@@ -167,6 +167,29 @@ describe('KiroAcpAdapter', () => {
     assert.equal(error.errorCode, 'context_window_overflow');
   });
 
+  it('keeps an expired CLI credential out of the transient retry path', async () => {
+    // 现场取自 2026-07-29 kiro-chat.log：social token 刷新被 500 拒绝后本地无 token，
+    // 每次请求在连接层就以 NoToken 失败。JSON-RPC message 仍是笼统的 `Internal error`，
+    // 曾被误判为 provider_transient 并无限重试，把"未登录"这个真实原因彻底掩盖。
+    const { pool } = createHarness({
+      async *promptStream() {
+        throw new AcpProtocolError(
+          -32603,
+          'Internal error',
+          'Encountered an error in the response stream: An unknown error occurred: dispatch failure' +
+            ' (ConnectorError { kind: Other(None), source: NoToken, connection: Unknown })',
+        );
+      },
+    });
+    const adapter = new KiroAcpAdapter({ catId: 'kiro-cat', pool, projectRoot: '/clowder' });
+
+    const error = (await collect(adapter.invoke('hello'))).find((message) => message.type === 'error');
+    assert.equal(error.errorCode, 'auth_failure');
+    assert.match(error.error, /未登录或凭证已失效/);
+    assert.match(error.error, /kiro-cli login/);
+    assert.doesNotMatch(error.error, /瞬时故障/);
+  });
+
   it('keeps a missing session out of the transient retry path', async () => {
     const { pool } = createHarness({
       async *promptStream() {
