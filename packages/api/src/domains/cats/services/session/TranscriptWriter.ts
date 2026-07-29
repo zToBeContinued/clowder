@@ -1,6 +1,6 @@
 /**
  * TranscriptWriter — F24 Phase C
- * Collects invocation events in memory, flushes to JSONL on seal.
+ * Streams invocation events to JSONL as they arrive; writes index + digest on seal.
  *
  * File structure per session:
  *   <dataDir>/threads/<threadId>/<catId>/sessions/<sessionId>/
@@ -10,15 +10,27 @@
  *
  * events.jsonl envelope:
  *   { v:1, t:number, threadId, catId, sessionId, cliSessionId, invocationId?, eventNo, event }
+ *
+ * Durability: events used to live only in memory until seal, so an API crash (or any exit
+ * that never reaches the sealer) lost the entire raw event stream — the one copy that
+ * IndexBuilder falls back to once Redis messages expire. Each appendEvent now schedules an
+ * append to events.jsonl behind a per-session promise chain, so a crash costs at most the
+ * events still in flight. The in-memory buffer is kept regardless: generateExtractiveDigest
+ * reads it at seal time, and it is what assigns eventNo.
  */
 
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { appendFile, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
+import { createModuleLogger } from '../../../../infrastructure/logger.js';
 import {
   type CollaborationContinuityCapsuleV1,
   extractContinuityCapsuleFromSystemInfo,
 } from '../agents/invocation/CollaborationContinuityCapsule.js';
 import { stripLeakedToolCallPayload } from '../agents/routing/route-helpers.js';
+
+const log = createModuleLogger('transcript-writer');
 
 export interface TranscriptSessionInfo {
   sessionId: string;
@@ -77,6 +89,19 @@ export interface HandoffDigestMeta {
   generatedAt: number;
 }
 
+/** Per-session bookkeeping for the incremental events.jsonl append. */
+interface PersistState {
+  sessionDir: string;
+  /** Events already on disk from an earlier process (see adoptExistingFile). */
+  eventNoBase: number;
+  /** How many entries of the current in-memory buffer are already appended. */
+  writtenCount: number;
+  /** Current file size in bytes, i.e. the offset the next line starts at. */
+  byteOffset: number;
+  /** Sparse index offsets, absolute within the file. */
+  offsets: number[];
+}
+
 export class TranscriptWriter {
   private readonly dataDir: string;
   private readonly indexStride: number;
@@ -84,13 +109,22 @@ export class TranscriptWriter {
   private buffers = new Map<string, BufferedEvent[]>();
   /** sessionId → threadId, so a thread purge can drop pending buffers too */
   private bufferedThreadIds = new Map<string, string>();
+  /** sessionId → on-disk append bookkeeping */
+  private persistStates = new Map<string, PersistState>();
+  /** sessionId → tail of the serialized append chain, so appends never interleave */
+  private persistChains = new Map<string, Promise<void>>();
 
   constructor(opts: TranscriptWriterOptions) {
     this.dataDir = opts.dataDir;
     this.indexStride = opts.indexStride ?? 100;
   }
 
-  /** Append a raw event to the in-memory buffer for a session. */
+  /**
+   * Buffer a raw event and schedule it to be appended to events.jsonl.
+   *
+   * Stays synchronous and never throws: callers treat it as fire-and-forget, and a transcript
+   * write failure must not break an invocation. Persistence errors are logged once per append.
+   */
   appendEvent(session: TranscriptSessionInfo, event: Record<string, unknown>, invocationId?: string): void {
     let buf = this.buffers.get(session.sessionId);
     if (!buf) {
@@ -104,6 +138,132 @@ export class TranscriptWriter {
       ...(invocationId !== undefined ? { invocationId } : {}),
       event,
     });
+    this.schedulePersist(session);
+  }
+
+  /**
+   * Queue a persist pass behind whatever is already running for this session.
+   *
+   * Bursty streams (text deltas) coalesce naturally: while one append is in flight the
+   * newly buffered events pile up and the next pass writes them in a single call.
+   */
+  private schedulePersist(session: TranscriptSessionInfo): void {
+    const sessionId = session.sessionId;
+    const previous = this.persistChains.get(sessionId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(() => this.persistPending(session))
+      .catch((err) => {
+        log.warn(
+          { sessionId, threadId: session.threadId, catId: session.catId, err: String(err) },
+          'Transcript incremental append failed; events stay buffered for the seal-time flush',
+        );
+      });
+    this.persistChains.set(sessionId, next);
+  }
+
+  /** Append every buffered-but-unwritten event for a session. Must run inside the chain. */
+  private async persistPending(session: TranscriptSessionInfo): Promise<void> {
+    const buf = this.buffers.get(session.sessionId);
+    if (!buf || buf.length === 0) return;
+
+    const state = await this.ensurePersistState(session);
+    const pending = buf.slice(state.writtenCount);
+    if (pending.length === 0) return;
+
+    let chunk = '';
+    let byteOffset = state.byteOffset;
+    const offsets: number[] = [];
+    for (const entry of pending) {
+      const absoluteEventNo = state.eventNoBase + entry.eventNo;
+      if (absoluteEventNo % this.indexStride === 0) {
+        offsets.push(byteOffset);
+      }
+      const line = this.serializeEnvelope(session, entry, absoluteEventNo);
+      chunk += `${line}\n`;
+      byteOffset += Buffer.byteLength(line, 'utf-8') + 1; // +1 for newline
+    }
+
+    await appendFile(join(state.sessionDir, 'events.jsonl'), chunk, 'utf-8');
+
+    // Only commit bookkeeping after the write lands, so a failed append is retried
+    // by the next pass instead of being silently skipped.
+    state.writtenCount += pending.length;
+    state.byteOffset = byteOffset;
+    state.offsets.push(...offsets);
+  }
+
+  private serializeEnvelope(session: TranscriptSessionInfo, entry: BufferedEvent, eventNo: number): string {
+    return JSON.stringify({
+      v: 1,
+      t: entry.timestamp,
+      threadId: session.threadId,
+      catId: session.catId,
+      sessionId: session.sessionId,
+      cliSessionId: session.cliSessionId,
+      invocationId: entry.invocationId,
+      eventNo,
+      event: entry.event,
+    });
+  }
+
+  private async ensurePersistState(session: TranscriptSessionInfo): Promise<PersistState> {
+    const existing = this.persistStates.get(session.sessionId);
+    if (existing) return existing;
+
+    const sessionDir = this.sessionDir(session);
+    await mkdir(sessionDir, { recursive: true });
+    const adopted = await this.adoptExistingFile(join(sessionDir, 'events.jsonl'));
+    const state: PersistState = { sessionDir, ...adopted };
+    this.persistStates.set(session.sessionId, state);
+    return state;
+  }
+
+  /**
+   * Continue an events.jsonl left by an earlier process instead of clobbering or duplicating it.
+   *
+   * A session stays active across an API restart (session-active:* lives in Redis), so the
+   * fresh in-memory buffer starts numbering at 0 again while the file already holds events.
+   * Appending blindly would produce duplicate eventNo values; the previous whole-file
+   * writeFile-on-seal would instead have dropped everything written before the restart.
+   * Scanning once gives us the real line count, size and stride offsets to carry on from.
+   */
+  private async adoptExistingFile(
+    jsonlPath: string,
+  ): Promise<{ eventNoBase: number; writtenCount: number; byteOffset: number; offsets: number[] }> {
+    const empty = { eventNoBase: 0, writtenCount: 0, byteOffset: 0, offsets: [] as number[] };
+    try {
+      const info = await stat(jsonlPath);
+      if (!info.isFile() || info.size === 0) return empty;
+    } catch {
+      return empty;
+    }
+
+    let eventNoBase = 0;
+    let byteOffset = 0;
+    const offsets: number[] = [];
+    try {
+      const rl = createInterface({ input: createReadStream(jsonlPath, 'utf-8'), crlfDelay: Number.POSITIVE_INFINITY });
+      for await (const line of rl) {
+        if (line.trim().length === 0) continue;
+        if (eventNoBase % this.indexStride === 0) offsets.push(byteOffset);
+        byteOffset += Buffer.byteLength(line, 'utf-8') + 1;
+        eventNoBase++;
+      }
+    } catch (err) {
+      log.warn({ jsonlPath, err: String(err) }, 'Could not scan existing transcript; starting a fresh append cursor');
+      return empty;
+    }
+
+    return { eventNoBase, writtenCount: 0, byteOffset, offsets };
+  }
+
+  /** Wait for the in-flight appends of one session (or all sessions) to settle. */
+  async drain(sessionId?: string): Promise<void> {
+    const chains = sessionId
+      ? [this.persistChains.get(sessionId)].filter((c): c is Promise<void> => Boolean(c))
+      : [...this.persistChains.values()];
+    await Promise.all(chains.map((chain) => chain.catch(() => {})));
   }
 
   /** Get buffered events for a session (for testing). */
@@ -117,8 +277,12 @@ export class TranscriptWriter {
   }
 
   /**
-   * Flush buffered events to disk + generate index + extractive digest.
-   * Clears the buffer after successful write.
+   * Seal-time finalization: append whatever is still unwritten, then write index + digest.
+   * Clears the buffer afterwards.
+   *
+   * events.jsonl is no longer rewritten here — it has been growing all along, so this only
+   * needs to catch the tail. index.json and the digest are still whole-file writes: they are
+   * small, derived, and only meaningful once the session is complete.
    */
   async flush(session: TranscriptSessionInfo, sealTimestamps?: { createdAt: number; sealedAt: number }): Promise<void> {
     const buf = this.buffers.get(session.sessionId);
@@ -126,56 +290,31 @@ export class TranscriptWriter {
       return;
     }
 
-    const sessionDir = this.sessionDir(session);
-    await mkdir(sessionDir, { recursive: true });
+    // Let queued appends finish first, otherwise this pass and an in-flight one could both
+    // claim the same pending slice.
+    await this.drain(session.sessionId);
+    await this.persistPending(session);
 
-    // 1. Write events.jsonl
-    const jsonlLines: string[] = [];
-    const offsets: number[] = [];
-    let byteOffset = 0;
+    const state = await this.ensurePersistState(session);
+    const sessionDir = state.sessionDir;
 
-    for (const entry of buf) {
-      if (entry.eventNo % this.indexStride === 0) {
-        offsets.push(byteOffset);
-      }
-
-      const envelope = {
-        v: 1,
-        t: entry.timestamp,
-        threadId: session.threadId,
-        catId: session.catId,
-        sessionId: session.sessionId,
-        cliSessionId: session.cliSessionId,
-        invocationId: entry.invocationId,
-        eventNo: entry.eventNo,
-        event: entry.event,
-      };
-
-      const line = JSON.stringify(envelope);
-      jsonlLines.push(line);
-      byteOffset += Buffer.byteLength(line, 'utf-8') + 1; // +1 for newline
-    }
-
-    await writeFile(join(sessionDir, 'events.jsonl'), `${jsonlLines.join('\n')}\n`, 'utf-8');
-
-    // 2. Write index.json
     const index = {
       v: 1,
-      eventCount: buf.length,
+      eventCount: state.eventNoBase + buf.length,
       stride: this.indexStride,
-      offsets,
+      offsets: state.offsets,
     };
     await writeFile(join(sessionDir, 'index.json'), JSON.stringify(index, null, 2), 'utf-8');
 
-    // 3. Write digest.extractive.json (if seal timestamps provided)
     if (sealTimestamps) {
       const digest = this.generateExtractiveDigest(session, sealTimestamps);
       await writeFile(join(sessionDir, 'digest.extractive.json'), JSON.stringify(digest, null, 2), 'utf-8');
     }
 
-    // Clear buffer
     this.buffers.delete(session.sessionId);
     this.bufferedThreadIds.delete(session.sessionId);
+    this.persistStates.delete(session.sessionId);
+    this.persistChains.delete(session.sessionId);
   }
 
   /**
@@ -343,10 +482,19 @@ export class TranscriptWriter {
   async deleteThread(threadId: string): Promise<boolean> {
     const threadDir = join(this.dataDir, 'threads', threadId);
     // Drop pending buffers too, otherwise a later flush would recreate the directory.
+    const affected: string[] = [];
     for (const [sessionId, bufferedThreadId] of this.bufferedThreadIds) {
       if (bufferedThreadId !== threadId) continue;
+      affected.push(sessionId);
       this.buffers.delete(sessionId);
       this.bufferedThreadIds.delete(sessionId);
+    }
+    // Wait for in-flight appends before removing the directory, and drop their bookkeeping —
+    // an append that lands after the rm would resurrect the transcript we just purged.
+    await Promise.all(affected.map((sessionId) => this.drain(sessionId)));
+    for (const sessionId of affected) {
+      this.persistStates.delete(sessionId);
+      this.persistChains.delete(sessionId);
     }
     try {
       await rm(threadDir, { recursive: true, force: true });

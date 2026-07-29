@@ -6,7 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, test } from 'node:test';
@@ -552,5 +552,166 @@ describe('TranscriptWriter', () => {
       assert.equal(digest.v, 1);
       assert.equal(digest.sessionId, 'sess-abc');
     });
+  });
+});
+
+/**
+ * 增量落盘（耐久性）。
+ *
+ * 原行为：事件只攒在内存，直到 seal 才整文件写一次。API 在 seal 前崩溃 → 整段原始事件流
+ * 全丢，而 Redis 消息过期后 IndexBuilder 正是靠这份 JSONL 回填 passage。
+ */
+describe('TranscriptWriter incremental durability', () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), 'transcript-durability-'));
+  });
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  async function loadWriter() {
+    const { TranscriptWriter } = await import('../dist/domains/cats/services/session/TranscriptWriter.js');
+    return TranscriptWriter;
+  }
+
+  const SESSION = {
+    sessionId: 'sess-durable',
+    threadId: 'thread-d',
+    catId: 'opus',
+    cliSessionId: 'cli-d',
+    seq: 0,
+  };
+
+  function sessionDirOf(dir, session = SESSION) {
+    return join(dir, 'threads', session.threadId, session.catId, 'sessions', session.sessionId);
+  }
+
+  async function readLines(dir, session = SESSION) {
+    const content = await readFile(join(sessionDirOf(dir, session), 'events.jsonl'), 'utf-8');
+    return content
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => JSON.parse(line));
+  }
+
+  test('events reach events.jsonl before any seal', async () => {
+    const TranscriptWriter = await loadWriter();
+    const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+    writer.appendEvent(SESSION, { type: 'text', content: 'first' });
+    writer.appendEvent(SESSION, { type: 'text', content: 'second' });
+    await writer.drain(SESSION.sessionId);
+
+    const lines = await readLines(tmpDir);
+    assert.equal(lines.length, 2, 'both events must already be on disk without a flush');
+    assert.deepEqual(
+      lines.map((l) => l.event.content),
+      ['first', 'second'],
+    );
+    assert.deepEqual(
+      lines.map((l) => l.eventNo),
+      [0, 1],
+    );
+    // 缓冲仍在，因为 seal 时的 digest 依赖它
+    assert.equal(writer.getEventCount(SESSION.sessionId), 2);
+  });
+
+  test('flush only appends the tail instead of rewriting the file', async () => {
+    const TranscriptWriter = await loadWriter();
+    const writer = new TranscriptWriter({ dataDir: tmpDir, indexStride: 2 });
+
+    for (let i = 0; i < 3; i++) {
+      writer.appendEvent(SESSION, { type: 'text', content: `msg ${i}` });
+    }
+    await writer.drain(SESSION.sessionId);
+    // 这条在增量写之后追加，只能靠 flush 补齐
+    writer.appendEvent(SESSION, { type: 'text', content: 'msg 3' });
+
+    await writer.flush(SESSION, { createdAt: 1000, sealedAt: 2000 });
+
+    const lines = await readLines(tmpDir);
+    assert.equal(lines.length, 4, '不能有重复行，也不能丢尾部事件');
+    assert.deepEqual(
+      lines.map((l) => l.eventNo),
+      [0, 1, 2, 3],
+    );
+
+    const index = JSON.parse(await readFile(join(sessionDirOf(tmpDir), 'index.json'), 'utf-8'));
+    assert.equal(index.eventCount, 4);
+    assert.equal(index.stride, 2);
+    assert.deepEqual(index.offsets.length, 2, 'stride 2 + 4 事件 → eventNo 0 与 2 各一个偏移');
+    assert.equal(index.offsets[0], 0);
+    // 偏移必须指向对应行的真实起始字节
+    const raw = await readFile(join(sessionDirOf(tmpDir), 'events.jsonl'), 'utf-8');
+    const buf = Buffer.from(raw, 'utf-8');
+    assert.equal(JSON.parse(buf.subarray(index.offsets[1]).toString('utf-8').split('\n')[0]).eventNo, 2);
+
+    assert.equal(writer.getEventCount(SESSION.sessionId), 0, 'flush 后清缓冲');
+  });
+
+  test('a new writer continues a transcript left by a crashed process without duplicating eventNo', async () => {
+    const TranscriptWriter = await loadWriter();
+
+    // 第一个进程：写了 3 个事件就"崩溃"（不 flush，直接丢弃实例）
+    const crashed = new TranscriptWriter({ dataDir: tmpDir, indexStride: 2 });
+    for (let i = 0; i < 3; i++) {
+      crashed.appendEvent(SESSION, { type: 'text', content: `pre-crash ${i}` });
+    }
+    await crashed.drain(SESSION.sessionId);
+    assert.equal((await readLines(tmpDir)).length, 3, '崩溃前的事件必须已落盘');
+
+    // 重启：session 在 Redis 里仍是 active，同一 session 继续收事件，
+    // 但新进程的内存缓冲从 eventNo 0 重新计数。
+    const restarted = new TranscriptWriter({ dataDir: tmpDir, indexStride: 2 });
+    restarted.appendEvent(SESSION, { type: 'text', content: 'post-restart 0' });
+    restarted.appendEvent(SESSION, { type: 'text', content: 'post-restart 1' });
+    await restarted.flush(SESSION, { createdAt: 1000, sealedAt: 2000 });
+
+    const lines = await readLines(tmpDir);
+    assert.equal(lines.length, 5, '重启前后的事件都要保留');
+    assert.deepEqual(
+      lines.map((l) => l.eventNo),
+      [0, 1, 2, 3, 4],
+      'eventNo 必须跨进程连续，不能重复',
+    );
+    assert.deepEqual(
+      lines.map((l) => l.event.content),
+      ['pre-crash 0', 'pre-crash 1', 'pre-crash 2', 'post-restart 0', 'post-restart 1'],
+    );
+
+    const index = JSON.parse(await readFile(join(sessionDirOf(tmpDir), 'index.json'), 'utf-8'));
+    assert.equal(index.eventCount, 5, 'index 要算上崩溃前那批');
+    assert.equal(index.offsets[0], 0);
+  });
+
+  test('deleteThread drops in-flight appends instead of letting them resurrect the directory', async () => {
+    const TranscriptWriter = await loadWriter();
+    const writer = new TranscriptWriter({ dataDir: tmpDir });
+
+    writer.appendEvent(SESSION, { type: 'text', content: 'secret' });
+    // 故意不 drain：删除时可能还有 append 在途
+    const removed = await writer.deleteThread(SESSION.threadId);
+    assert.equal(removed, true);
+    await writer.drain();
+
+    await assert.rejects(readFile(join(sessionDirOf(tmpDir), 'events.jsonl'), 'utf-8'), /ENOENT/);
+    assert.equal(writer.getEventCount(SESSION.sessionId), 0);
+  });
+
+  test('a failed append leaves the events buffered so the next pass retries', async () => {
+    const TranscriptWriter = await loadWriter();
+    // dataDir 指向一个普通文件，任何 mkdir 都会失败 → 落盘必然报错
+    const blocked = join(tmpDir, 'not-a-dir');
+    await writeFile(blocked, 'x', 'utf-8');
+    const writer = new TranscriptWriter({ dataDir: blocked });
+
+    writer.appendEvent(SESSION, { type: 'text', content: 'kept' });
+    await writer.drain(SESSION.sessionId);
+
+    // appendEvent 不能抛错，事件也不能丢
+    assert.equal(writer.getEventCount(SESSION.sessionId), 1);
   });
 });
