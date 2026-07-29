@@ -63,7 +63,112 @@ try {
     Write-Warn "Clowder will still start (in-memory). Re-run once proxy/network is available to get Redis."
 }
 
-# --- 3) Start Clowder (default mode = Redis; trust-all is automatic) ---------
+# --- 3) Keep kiro-cli current (breaks the installer re-download loop) --------
+#
+# Root cause of the kiro-installer-*.msi pile in .cat-cafe\runtime\tmp: whenever the
+# installed kiro-cli is behind the published release, its updater starts a full ~238MB
+# installer download on EVERY process launch, but the msiexec step can never land inside
+# a long-lived `acp` carrier -- so each cold start re-downloads the same MSI and throws it
+# away. Downloads therefore scale 1:1 with cold starts (measured: 28 files / 5.33GB in
+# ~8 hours). Neither the app.disableAutoupdates setting (verified effective yet ignored on
+# the acp path) nor KIRO_NO_AUTO_UPDATE stops it -- both were reproduced with an isolated
+# TEMP. Applying the update here instead, in a short-lived foreground process where msiexec
+# can actually finish, removes the reason to download at all.
+#
+# Runs after the proxy block on purpose (the updater needs network). Never fatal: a missing
+# kiro-cli, a network failure or a hung updater only warns and lets Clowder start.
+function Invoke-KiroCliCommand {
+    param(
+        [Parameter(Mandatory = $true)][string]$Exe,
+        [Parameter(Mandatory = $true)][string[]]$KiroArgs,
+        [Parameter(Mandatory = $true)][int]$TimeoutSec
+    )
+
+    # Deliberately .NET Process instead of Start-Process: with redirected streams,
+    # Start-Process -PassThru leaves ExitCode empty even after WaitForExit + Refresh,
+    # which made a successful update look like a failure.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    # ProcessStartInfo.ArgumentList does not exist on .NET Framework (Windows PowerShell
+    # 5.1), so the arguments are joined. Safe here: every argument is a fixed literal
+    # defined in this script, never user input.
+    if ($Exe -match "\.(cmd|bat)$") {
+        # CreateProcess cannot launch a batch shim directly -- route it through cmd.exe.
+        $psi.FileName = "$env:SystemRoot\System32\cmd.exe"
+        $psi.Arguments = "/d /c `"$Exe`" " + ($KiroArgs -join " ")
+    } else {
+        $psi.FileName = $Exe
+        $psi.Arguments = ($KiroArgs -join " ")
+    }
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.RedirectStandardInput = $true
+
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    # Closing stdin gives the updater an immediate EOF, so it can never block the launcher
+    # waiting on an interactive confirmation.
+    $proc.StandardInput.Close()
+    # Read both pipes concurrently: draining only one risks a deadlock on a full buffer.
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
+
+    if (-not $proc.WaitForExit($TimeoutSec * 1000)) {
+        try { $proc.Kill() } catch {}
+        return [pscustomobject]@{ TimedOut = $true; ExitCode = $null; Output = "" }
+    }
+    $out = ""
+    $err = ""
+    try { $out = [string]$stdoutTask.Result } catch {}
+    try { $err = [string]$stderrTask.Result } catch {}
+    return [pscustomobject]@{ TimedOut = $false; ExitCode = $proc.ExitCode; Output = ($out + "`n" + $err) }
+}
+
+function Resolve-KiroCliPath {
+    $found = Get-Command "kiro-cli" -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($found) { return $found.Source }
+    # Same fallback the API uses (see packages/api/src/utils/cli-resolve.ts): the official
+    # Windows installer drops the binary here and does not always land on PATH.
+    if ($env:LOCALAPPDATA) {
+        $candidate = Join-Path $env:LOCALAPPDATA "Kiro-Cli\kiro-cli.exe"
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return $null
+}
+
+Write-Step "Checking kiro-cli for updates"
+try {
+    $kiroExe = Resolve-KiroCliPath
+    if (-not $kiroExe) {
+        Write-Ok "kiro-cli not installed - nothing to check"
+    } else {
+        $check = Invoke-KiroCliCommand -Exe $kiroExe -KiroArgs @("update", "--check") -TimeoutSec 90
+        if ($check.TimedOut) {
+            Write-Warn "kiro-cli update --check timed out - continuing without updating"
+        } elseif ($check.Output -match "Update available") {
+            $line = ($check.Output -split "`r?`n" | Where-Object { $_ -match "Update available" } | Select-Object -First 1).Trim()
+            Write-Warn "$line - installing now (one download instead of one per cold start)"
+            $apply = Invoke-KiroCliCommand -Exe $kiroExe -KiroArgs @("update") -TimeoutSec 1800
+            if ($apply.TimedOut) {
+                Write-Warn "kiro-cli update timed out - continuing; it will be retried next launch"
+            } elseif ($apply.ExitCode -ne 0) {
+                Write-Warn "kiro-cli update failed (exit $($apply.ExitCode)) - continuing; it will be retried next launch"
+            } else {
+                $version = Invoke-KiroCliCommand -Exe $kiroExe -KiroArgs @("--version") -TimeoutSec 60
+                $shown = if ($version.TimedOut) { "unknown" } else { ($version.Output).Trim() }
+                Write-Ok "kiro-cli updated - now $shown"
+            }
+        } else {
+            Write-Ok "kiro-cli is already on the current version"
+        }
+    }
+} catch {
+    Write-Warn "kiro-cli update check failed: $($_.Exception.Message)"
+    Write-Warn "Continuing - a stale kiro-cli only costs bandwidth, it does not block Clowder."
+}
+
+# --- 4) Start Clowder (default mode = Redis; trust-all is automatic) ---------
 Write-Step "Starting Clowder (API + web) ..."
 & node (Join-Path $repo "scripts\start-entry.mjs") start
 if ($LASTEXITCODE -ne 0) {

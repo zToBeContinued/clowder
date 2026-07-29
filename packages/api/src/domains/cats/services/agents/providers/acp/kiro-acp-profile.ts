@@ -18,6 +18,25 @@ export const KIRO_MCP_WHITELIST = [
   'codegraph',
 ] as const;
 
+/**
+ * Idle TTL for the pooled `kiro-cli acp` carrier.
+ *
+ * Cold starts are expensive twice over: ~9-12s of session_init, and — whenever the
+ * installed kiro-cli is behind the published release — a full ~238MB installer download
+ * that its updater starts on every process launch and never manages to apply from inside
+ * a long-lived `acp` process. Downloads therefore scale 1:1 with cold starts, so a short
+ * TTL turns a bursty usage pattern ("busy spell, then a ten-minute gap") into repeated
+ * evictions and repeated downloads. 30 minutes covers the usual gaps; the tradeoff is
+ * that the carrier (a ~500MB binary) stays resident longer.
+ *
+ * 支持 UI 热更新：每次取值时实时读 process.env，不缓存。改动会改变池指纹，
+ * 因此下一次取用时会重建进程池（即经历一次冷启动）后才按新值计时。
+ */
+export function getKiroAcpIdleTtlMs(): number {
+  const raw = Number(process.env.CAT_CAFE_KIRO_ACP_IDLE_TTL_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 30 * 60 * 1000;
+}
+
 export interface KiroAcpProfileInput {
   defaultModel?: string;
   cli?: {

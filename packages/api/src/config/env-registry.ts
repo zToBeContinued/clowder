@@ -690,6 +690,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CAT_CAFE_KIRO_ACP_IDLE_TTL_MS',
+    defaultValue: '1800000',
+    description:
+      'Kiro ACP carrier 空闲多久后被进程池回收（毫秒，默认 30 分钟）。调大可减少冷启动——每次冷启动都要 9-12 秒 session_init，且在 kiro-cli 版本落后时会触发一次约 238MB 的安装包下载；代价是 carrier 常驻更久占内存。改完即时生效，无需重启（会重建进程池，即下一次取用先经历一次冷启动）。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CAT_CAFE_SERVICE_ITER_CLOSE_TIMEOUT_MS',
     defaultValue: '5000',
     description:

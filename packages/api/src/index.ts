@@ -1213,7 +1213,7 @@ async function main(): Promise<void> {
           const { KiroAcpAdapter } = await import('./domains/cats/services/agents/providers/acp/KiroAcpAdapter.js');
           const { AcpProcessPool } = await import('./domains/cats/services/agents/providers/acp/AcpProcessPool.js');
           const { AcpClient } = await import('./domains/cats/services/agents/providers/acp/AcpClient.js');
-          const { createKiroAcpProfile, KIRO_MCP_WHITELIST } = await import(
+          const { createKiroAcpProfile, getKiroAcpIdleTtlMs, KIRO_MCP_WHITELIST } = await import(
             './domains/cats/services/agents/providers/acp/kiro-acp-profile.js'
           );
           const acpProjectRoot = findMonorepoRoot();
@@ -1221,7 +1221,7 @@ async function main(): Promise<void> {
           const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, cliCommand ?? profile.command);
           const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, profile.startupArgs);
           const maxLiveProcesses = 3;
-          const idleTtlMs = 5 * 60 * 1000;
+          const idleTtlMs = getKiroAcpIdleTtlMs();
           const healthCheckIntervalMs = 30_000;
           const poolFingerprint = createAcpPoolFingerprint({
             carrier: 'kiro-acp',

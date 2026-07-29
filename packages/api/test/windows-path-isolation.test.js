@@ -141,7 +141,7 @@ $resolvedPnpmStore = (& pnpm store path | Select-Object -Last 1).Trim()
 );
 
 test(
-  'Windows runtime helper sweeps stale kiro-cli installer downloads from the isolated temp',
+  'Windows runtime helper sweeps kiro-cli installer downloads from the isolated temp regardless of age',
   { skip: process.platform !== 'win32' },
   () => {
     const sandbox = createSandbox('runtime-temp-sweep-');
@@ -154,7 +154,9 @@ test(
       const helperCopy = join(scriptsDir, 'windows-runtime-env.ps1');
       copyFileSync(RUNTIME_HELPER, helperCopy);
 
-      // 两天前的安装器残留 → 必须清掉；刚下的 → 必须留着（可能正在用）。
+      // 安装器残留一律清掉，不论新旧：这些 MSI 在一天之内就能堆到几个 GB，
+      // 按「超过一天」筛等于当天的完全不管。正在下载中的文件被 Windows 锁住、
+      // 删不掉会被静默跳过，所以无需靠时间条件保护。
       // 同时放一个无关的旧临时文件，验证清扫范围是窄的、不会误伤。
       const staleInstaller = join(tempRoot, 'kiro-installer-11111111-2222-3333-4444-555555555555.msi');
       const freshInstaller = join(tempRoot, 'kiro-installer-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.msi');
@@ -185,9 +187,9 @@ $runtime = Initialize-ClowderWindowsRuntimeEnvironment -ProjectRoot $ProjectRoot
       assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
 
       assert.equal(existsSync(staleInstaller), false, 'stale kiro-cli installer download must be swept');
-      assert.equal(existsSync(freshInstaller), true, 'a fresh installer download must be left alone');
+      assert.equal(existsSync(freshInstaller), false, 'a same-day installer download must be swept too');
       assert.equal(existsSync(unrelatedStale), true, 'the sweep must not touch unrelated temp files');
-      assert.equal(parseJsonOutput(result.stdout).StaleTempRemoved, 1, 'helper should report exactly one swept file');
+      assert.equal(parseJsonOutput(result.stdout).StaleTempRemoved, 2, 'helper should report both swept installers');
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
