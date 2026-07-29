@@ -365,10 +365,28 @@ if ($useRedis) {
                     New-Item -Path $redisLayout.Logs -ItemType Directory -Force | Out-Null
                     $redisAclFile = Join-Path $redisLayout.Data "redis-$RedisPort.acl"
                     $redisServerAuthArgs = Get-RedisServerAuthArgs -RedisUrl $configuredRedisUrl -AclFilePath $redisAclFile
+                    # Persistence was previously left entirely to redis-server's built-in
+                    # defaults here, while the Unix launcher (scripts/start-dev.sh) pins RDB
+                    # save points AND runs with AOF on. That gap meant an ungraceful exit on
+                    # Windows -- closing the window, a kill, a power cut, none of which reach
+                    # the SHUTDOWN SAVE in stop-windows.ps1 -- could drop everything written
+                    # since the last snapshot, i.e. up to 5 minutes of conversation for a
+                    # low-write session. Same save points as Unix, plus AOF at everysec.
+                    $redisAofDir = Join-Path $redisLayout.Data "appendonlydir"
+                    $redisAofReady = Test-Path -LiteralPath $redisAofDir
                     $redisArgs = @(
                         "--port", $RedisPort,
                         "--bind", "127.0.0.1",
                         "--dir", (Quote-WindowsProcessArgument -Value $redisLayout.Data),
+                        "--dbfilename", "dump.rdb",
+                        "--save", (Quote-WindowsProcessArgument -Value "3600 1 300 100 60 10000"),
+                        # Only boot with AOF on once an AOF actually exists: with AOF enabled
+                        # Redis ignores dump.rdb, so doing this on an RDB-only data dir would
+                        # start empty and then overwrite the snapshot. The CONFIG SET below
+                        # bootstraps the AOF safely from the RDB-loaded dataset instead.
+                        "--appendonly", $(if ($redisAofReady) { "yes" } else { "no" }),
+                        "--appendfilename", "appendonly.aof",
+                        "--appendfsync", "everysec",
                         "--logfile", (Quote-WindowsProcessArgument -Value $redisLogFile),
                         "--pidfile", (Quote-WindowsProcessArgument -Value $redisPidFile)
                     ) + $redisServerAuthArgs
@@ -383,6 +401,16 @@ if ($useRedis) {
                     $managedProbeUrl = if ($configuredRedisUrl) { $configuredRedisUrl } else { $localUrl }
                     if (Test-RedisReachable -RedisUrl $managedProbeUrl) {
                         Write-Ok "Redis started on port $RedisPort"
+                        if (-not $redisAofReady) {
+                            # First run on an RDB-only data dir: the dataset is now in memory,
+                            # so turning AOF on makes Redis rewrite it from there. Best-effort
+                            # only -- RDB save points still apply if this fails.
+                            if (Enable-RedisAppendOnly -RedisUrl $managedProbeUrl) {
+                                Write-Ok "Redis AOF enabled (appendonlydir created from the loaded snapshot)"
+                            } else {
+                                Write-Warn "Could not enable Redis AOF - running on RDB snapshots only; an ungraceful exit may lose recent messages"
+                            }
+                        }
                         if ($configuredRedisUrl) {
                             $env:REDIS_URL = $configuredRedisUrl
                         } else {

@@ -260,3 +260,29 @@ test('Windows installer overwrites stale process env with the current repo .env 
   assert.match(installScript, /SetEnvironmentVariable\(\$key, \$val, "Process"\)/);
   assert.doesNotMatch(installScript, /if \(-not \[System\.Environment\]::GetEnvironmentVariable\(\$key\)\) \{/);
 });
+
+test('Windows managed Redis pins durable persistence and enables AOF without discarding the RDB', () => {
+  // Windows 之前把持久化完全交给 redis-server 内建默认（AOF 关闭），而 Unix 侧
+  // scripts/start-dev.sh 是显式 --save + --appendonly yes。差异导致非优雅退出
+  // （点窗口 X / kill / 断电，都到不了 stop-windows.ps1 的 SHUTDOWN SAVE）会丢掉
+  // 上次快照之后的全部消息。
+  assert.match(startWindowsScript, /"--dbfilename",\s*"dump\.rdb"/);
+  assert.match(startWindowsScript, /"--save",\s*\(Quote-WindowsProcessArgument -Value "3600 1 300 100 60 10000"\)/);
+  assert.match(startWindowsScript, /"--appendfilename",\s*"appendonly\.aof"/);
+  assert.match(startWindowsScript, /"--appendfsync",\s*"everysec"/);
+
+  // 关键顺序：只有 appendonlydir 已存在才在启动时开 AOF。实测（Redis 8.8）在只有
+  // dump.rdb 的目录上以 --appendonly yes 启动会得到空库并覆盖快照，所以首次必须
+  // 先以 no 启动装载 RDB，再在线 CONFIG SET，让 Redis 从内存重写出 AOF。
+  assert.match(startWindowsScript, /\$redisAofDir = Join-Path \$redisLayout\.Data "appendonlydir"/);
+  assert.match(startWindowsScript, /\$redisAofReady = Test-Path -LiteralPath \$redisAofDir/);
+  assert.match(startWindowsScript, /"--appendonly",\s*\$\(if \(\$redisAofReady\) \{ "yes" \} else \{ "no" \}\)/);
+  assert.match(
+    startWindowsScript,
+    /if \(-not \$redisAofReady\) \{[\s\S]*?Enable-RedisAppendOnly -RedisUrl \$managedProbeUrl/,
+  );
+
+  // AOF 开关走既有的 RESP 通道，不引入 redis-cli 依赖。
+  assert.match(helpersScript, /function Enable-RedisAppendOnly/);
+  assert.match(helpersScript, /Format-RedisRespCommand -CommandArgs @\("CONFIG", "SET", "appendonly", "yes"\)/);
+});

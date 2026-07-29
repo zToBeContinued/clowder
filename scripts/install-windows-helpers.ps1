@@ -417,6 +417,72 @@ function Send-RedisShutdown {
     }
 }
 
+# Turn on AOF at runtime via RESP CONFIG SET, mirroring Send-RedisShutdown's transport.
+#
+# Why at runtime instead of --appendonly yes on the command line: when AOF is enabled at
+# startup Redis loads the AOF and ignores dump.rdb entirely. On a data directory that has
+# only an RDB (every Clowder install so far), booting with AOF on would come up EMPTY and
+# then overwrite the snapshot -- silent loss of the whole conversation history. Enabling it
+# on a live server instead makes Redis rewrite the AOF from the in-memory dataset that was
+# just loaded from the RDB, so nothing is lost. Once appendonlydir exists, later startups
+# can and do pass --appendonly yes directly.
+function Enable-RedisAppendOnly {
+    param(
+        [string]$RedisUrl,
+        [int]$TimeoutMs = 5000
+    )
+
+    if (-not $RedisUrl) {
+        return $false
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($RedisUrl, [System.UriKind]::Absolute, [ref]$uri)) {
+        return $false
+    }
+
+    $hostName = $uri.Host
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { 6379 }
+
+    $client = $null
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $connectTask = $client.ConnectAsync($hostName, $port)
+        if (-not $connectTask.Wait($TimeoutMs) -or -not $client.Connected) {
+            return $false
+        }
+
+        $stream = $client.GetStream()
+        $stream.ReadTimeout = $TimeoutMs
+        $stream.WriteTimeout = $TimeoutMs
+        $reader = [System.IO.StreamReader]::new($stream, [System.Text.UTF8Encoding]::new($false))
+
+        $authCmd = Get-RedisAuthRespCommand -Uri $uri
+        if ($authCmd) {
+            Write-RedisRespCommand -Stream $stream -Command $authCmd
+            $authLine = $reader.ReadLine()
+            if ($authLine -notmatch '^\+OK') {
+                return $false
+            }
+        }
+
+        Write-RedisRespCommand -Stream $stream -Command (Format-RedisRespCommand -CommandArgs @("CONFIG", "SET", "appendonly", "yes"))
+        $setLine = $reader.ReadLine()
+        if ($setLine -notmatch '^\+OK') {
+            return $false
+        }
+
+        # Persist nothing to a config file (the server runs config-less), so the flag only
+        # lives for this process; the appendonlydir it creates is what makes the next
+        # startup pass --appendonly yes.
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($client) { $client.Dispose() }
+    }
+}
+
 function Get-RedisServerAuthArgs {
     param([string]$RedisUrl, [string]$AclFilePath)
     if (-not $RedisUrl) { return @() }
