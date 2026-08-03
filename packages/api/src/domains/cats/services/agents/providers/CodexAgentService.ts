@@ -3,8 +3,8 @@
  * 使用 Codex CLI 子进程调用缅因猫 (Codex)
  *
  * CLI 调用方式:
- *   codex exec --json --sandbox danger-full-access --add-dir .git --config approval_policy="on-request" "prompt"
- *   codex exec resume SESSION_ID --json --config approval_policy="on-request" "prompt"
+ *   codex exec --json --dangerously-bypass-approvals-and-sandbox --add-dir .git "prompt"
+ *   codex exec resume SESSION_ID --json --dangerously-bypass-approvals-and-sandbox "prompt"
  *
  * NDJSON 事件格式:
  *   thread.started  → session_init (含 thread_id)
@@ -379,6 +379,7 @@ export class CodexAgentService implements AgentService {
 
     const sandboxMode = getCodexSandboxMode();
     const approvalPolicy = getCodexApprovalPolicy();
+    const unrestricted = sandboxMode === 'danger-full-access' && approvalPolicy === 'never';
     const effortLevel = getCatEffort(this.catId as string, undefined, 'openai');
     const reasoningArgs = ['--config', `model_reasoning_effort="${effortLevel}"`];
     const approvalArgs = ['--config', `approval_policy="${approvalPolicy}"`];
@@ -473,6 +474,8 @@ export class CodexAgentService implements AgentService {
       }
       return out;
     };
+    const accessArgs = unrestricted ? dedup(['--dangerously-bypass-approvals-and-sandbox']) : dedup(approvalArgs);
+    const sandboxArgs = unrestricted ? [] : dedup(['--sandbox', sandboxMode]);
 
     const args: string[] = options?.sessionId
       ? [
@@ -483,9 +486,9 @@ export class CodexAgentService implements AgentService {
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
-          ...dedup(approvalArgs),
           ...dedup(customProviderArgs),
           ...userConfigArgs,
+          ...accessArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,
@@ -497,13 +500,12 @@ export class CodexAgentService implements AgentService {
           ...dedup(modelArgs),
           ...dedup(reasoningArgs),
           ...dedup(contextWindowArgs),
-          '--sandbox',
-          sandboxMode,
+          ...sandboxArgs,
           '--add-dir',
           '.git',
-          ...dedup(approvalArgs),
           ...dedup(customProviderArgs),
           ...userConfigArgs,
+          ...accessArgs,
           ...gitRepoArgs,
           ...catCafeMcpArgs,
           ...imageArgs,

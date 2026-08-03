@@ -1301,7 +1301,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'CAT_CODEX_APPROVAL_POLICY',
-    defaultValue: 'on-request',
+    defaultValue: 'never',
     description: '缅因猫审批策略',
     category: 'codex',
     sensitive: false,

@@ -7,8 +7,8 @@ import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
-import { mergeTokenUsage } from '../../types.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
+import { mergeTokenUsage } from '../../types.js';
 import {
   type CursorStreamEvent,
   isAssistantDelta,
@@ -53,14 +53,12 @@ export class CursorAgentService implements AgentService {
     const effectivePrompt = buildCursorPrompt(prompt, options?.systemPrompt);
     const workingDirectory = options?.workingDirectory ?? process.cwd();
 
-    // --print 无头；--force + --trust 免工具/工作区确认(headless 无人应答)；stream-json + partial 流式。
+    // --print 无头；stream-json + partial 流式。全权限参数在自定义参数后追加，防止被覆盖。
     const args = [
       '--print',
       '--output-format',
       'stream-json',
       '--stream-partial-output',
-      '--force',
-      '--trust',
       '--workspace',
       workingDirectory,
     ];
@@ -72,19 +70,13 @@ export class CursorAgentService implements AgentService {
     if (this.model) {
       args.push('--model', this.model);
     }
-    // prompt 作为末尾位置参数(spawnCli 用数组、非 shell，无引号注入风险)。
-    args.push(effectivePrompt);
-
     // 成员编辑器自定义 CLI 参数(#567)。
-    const userParts: string[] = [];
     for (const arg of options?.cliConfigArgs ?? []) {
-      userParts.push(...arg.trim().split(/\s+/));
+      args.push(...arg.trim().split(/\s+/));
     }
-    if (userParts.length > 0) {
-      // prompt 必须留在末尾：先取出，追加用户参数后再放回。
-      const tail = args.pop() as string;
-      args.push(...userParts, tail);
-    }
+    args.push('--force', '--trust', '--sandbox', 'disabled', '--approve-mcps');
+    // prompt 必须是末尾位置参数(spawnCli 用数组、非 shell，无引号注入风险)。
+    args.push(effectivePrompt);
 
     try {
       const hasInjectedExecutor = Boolean(this.spawnFn || options?.spawnCliOverride);
@@ -207,7 +199,6 @@ export class CursorAgentService implements AgentService {
           if (errText) {
             yield { type: 'error', catId: this.catId, error: errText, metadata, timestamp: Date.now() };
           }
-          continue;
         }
       }
 

@@ -83,6 +83,25 @@ describe('probeLocalAgentClis', () => {
     assert.equal(results.find((item) => item.id === 'gemini')?.installed, false);
   });
 
+  it('maps the cursor-agent alias to the Cursor client', async () => {
+    const results = await probeWithIsolatedHome({
+      resolveCommand(command) {
+        return command === 'cursor-agent' ? '/opt/bin/cursor-agent' : null;
+      },
+      async runCommand(_file, args) {
+        if (args[0] === '--version') return { stdout: '2026.07.23-e383d2b', stderr: '' };
+        assert.deepEqual(args, ['models']);
+        return { stdout: 'gpt-5 - GPT-5\n', stderr: '' };
+      },
+    });
+
+    const cursor = results.find((item) => item.id === 'cursor');
+    assert.equal(cursor?.installed, true);
+    assert.equal(cursor?.resolvedPath, '/opt/bin/cursor-agent');
+    assert.equal(cursor?.clientId, 'cursor');
+    assert.equal(cursor?.models[0]?.id, 'gpt-5');
+  });
+
   it('does not read credential state and marks auth as unknown', async () => {
     const results = await probeWithIsolatedHome({
       resolveCommand(command) {

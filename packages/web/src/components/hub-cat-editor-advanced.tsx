@@ -46,8 +46,8 @@ export function AdvancedRuntimeSection({
   onCodexChange: (patch: Partial<CodexRuntimeSettings>) => void;
 }) {
   const effectiveCodexSettings = codexSettings ?? {
-    sandboxMode: 'workspace-write' as const,
-    approvalPolicy: 'on-request' as const,
+    sandboxMode: 'danger-full-access' as const,
+    approvalPolicy: 'never' as const,
     authMode: 'oauth' as const,
   };
   const sessionChainEnabled = form.sessionChain === 'true' && (strategyForm?.sessionChainEnabled ?? true);

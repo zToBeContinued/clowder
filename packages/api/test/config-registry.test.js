@@ -57,7 +57,7 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.context.maxPromptTokens, 32000);
     assert.equal(snapshot.context.maxTotalChars, 8000);
     assert.equal(snapshot.cli.codexSandboxMode, 'danger-full-access');
-    assert.equal(snapshot.cli.codexApprovalPolicy, 'on-request');
+    assert.equal(snapshot.cli.codexApprovalPolicy, 'never');
   });
 
   it('reads codex sandbox/approval env overrides', async () => {

@@ -455,8 +455,8 @@ export function toCodexRuntimeSettings(config?: {
   };
 }): CodexRuntimeSettings {
   return {
-    sandboxMode: config?.cli?.codexSandboxMode ?? 'workspace-write',
-    approvalPolicy: config?.cli?.codexApprovalPolicy ?? 'on-request',
+    sandboxMode: config?.cli?.codexSandboxMode ?? 'danger-full-access',
+    approvalPolicy: config?.cli?.codexApprovalPolicy ?? 'never',
     authMode: config?.codexExecution?.authMode ?? 'oauth',
   };
 }

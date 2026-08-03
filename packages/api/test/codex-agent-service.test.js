@@ -177,9 +177,14 @@ test('uses exec resume when sessionId is provided', async () => {
   const modelFlagIndex = args.indexOf('--model');
   assert.ok(modelFlagIndex >= 0, 'resume args must include --model');
   assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
-  assert.ok(args.includes('--config'), 'resume args must include approval policy override');
-  assert.ok(args.includes('approval_policy="on-request"'), 'default approval policy should be on-request');
-  assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
+  assert.ok(
+    args.includes('--dangerously-bypass-approvals-and-sandbox'),
+    'resume args must bypass approvals and sandboxing',
+  );
+  assert.ok(
+    !args.some((arg) => arg.startsWith('approval_policy=')),
+    'unrestricted resume must not inject approval policy',
+  );
 });
 
 test('injects cat-cafe MCP config when workingDirectory contains mcp-server', async () => {
@@ -216,7 +221,7 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
     assert.ok(args.includes('mcp_servers.cat-cafe.command="node"'));
     const mcpArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe.args=['));
     assert.ok(mcpArgsConfig, 'must inject cat-cafe mcp args config');
-    assert.match(mcpArgsConfig, /packages\/mcp-server\/dist\/index\.js/);
+    assert.match(mcpArgsConfig.replace(/\\+/g, '/'), /packages\/mcp-server\/dist\/index\.js/);
     assert.ok(args.includes('mcp_servers.cat-cafe.enabled=true'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"'));
     assert.ok(args.includes('mcp_servers.cat-cafe.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
@@ -232,7 +237,7 @@ test('injects cat-cafe MCP config when workingDirectory contains mcp-server', as
     assert.ok(args.includes('mcp_servers.cat-cafe-collab.command="node"'));
     const collabArgsConfig = args.find((arg) => arg.startsWith('mcp_servers.cat-cafe-collab.args=['));
     assert.ok(collabArgsConfig, 'must inject cat-cafe-collab mcp args config');
-    assert.match(collabArgsConfig, /packages\/mcp-server\/dist\/collab\.js/);
+    assert.match(collabArgsConfig.replace(/\\+/g, '/'), /packages\/mcp-server\/dist\/collab\.js/);
     assert.ok(args.includes('mcp_servers.cat-cafe-collab.enabled=true'));
     assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_API_URL="http://127.0.0.1:3004"'));
     assert.ok(args.includes('mcp_servers.cat-cafe-collab.env.CAT_CAFE_INVOCATION_ID="inv-test-1"'));
@@ -259,10 +264,15 @@ test('does not include resume when no sessionId', async () => {
   const modelFlagIndex = args.indexOf('--model');
   assert.ok(modelFlagIndex >= 0, 'fresh exec args must include --model');
   assert.equal(args[modelFlagIndex + 1], 'gpt-5.3-codex');
-  assert.ok(args.includes('--sandbox'), 'fresh exec should include sandbox mode');
-  assert.ok(args.includes('danger-full-access'), 'default sandbox should allow git writes');
-  assert.ok(args.includes('approval_policy="on-request"'), 'fresh exec should set default approval policy');
-  assert.ok(!args.includes('approval_policy=\\"on-request\\"'), 'argv should not contain literal backslash escapes');
+  assert.ok(
+    args.includes('--dangerously-bypass-approvals-and-sandbox'),
+    'fresh exec must bypass approvals and sandboxing by default',
+  );
+  assert.ok(!args.includes('--sandbox'), 'unrestricted fresh exec must not start a sandbox');
+  assert.ok(
+    !args.some((arg) => arg.startsWith('approval_policy=')),
+    'unrestricted exec must not inject approval policy',
+  );
 });
 
 test('unknown Codex cat falls back to xhigh reasoning effort for new invocations', async () => {
@@ -348,6 +358,10 @@ test('uses env-configured sandbox and approval policy for fresh exec', async () 
     assert.ok(args.includes('read-only'), 'sandbox should follow CAT_CODEX_SANDBOX_MODE');
     assert.ok(args.includes('--config'), 'approval policy should be set by config override');
     assert.ok(args.includes('approval_policy="never"'), 'approval policy should follow env');
+    assert.ok(
+      !args.includes('--dangerously-bypass-approvals-and-sandbox'),
+      'explicit restricted sandbox must disable unrestricted mode',
+    );
   } finally {
     if (oldSandbox === undefined) {
       delete process.env.CAT_CODEX_SANDBOX_MODE;
@@ -378,8 +392,15 @@ test('falls back to defaults for invalid sandbox/approval env values', async () 
     await promise;
 
     const args = spawnFn.mock.calls[0].arguments[1];
-    assert.ok(args.includes('danger-full-access'), 'invalid sandbox should fallback to default');
-    assert.ok(args.includes('approval_policy="on-request"'), 'invalid policy should fallback to default');
+    assert.ok(
+      args.includes('--dangerously-bypass-approvals-and-sandbox'),
+      'invalid access settings should fall back to unrestricted defaults',
+    );
+    assert.ok(!args.includes('--sandbox'), 'unrestricted fallback must not start a sandbox');
+    assert.ok(
+      !args.some((arg) => arg.startsWith('approval_policy=')),
+      'unrestricted fallback must not require approval',
+    );
   } finally {
     if (oldSandbox === undefined) {
       delete process.env.CAT_CODEX_SANDBOX_MODE;
@@ -407,10 +428,11 @@ test('new session includes --add-dir .git for git write access', async () => {
   const addDirIdx = args.indexOf('--add-dir');
   assert.ok(addDirIdx >= 0, 'new session args must include --add-dir');
   assert.equal(args[addDirIdx + 1], '.git', '--add-dir must be followed by .git');
-  assert.ok(args.includes('--sandbox'), 'new session must still include --sandbox');
+  assert.ok(args.includes('--dangerously-bypass-approvals-and-sandbox'));
+  assert.ok(!args.includes('--sandbox'), 'unrestricted new session must not include --sandbox');
 });
 
-test('resume session does NOT include --add-dir (sandbox locked at creation)', async () => {
+test('resume session stays unrestricted without --add-dir or --sandbox', async () => {
   const proc = createMockProcess();
   const spawnFn = createMockSpawnFn(proc);
   const service = new CodexAgentService({ spawnFn });
@@ -422,6 +444,7 @@ test('resume session does NOT include --add-dir (sandbox locked at creation)', a
   const args = spawnFn.mock.calls[0].arguments[1];
   assert.ok(!args.includes('--add-dir'), 'resume args must not include --add-dir');
   assert.ok(!args.includes('--sandbox'), 'resume args must not include --sandbox');
+  assert.ok(args.includes('--dangerously-bypass-approvals-and-sandbox'));
 });
 
 test('custom provider: model passed via --config as-is', async () => {

@@ -19,7 +19,7 @@ export interface LocalCliProbeDefinition {
   readonly label: string;
   readonly command: string;
   readonly commandAliases?: readonly string[];
-  readonly clientId?: 'anthropic' | 'openai' | 'google' | 'kiro' | 'opencode' | 'kimi' | 'grok';
+  readonly clientId?: 'anthropic' | 'openai' | 'google' | 'kiro' | 'opencode' | 'kimi' | 'grok' | 'cursor';
   readonly defaultModel?: string;
   readonly modelsProbe?: LocalCliModelsProbeDefinition;
   readonly installHint: string;
@@ -118,6 +118,7 @@ export const LOCAL_CLI_ALLOWLIST: readonly LocalCliProbeDefinition[] = [
     label: 'Cursor CLI',
     command: 'cursor',
     commandAliases: ['cursor-agent'],
+    clientId: 'cursor',
     modelsProbe: LOCAL_CLI_MODELS_PROBES.cursor,
     installHint: '在 Cursor 中启用 shell command，或安装 cursor CLI',
     versionArgs: ['--version'],

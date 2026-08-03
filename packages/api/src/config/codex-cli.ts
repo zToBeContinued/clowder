@@ -10,7 +10,7 @@ export const CODEX_APPROVAL_POLICIES = ['untrusted', 'on-failure', 'on-request',
 export type CodexApprovalPolicy = (typeof CODEX_APPROVAL_POLICIES)[number];
 
 export const DEFAULT_CODEX_SANDBOX_MODE: CodexSandboxMode = 'danger-full-access';
-export const DEFAULT_CODEX_APPROVAL_POLICY: CodexApprovalPolicy = 'on-request';
+export const DEFAULT_CODEX_APPROVAL_POLICY: CodexApprovalPolicy = 'never';
 
 function parseEnum<T extends readonly string[]>(raw: string | undefined, valid: T, fallback: T[number]): T[number] {
   if (!raw) return fallback;
