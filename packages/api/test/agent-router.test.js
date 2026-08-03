@@ -466,6 +466,254 @@ describe('AgentRouter', () => {
     assert.deepEqual(targetCats, ['opus']);
   });
 
+  test('routingPolicy default mode routes unmentioned messages to the configured default instead of the last replier', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { 'thread-fixed-default': ['codex'] },
+      {},
+      {
+        'thread-fixed-default': {
+          v: 1,
+          unmentionedMode: 'default',
+          defaultCat: 'gemini',
+          fallbackCats: ['opus'],
+        },
+      },
+    );
+    threadStore.updateParticipantActivity('thread-fixed-default', 'codex', true);
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus', 'Opus response'),
+        codexService: createMockAgentService('codex', 'Codex response'),
+        geminiService: createMockAgentService('gemini', 'Gemini response'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('继续实现下一步', 'thread-fixed-default');
+    assert.deepEqual(targetCats, ['gemini']);
+  });
+
+  test('routingPolicy default mode stays fixed when an unmentioned message requests ideation', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      { 'thread-fixed-ideate': ['opus', 'codex'] },
+      {},
+      {
+        'thread-fixed-ideate': {
+          v: 1,
+          unmentionedMode: 'default',
+          defaultCat: 'gemini',
+        },
+      },
+      { 'thread-fixed-ideate': ['opus', 'codex'] },
+    );
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus', 'Opus response'),
+        codexService: createMockAgentService('codex', 'Codex response'),
+        geminiService: createMockAgentService('gemini', 'Gemini response'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('#ideate 一起讨论下一步', 'thread-fixed-ideate');
+    assert.deepEqual(targetCats, ['gemini']);
+  });
+
+  test('routingPolicy default mode uses fallback when the configured default last failed', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      {},
+      {},
+      {
+        'thread-default-unhealthy': {
+          v: 1,
+          unmentionedMode: 'default',
+          defaultCat: 'gemini',
+          fallbackCats: ['opus'],
+        },
+      },
+    );
+    threadStore.updateParticipantActivity('thread-default-unhealthy', 'gemini', false);
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus', 'Opus response'),
+        codexService: createMockAgentService('codex', 'Codex response'),
+        geminiService: createMockAgentService('gemini', 'Gemini response'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('继续执行', 'thread-default-unhealthy');
+    assert.deepEqual(targetCats, ['opus']);
+  });
+
+  test('routingPolicy keyword rule uses its fallback when the primary agent is unavailable', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      {},
+      {},
+      {
+        'thread-keyword-fallback': {
+          v: 1,
+          unmentionedMode: 'default',
+          defaultCat: 'opus',
+          rules: [
+            {
+              id: 'contract-gate',
+              label: '契约与里程碑',
+              keywords: ['契约冻结', '最终里程碑'],
+              targetCat: 'codex',
+              fallbackCats: ['gemini'],
+            },
+          ],
+        },
+      },
+    );
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus', 'Opus response'),
+        geminiService: createMockAgentService('gemini', 'Gemini response'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('请做最终里程碑把关', 'thread-keyword-fallback');
+    assert.deepEqual(targetCats, ['gemini']);
+  });
+
+  test('routingPolicy keyword rule uses fallback when the primary agent last failed', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      {},
+      {},
+      {
+        'thread-keyword-unhealthy': {
+          v: 1,
+          rules: [
+            {
+              id: 'architecture-gate',
+              label: '架构裁决',
+              keywords: ['架构裁决'],
+              targetCat: 'codex',
+              fallbackCats: ['gemini'],
+            },
+          ],
+        },
+      },
+    );
+    threadStore.updateParticipantActivity('thread-keyword-unhealthy', 'codex', false);
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus', 'Opus response'),
+        codexService: createMockAgentService('codex', 'Codex response'),
+        geminiService: createMockAgentService('gemini', 'Gemini response'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('请做架构裁决', 'thread-keyword-unhealthy');
+    assert.deepEqual(targetCats, ['gemini']);
+  });
+
+  test('routingPolicy keyword rule never overrides an explicit mention', async () => {
+    const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+    const threadStore = createMockThreadStore(
+      {},
+      {},
+      {
+        'thread-keyword-mention': {
+          v: 1,
+          rules: [
+            {
+              id: 'architecture',
+              label: '架构',
+              keywords: ['架构'],
+              targetCat: 'codex',
+            },
+          ],
+        },
+      },
+    );
+
+    const router = new AgentRouter(
+      await migrateRouterOpts({
+        claudeService: createMockAgentService('opus', 'Opus response'),
+        codexService: createMockAgentService('codex', 'Codex response'),
+        geminiService: createMockAgentService('gemini', 'Gemini response'),
+        registry: createMockRegistry(),
+        messageStore: createMockMessageStore(),
+        threadStore,
+      }),
+    );
+
+    const { targetCats } = await router.resolveTargetsAndIntent('@gemini 看一下这个架构', 'thread-keyword-mention');
+    assert.deepEqual(targetCats, ['gemini']);
+  });
+
+  test('routingPolicy keyword rule does not take over an unavailable explicit mention', async () => {
+    await withAvailabilityConfig({ gemini: false }, async () => {
+      const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
+
+      const threadStore = createMockThreadStore(
+        {},
+        {},
+        {
+          'thread-unavailable-mention': {
+            v: 1,
+            rules: [
+              {
+                id: 'architecture',
+                label: '架构',
+                keywords: ['架构裁决'],
+                targetCat: 'codex',
+              },
+            ],
+          },
+        },
+      );
+
+      const router = new AgentRouter(
+        await migrateRouterOpts({
+          claudeService: createMockAgentService('opus', 'Opus response'),
+          codexService: createMockAgentService('codex', 'Codex response'),
+          geminiService: createMockAgentService('gemini', 'Gemini response'),
+          registry: createMockRegistry(),
+          messageStore: createMockMessageStore(),
+          threadStore,
+        }),
+      );
+
+      const { targetCats } = await router.resolveTargetsAndIntent(
+        '@gemini 请做架构裁决',
+        'thread-unavailable-mention',
+      );
+      assert.deepEqual(targetCats, ['opus']);
+    });
+  });
+
   test('routes to opus (default) when no @ mention is present', async () => {
     const { AgentRouter } = await import('../dist/domains/cats/services/agents/routing/AgentRouter.js');
 

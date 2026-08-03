@@ -324,7 +324,22 @@ describe('RedisThreadStore', { skip: redisIsolationSkipReason(REDIS_URL) }, () =
 
   it('updateRoutingPolicy() stores and hydrates routingPolicy', async () => {
     const thread = await store.create('user1', 'Routing Policy');
-    const policy = { v: 1, scopes: { review: { avoidCats: ['opus'], reason: 'budget' } } };
+    const policy = {
+      v: 1,
+      unmentionedMode: 'default',
+      defaultCat: 'cursor',
+      fallbackCats: ['kiro'],
+      rules: [
+        {
+          id: 'governance',
+          label: '治理把关',
+          keywords: ['契约冻结', '架构裁决'],
+          targetCat: 'codex',
+          fallbackCats: ['kiro'],
+        },
+      ],
+      scopes: { review: { avoidCats: ['opus'], reason: 'budget' } },
+    };
     await store.updateRoutingPolicy(thread.id, policy);
     const updated = await store.get(thread.id);
     assert.deepEqual(updated.routingPolicy, policy);

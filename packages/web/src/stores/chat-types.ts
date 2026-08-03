@@ -469,8 +469,22 @@ export interface ThreadRoutingRule {
   expiresAt?: number;
 }
 
+export type ThreadUnmentionedRoutingMode = 'continue' | 'default';
+
+export interface ThreadKeywordRoutingRuleV1 {
+  id: string;
+  label: string;
+  keywords: string[];
+  targetCat: string;
+  fallbackCats?: string[];
+}
+
 export interface ThreadRoutingPolicyV1 {
   v: 1;
+  unmentionedMode?: ThreadUnmentionedRoutingMode;
+  defaultCat?: string;
+  fallbackCats?: string[];
+  rules?: ThreadKeywordRoutingRuleV1[];
   scopes?: Partial<Record<ThreadRoutingScope, ThreadRoutingRule>>;
 }
 

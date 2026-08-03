@@ -702,6 +702,52 @@ describe('Thread API', () => {
     assert.equal(res.statusCode, 400);
   });
 
+  it('PATCH /api/threads/:id persists generic channel routing policy', async () => {
+    const thread = threadStore.create('alice', 'Generic Routing Policy');
+    const routingPolicy = {
+      v: 1,
+      unmentionedMode: 'default',
+      defaultCat: 'codex',
+      fallbackCats: ['opus'],
+      rules: [
+        {
+          id: 'milestone-gate',
+          label: '里程碑把关',
+          keywords: ['里程碑', '最终验收'],
+          targetCat: 'gemini',
+          fallbackCats: ['opus'],
+        },
+      ],
+    };
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: { routingPolicy },
+    });
+
+    assert.equal(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.deepEqual(body.routingPolicy, routingPolicy);
+    assert.deepEqual(threadStore.get(thread.id).routingPolicy, routingPolicy);
+  });
+
+  it('PATCH /api/threads/:id rejects fixed default routing without a default agent', async () => {
+    const thread = threadStore.create('alice', 'Invalid Generic Routing Policy');
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/threads/${thread.id}`,
+      payload: {
+        routingPolicy: {
+          v: 1,
+          unmentionedMode: 'default',
+        },
+      },
+    });
+
+    assert.equal(res.statusCode, 400);
+  });
+
   it('DELETE /api/threads/:id soft-deletes thread (Phase D)', async () => {
     const thread = threadStore.create('alice', 'To Delete');
 

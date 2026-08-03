@@ -476,8 +476,13 @@ export class RedisThreadStore implements IThreadStore {
     const key = ThreadKeys.detail(threadId);
     const scopes = policy?.scopes;
     const hasScopes = scopes && Object.keys(scopes).length > 0;
+    const hasGenericPolicy = Boolean(
+      policy?.defaultCat ||
+        (Array.isArray(policy?.fallbackCats) && policy.fallbackCats.length > 0) ||
+        (Array.isArray(policy?.rules) && policy.rules.length > 0),
+    );
 
-    if (!policy || policy.v !== 1 || !hasScopes) {
+    if (!policy || policy.v !== 1 || (!hasScopes && !hasGenericPolicy)) {
       await this.deleteDetailFields(key, 'routingPolicy');
       return;
     }

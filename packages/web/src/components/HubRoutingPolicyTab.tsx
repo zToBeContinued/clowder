@@ -16,10 +16,10 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function buildPolicy(params: {
+function buildScopes(params: {
   reviewAvoidOpus: boolean;
   architecturePreferOpus: boolean;
-}): ThreadRoutingPolicyV1 | null {
+}): NonNullable<ThreadRoutingPolicyV1['scopes']> {
   const scopes: NonNullable<ThreadRoutingPolicyV1['scopes']> = {};
   if (params.reviewAvoidOpus) {
     scopes.review = { avoidCats: ['opus'], reason: 'budget' };
@@ -27,7 +27,17 @@ function buildPolicy(params: {
   if (params.architecturePreferOpus) {
     scopes.architecture = { preferCats: ['opus'] };
   }
-  return Object.keys(scopes).length > 0 ? { v: 1, scopes } : null;
+  return scopes;
+}
+
+export function mergeRoutingScopes(
+  policy: ThreadRoutingPolicyV1 | null | undefined,
+  scopes: NonNullable<ThreadRoutingPolicyV1['scopes']>,
+): ThreadRoutingPolicyV1 | null {
+  const genericPolicy: ThreadRoutingPolicyV1 = { ...(policy ?? { v: 1 }) };
+  delete genericPolicy.scopes;
+  const next = Object.keys(scopes).length > 0 ? { ...genericPolicy, scopes } : genericPolicy;
+  return Object.keys(next).some((key) => key !== 'v') ? next : null;
 }
 
 export function HubRoutingPolicyTab() {
@@ -76,7 +86,7 @@ export function HubRoutingPolicyTab() {
     setSaving(true);
     setError(null);
     try {
-      const routingPolicy = buildPolicy({ reviewAvoidOpus, architecturePreferOpus });
+      const routingPolicy = mergeRoutingScopes(currentPolicy, buildScopes({ reviewAvoidOpus, architecturePreferOpus }));
       const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -88,13 +98,15 @@ export function HubRoutingPolicyTab() {
       }
       const updated = (await res.json()) as Thread;
       setThread(updated);
+      const chatStore = useChatStore.getState();
+      chatStore.setThreads(chatStore.threads.map((item) => (item.id === updated.id ? updated : item)));
       setSavedAt(Date.now());
     } catch {
       setError('网络错误');
     } finally {
       setSaving(false);
     }
-  }, [threadId, reviewAvoidOpus, architecturePreferOpus]);
+  }, [architecturePreferOpus, currentPolicy, reviewAvoidOpus, threadId]);
 
   return (
     <div className="space-y-4">
@@ -144,6 +156,7 @@ export function HubRoutingPolicyTab() {
               {savedAt ? ` · 已保存 ${new Date(savedAt).toLocaleTimeString()}` : ''}
             </div>
             <button
+              type="button"
               onClick={onSave}
               disabled={saving}
               className="px-3 py-2 text-sm rounded-lg bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] disabled:opacity-60"

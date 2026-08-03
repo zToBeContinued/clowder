@@ -358,6 +358,47 @@ export class AgentRouter {
     return filtered;
   }
 
+  private firstRoutableCat(
+    catIds: Iterable<string | null | undefined>,
+    excludedCats: ReadonlySet<string> = new Set(),
+  ): CatId | null {
+    return this.filterRoutableCats(catIds).find((catId) => !excludedCats.has(catId)) ?? null;
+  }
+
+  /** Resolve project-defined channel rules before legacy conversational fallback. */
+  private resolveKeywordPolicyTarget(
+    thread: { routingPolicy?: ThreadRoutingPolicyV1 } | null | undefined,
+    message: string,
+    unhealthyCats: ReadonlySet<string>,
+  ): CatId | null {
+    const rules = thread?.routingPolicy?.rules;
+    if (!Array.isArray(rules)) return null;
+
+    const normalizedMessage = message.toLocaleLowerCase();
+    for (const rule of rules) {
+      if (!rule || !Array.isArray(rule.keywords)) continue;
+      const matches = rule.keywords.some((keyword) => {
+        const normalizedKeyword = typeof keyword === 'string' ? keyword.trim().toLocaleLowerCase() : '';
+        return normalizedKeyword.length > 0 && normalizedMessage.includes(normalizedKeyword);
+      });
+      if (!matches) continue;
+
+      const fallbackCats = Array.isArray(rule.fallbackCats) ? rule.fallbackCats : [];
+      return this.firstRoutableCat([rule.targetCat, ...fallbackCats], unhealthyCats);
+    }
+    return null;
+  }
+
+  private resolveFixedDefaultTarget(
+    thread: { routingPolicy?: ThreadRoutingPolicyV1 } | null | undefined,
+    unhealthyCats: ReadonlySet<string>,
+  ): CatId | null {
+    const policy = thread?.routingPolicy;
+    if (!policy || policy.v !== 1 || policy.unmentionedMode !== 'default') return null;
+    const fallbackCats = Array.isArray(policy.fallbackCats) ? policy.fallbackCats : [];
+    return this.firstRoutableCat([policy.defaultCat, ...fallbackCats], unhealthyCats);
+  }
+
   /** Pick a deterministic fallback cat when policy filters out all candidates. */
   private pickFallbackCat(exclude: Set<string>): CatId | null {
     const def = getDefaultCatId() as string;
@@ -621,7 +662,7 @@ export class AgentRouter {
    * Does NOT mutate thread participants.
    */
   private async peekTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats, routing_warnings: mentionWarnings } = await this.parseAllMentions(message, threadId);
     if (mentionedCats.length > 0) return mentionedCats;
 
     if (this.threadStore) {
@@ -632,6 +673,20 @@ export class AgentRouter {
       const rawPref = Array.isArray(thread?.preferredCats) ? thread.preferredCats : [];
       const validPreferred = this.filterRoutableCats(rawPref);
       const preferredSet = new Set(validPreferred.map(String));
+      const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
+      const unhealthyCats = new Set(
+        participantsWithActivity
+          .filter((participant) => participant.lastResponseHealthy === false)
+          .map((participant) => participant.catId),
+      );
+
+      if (mentionWarnings.length === 0) {
+        const keywordTarget = this.resolveKeywordPolicyTarget(thread, message, unhealthyCats);
+        if (keywordTarget) return [keywordTarget];
+
+        const fixedDefaultTarget = this.resolveFixedDefaultTarget(thread, unhealthyCats);
+        if (fixedDefaultTarget) return [fixedDefaultTarget];
+      }
 
       // #58: explicit #ideate with multiple preferred cats → dispatch all (user requested parallel)
       const hasExplicitIdeate = /#ideate\b/i.test(message);
@@ -644,7 +699,6 @@ export class AgentRouter {
       // preferredCats only kicks in when there's no conversation history at all.
       // #267: three-tier fallback — (1) any healthy replier (unscoped),
       //   (2) preferred non-errored participant, (3) any non-errored participant.
-      const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       const isRoutable = (p: { catId: CatId }) => this.isRoutableCat(p.catId);
       const isHealthy = (p: { lastResponseHealthy?: boolean }) => p.lastResponseHealthy !== false;
       const healthyReplier = participantsWithActivity.find((p) => p.messageCount > 0 && isHealthy(p) && isRoutable(p));
@@ -673,7 +727,7 @@ export class AgentRouter {
 
   /** Resolve target cats and persist new mentions as thread participants */
   private async resolveTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats } = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats, routing_warnings: mentionWarnings } = await this.parseAllMentions(message, threadId);
 
     if (mentionedCats.length > 0) {
       if (this.threadStore) {
@@ -690,6 +744,20 @@ export class AgentRouter {
       const rawPref = Array.isArray(thread?.preferredCats) ? thread.preferredCats : [];
       const validPreferred = this.filterRoutableCats(rawPref);
       const preferredSet = new Set(validPreferred.map(String));
+      const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
+      const unhealthyCats = new Set(
+        participantsWithActivity
+          .filter((participant) => participant.lastResponseHealthy === false)
+          .map((participant) => participant.catId),
+      );
+
+      if (mentionWarnings.length === 0) {
+        const keywordTarget = this.resolveKeywordPolicyTarget(thread, message, unhealthyCats);
+        if (keywordTarget) return [keywordTarget];
+
+        const fixedDefaultTarget = this.resolveFixedDefaultTarget(thread, unhealthyCats);
+        if (fixedDefaultTarget) return [fixedDefaultTarget];
+      }
 
       // #58: explicit #ideate with multiple preferred cats → dispatch all (user requested parallel)
       const hasExplicitIdeate = /#ideate\b/i.test(message);
@@ -699,7 +767,6 @@ export class AgentRouter {
 
       // F078 + #58: last-replier takes priority over preferred cats (user mental model)
       // #267: three-tier fallback (same as peekTargets)
-      const participantsWithActivity = await this.threadStore.getParticipantsWithActivity(threadId);
       const isRoutable = (p: { catId: CatId }) => this.isRoutableCat(p.catId);
       const isHealthy = (p: { lastResponseHealthy?: boolean }) => p.lastResponseHealthy !== false;
       const healthyReplier = participantsWithActivity.find((p) => p.messageCount > 0 && isHealthy(p) && isRoutable(p));

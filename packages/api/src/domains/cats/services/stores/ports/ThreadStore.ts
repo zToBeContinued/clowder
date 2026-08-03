@@ -46,9 +46,40 @@ export interface ThreadRoutingRule {
   expiresAt?: number;
 }
 
+export type ThreadUnmentionedRoutingMode = 'continue' | 'default';
+
+export interface ThreadKeywordRoutingRuleV1 {
+  /** Stable UI identity; labels and bindings may change without recreating the rule. */
+  id: string;
+  /** Project-defined responsibility name, not a provider/model role. */
+  label: string;
+  /** Case-insensitive substring triggers. Rules are evaluated in array order. */
+  keywords: string[];
+  targetCat: CatId;
+  /** Ordered failover list used only when targetCat is unavailable. */
+  fallbackCats?: CatId[];
+}
+
 export interface ThreadRoutingPolicyV1 {
   v: 1;
+  /** continue preserves legacy last-replier behavior; default pins unmentioned turns to defaultCat. */
+  unmentionedMode?: ThreadUnmentionedRoutingMode;
+  defaultCat?: CatId;
+  /** Ordered channel-level fallback when defaultCat is unavailable. */
+  fallbackCats?: CatId[];
+  /** Generic, project-defined routing rules. No provider or model names are hard-coded. */
+  rules?: ThreadKeywordRoutingRuleV1[];
   scopes?: Partial<Record<ThreadRoutingScope, ThreadRoutingRule>>;
+}
+
+function hasThreadRoutingPolicyContent(
+  policy: ThreadRoutingPolicyV1 | null | undefined,
+): policy is ThreadRoutingPolicyV1 {
+  if (!policy || policy.v !== 1) return false;
+  if (policy.scopes && Object.keys(policy.scopes).length > 0) return true;
+  if (policy.defaultCat) return true;
+  if (Array.isArray(policy.fallbackCats) && policy.fallbackCats.length > 0) return true;
+  return Array.isArray(policy.rules) && policy.rules.length > 0;
 }
 
 /** F065 Phase B + F148 VG-3: Rolling thread-level memory across sealed sessions. */
@@ -701,10 +732,7 @@ export class ThreadStore implements IThreadStore {
     const thread = this.get(threadId);
     if (!thread) return;
 
-    // Normalize: null or empty scopes clears policy.
-    const scopes = policy?.scopes;
-    const hasScopes = scopes && Object.keys(scopes).length > 0;
-    if (!policy || policy.v !== 1 || !hasScopes) {
+    if (!hasThreadRoutingPolicyContent(policy)) {
       delete thread.routingPolicy;
       return;
     }

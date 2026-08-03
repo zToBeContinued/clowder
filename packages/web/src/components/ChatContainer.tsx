@@ -27,6 +27,7 @@ import { useVisibleThreadReadAck } from '@/hooks/useVisibleThreadReadAck';
 import { useVoiceAutoPlay } from '@/hooks/useVoiceAutoPlay';
 import { useVoiceStream } from '@/hooks/useVoiceStream';
 import { useWorkspaceNavigate } from '@/hooks/useWorkspaceNavigate';
+import type { ThreadRoutingPolicyV1 } from '@/stores/chat-types';
 import { type ChatMessage as ChatMessageData, type Thread, useChatStore } from '@/stores/chatStore';
 import { useGameStore } from '@/stores/gameStore';
 import { useGuideStore } from '@/stores/guideStore';
@@ -1001,7 +1002,15 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
   }, [addToast, editingDraft, editingMessageId, isSavingEdit, messages, patchMessage]);
 
   const handleSaveChannelSettings = useCallback(
-    async ({ title: nextTitle, participatingCats }: { title: string; participatingCats: string[] }) => {
+    async ({
+      title: nextTitle,
+      participatingCats,
+      routingPolicy,
+    }: {
+      title: string;
+      participatingCats: string[];
+      routingPolicy: ThreadRoutingPolicyV1 | null;
+    }) => {
       if (isSavingChannel || isDeletingChannel) return;
       setIsSavingChannel(true);
       setChannelSettingsError(null);
@@ -1009,7 +1018,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
         const res = await apiFetch(`/api/threads/${encodeURIComponent(threadId)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: nextTitle, participatingCats }),
+          body: JSON.stringify({ title: nextTitle, participatingCats, routingPolicy }),
         });
         const body = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -1025,12 +1034,16 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
                   participatingCats: Array.isArray(body?.participatingCats)
                     ? (body.participatingCats as string[])
                     : participatingCats,
+                  routingPolicy:
+                    body?.routingPolicy && typeof body.routingPolicy === 'object'
+                      ? (body.routingPolicy as ThreadRoutingPolicyV1)
+                      : undefined,
                 }
               : thread,
           ),
         }));
         setChannelSettingsOpen(false);
-        addToast({ type: 'success', title: '频道已更新', message: '频道名称和成员已保存', duration: 2200 });
+        addToast({ type: 'success', title: '频道已更新', message: '频道名称、成员和路由已保存', duration: 2200 });
       } catch {
         setChannelSettingsError('网络请求未完成，请稍后重试');
       } finally {
@@ -1759,6 +1772,7 @@ export function ChatContainer({ threadId }: ChatContainerProps) {
           title={currentThreadTitle}
           availableCats={cats}
           selectedCatIds={currentThreadMemberIds}
+          routingPolicy={currentThread?.routingPolicy}
           isDefaultThread={threadId === 'default'}
           isSaving={isSavingChannel}
           isDeleting={isDeletingChannel}

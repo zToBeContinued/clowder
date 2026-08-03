@@ -196,9 +196,43 @@ const threadRoutingRuleSchema = z
   })
   .strict();
 
+const threadKeywordRoutingRuleSchema = z
+  .object({
+    id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(64)
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+    label: z
+      .string()
+      .trim()
+      .min(1)
+      .max(60)
+      .regex(/^[^\r\n]+$/, 'label must be single-line'),
+    keywords: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1)
+          .max(50)
+          .regex(/^[^\r\n]+$/, 'keyword must be single-line'),
+      )
+      .min(1)
+      .max(12),
+    targetCat: catIdSchema(),
+    fallbackCats: z.array(catIdSchema()).max(10).optional(),
+  })
+  .strict();
+
 const threadRoutingPolicySchema = z
   .object({
     v: z.literal(1),
+    unmentionedMode: z.enum(['continue', 'default']).optional(),
+    defaultCat: catIdSchema().optional(),
+    fallbackCats: z.array(catIdSchema()).max(10).optional(),
+    rules: z.array(threadKeywordRoutingRuleSchema).max(20).optional(),
     scopes: z
       .object({
         review: threadRoutingRuleSchema.optional(),
@@ -207,7 +241,28 @@ const threadRoutingPolicySchema = z
       .partial()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((policy, context) => {
+    if (policy.unmentionedMode === 'default' && !policy.defaultCat) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['defaultCat'],
+        message: 'defaultCat is required when unmentionedMode is default',
+      });
+    }
+
+    const ids = new Set<string>();
+    for (const [index, rule] of (policy.rules ?? []).entries()) {
+      if (ids.has(rule.id)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['rules', index, 'id'],
+          message: 'routing rule ids must be unique',
+        });
+      }
+      ids.add(rule.id);
+    }
+  });
 
 const updateThreadSchema = z
   .object({
