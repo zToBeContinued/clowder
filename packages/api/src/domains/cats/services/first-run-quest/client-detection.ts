@@ -112,7 +112,8 @@ const CLI_SPECS: CliSpec[] = [
 /**
  * Windows 上把 --version 探测命令解析为可执行形态：
  * - 标准 npm .cmd shim → 解析出底层 .js/.exe 入口（resolveWindowsShimSpawn）；
- * - 非标准 .cmd（如 cursor-agent.cmd 是 powershell 包装器，parseShimFile 解析不了）→ 用 `cmd /c` 直跑；
+ * - PowerShell-backed .cmd shim（如 cursor-agent.cmd）由 resolveWindowsShimSpawn
+ *   解析为 `powershell.exe -File`；其他无法解析的 .cmd 才回退 `cmd /c`；
  * - .ps1（部分 CLI 直接以 .ps1 暴露）→ 用 powershell -File 跑。
  */
 function resolveVersionSpawn(

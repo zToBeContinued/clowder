@@ -195,6 +195,37 @@ test('resolveWindowsShimSpawn directly launches native exe shim targets', () => 
   });
 });
 
+test('resolveWindowsShimSpawn launches PowerShell shims without shell quoting', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-powershell-shim-'));
+  const cmdPath = join(tempRoot, 'cursor-agent.cmd');
+  const scriptPath = join(tempRoot, 'cursor-agent.ps1');
+  const longPrompt = 'prompt-'.repeat(4_000);
+
+  writeFileSync(
+    cmdPath,
+    [
+      '@echo off',
+      'setlocal enabledelayedexpansion',
+      'set "SCRIPT_DIR=%~dp0"',
+      'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%\\cursor-agent.ps1" %*',
+    ].join('\r\n'),
+    'utf8',
+  );
+  writeFileSync(scriptPath, 'Write-Output ok\n', 'utf8');
+
+  try {
+    assert.equal(parseShimFile(cmdPath), scriptPath);
+
+    const resolved = resolveWindowsShimSpawn(cmdPath, ['--print', longPrompt]);
+    assert.deepEqual(resolved, {
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '--print', longPrompt],
+    });
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('resolveCmdShimScript skips sibling node.exe and resolves the actual script (#247)', () => {
   // Portable Node installs place node.exe alongside the .cmd shim.
   // The shim references both %~dp0\node.exe (launcher) and %~dp0\node_modules\...\bin\opencode (script).

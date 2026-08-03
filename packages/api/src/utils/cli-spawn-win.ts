@@ -54,7 +54,8 @@ export function extractBareName(command: string): string {
 /**
  * Try to extract an entry script from a .cmd shim file by parsing its content.
  * Handles both relative (%~dp0, %dp0, %dp0%) and absolute (%APPDATA%, etc.) paths.
- * Prefers .js matches, falls back to extensionless entrypoints, then native .exe entrypoints.
+ * Prefers .js matches, then PowerShell scripts, extensionless entrypoints,
+ * and finally native .exe entrypoints.
  */
 export function parseShimFile(cmdPath: string): string | null {
   if (!existsSync(cmdPath)) return null;
@@ -63,10 +64,29 @@ export function parseShimFile(cmdPath: string): string | null {
 
   const candidates: string[] = [];
 
+  // Some vendor shims first assign the directory of the wrapper to a
+  // variable (for example `set "SCRIPT_DIR=%~dp0"`) and reference the real
+  // PowerShell entrypoint through that variable. Resolve those aliases so the
+  // caller can bypass cmd.exe entirely.
+  const shimDirVariables: string[] = [];
+  for (const match of shimContent.matchAll(/\bset\s+"?([A-Z_][A-Z0-9_]*)"?\s*=\s*%~?dp0%?/gi)) {
+    shimDirVariables.push(match[1]);
+  }
+
   // Relative paths: %~dp0\..., %dp0\..., %dp0%\...
   for (const match of shimContent.matchAll(/%~?dp0%?\\([^"\r\n]+)/gi)) {
     const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
     candidates.push(join(shimDir, raw));
+  }
+
+  for (const variable of shimDirVariables) {
+    // Variable names are restricted to ASCII identifier characters above, so
+    // they are safe to interpolate into this small lookup expression.
+    const variablePattern = new RegExp(`%${variable}%\\\\([^"\\r\\n]+)`, 'gi');
+    for (const match of shimContent.matchAll(variablePattern)) {
+      const raw = match[1].replace(/\\/g, '/').replace(/\s+%\*.*$/, '');
+      candidates.push(join(shimDir, raw));
+    }
   }
 
   // Absolute paths via environment variables (#284): %APPDATA%\..., %LOCALAPPDATA%\..., etc.
@@ -80,6 +100,10 @@ export function parseShimFile(cmdPath: string): string | null {
 
   for (const scriptPath of candidates) {
     if (/\.js$/i.test(scriptPath) && existsSync(scriptPath)) return scriptPath;
+  }
+
+  for (const scriptPath of candidates) {
+    if (/\.ps1$/i.test(scriptPath) && existsSync(scriptPath)) return scriptPath;
   }
 
   for (const scriptPath of candidates) {
@@ -101,7 +125,7 @@ export function parseShimFile(cmdPath: string): string | null {
 }
 
 /**
- * Resolve the underlying .js entry script from a Windows .cmd shim.
+ * Resolve the underlying entry script from a Windows .cmd shim.
  *
  * Accepts both bare command names ('claude') and full paths
  * ('C:\Users\Admin\bin\claude.cmd') — resolveCliCommand returns full paths.
@@ -185,6 +209,12 @@ export function resolveWindowsShimSpawn(
     return {
       command: shimScript,
       args: [...args],
+    };
+  }
+  if (/\.ps1$/i.test(shimScript)) {
+    return {
+      command: 'powershell.exe',
+      args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', shimScript, ...args],
     };
   }
   return {
