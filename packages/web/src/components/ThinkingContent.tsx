@@ -144,7 +144,11 @@ export function ThinkingContent({
           <div style={{ height: 1, backgroundColor: DIVIDER }} />
           <div
             style={{ padding: '8px 12px 10px 12px', color: 'rgba(255,255,255,0.85)' }}
-            className="text-xs leading-relaxed cli-output-md w-full min-w-0 break-words whitespace-pre-wrap"
+            // 不能整体 whitespace-pre-wrap：react-markdown 在块级元素之间输出原始换行
+            // 文本节点，pre-wrap 会让每个换行真实占一行 → 段间出现巨大空隙。
+            // 改为只在段落内部保留换行语义（[&_p]），块间空白回到 normal collapse；
+            // 思考块分隔线（---）压缩边距并提高可见度，读起来是紧凑的分段而非断崖。
+            className="text-xs leading-relaxed cli-output-md w-full min-w-0 break-words [&_p]:whitespace-pre-wrap [&_p]:mb-1.5 [&_hr]:my-2 [&_hr]:border-white/15"
           >
             <MarkdownContent content={content} className={className} />
           </div>
