@@ -20,6 +20,11 @@ import {
 } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
+import {
+  decideFailureResume,
+  getAutoResumeDelayMs,
+  getAutoResumeMaxRetries,
+} from './failure-resume-policy.js';
 import { hydrateReplyPreview, type IMessageStore, type StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../types.js';
@@ -581,6 +586,8 @@ export class QueueProcessor {
   private processingSlots = new Map<string, number>();
   /** F108: Per-slot pause tracking (set on canceled/failed, cleared on next execution) */
   private pausedSlots = new Map<string, 'canceled' | 'failed'>();
+  /** 失败自动续跑计数（key=threadId::catId）；成功/取消清零，防无限重试。 */
+  private readonly failureRetries = new Map<string, number>();
   private pauseEpoch = new Map<string, number>();
   /** F122B B6: Per-entry completion hooks (for multi-mention response aggregation). */
   private entryCompleteHooks = new Map<string, EntryCompleteHook>();
@@ -1733,12 +1740,14 @@ export class QueueProcessor {
         this.onInvocationComplete(entry.threadId, entryCat, status).catch(() => {});
         this.signalDeliveryBatchDone(entry.threadId, status);
         this.drainCatWaiters(entryCat, entry.threadId);
+        this.maybeAutoResumeOnFailure(entry, entryCat, status);
       },
       () => {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(entry.threadId, entryCat, 'failed').catch(() => {});
         this.signalDeliveryBatchDone(entry.threadId, 'failed');
         this.drainCatWaiters(entryCat, entry.threadId);
+        this.maybeAutoResumeOnFailure(entry, entryCat, 'failed');
       },
     );
     return true;
@@ -1780,6 +1789,104 @@ export class QueueProcessor {
   /** After a cat finishes anywhere, re-kick other threads whose queued entries
    * for that cat were skipped by the global cap — otherwise they would sit
    * until their own thread happened to get new activity. */
+  /**
+   * 失败自动续跑：无人值守的 A2A/派工条目异常失败后，让同一只猫 resume 续跑一次
+   * （带退避），耗尽仍失败则通知铲屎官。用户手动消息失败不自动续跑（用户在场）。
+   */
+  private maybeAutoResumeOnFailure(
+    entry: QueueEntry,
+    entryCat: string,
+    status: 'succeeded' | 'failed' | 'canceled' | 'canceled_by_user',
+  ): void {
+    const key = QueueProcessor.slotKey(entry.threadId, entryCat);
+    const decision = decideFailureResume({
+      status,
+      autoExecute: entry.autoExecute === true,
+      source: entry.source,
+      usedRetries: this.failureRetries.get(key) ?? 0,
+      maxRetries: getAutoResumeMaxRetries(),
+    });
+    if (decision === 'clear' || decision === 'ignore') {
+      if (decision === 'clear') this.failureRetries.delete(key);
+      return;
+    }
+    if (decision === 'resume') {
+      this.failureRetries.set(key, (this.failureRetries.get(key) ?? 0) + 1);
+      const timer = setTimeout(() => {
+        void this.enqueueFailureResume(entry, entryCat);
+      }, getAutoResumeDelayMs());
+      timer.unref?.();
+      return;
+    }
+    // notify
+    this.failureRetries.delete(key);
+    void this.notifyOwnerAutoResumeExhausted(entry, entryCat);
+  }
+
+  private async enqueueFailureResume(entry: QueueEntry, entryCat: string): Promise<void> {
+    try {
+      // 槽位已有新活动（用户已介入 / 新一棒在跑）时不重复续跑
+      if (this.processingSlots.has(QueueProcessor.slotKey(entry.threadId, entryCat))) return;
+      this.deps.queue.enqueue({
+        threadId: entry.threadId,
+        userId: entry.userId,
+        content:
+          '（系统自动续跑）你上一次执行异常中断了。请基于当前会话上下文 resume，接续未完成的工作继续推进；若其实已完成，简短确认即可。',
+        source: 'agent',
+        sourceCategory: 'a2a',
+        targetCats: [entryCat],
+        intent: 'execute',
+        autoExecute: true,
+        callerCatId: entryCat,
+      });
+      void this.tryAutoExecute(entry.threadId);
+      this.deps.log?.info?.(
+        { threadId: entry.threadId, catId: entryCat },
+        '[QueueProcessor] auto-resume enqueued after failure',
+      );
+    } catch (err) {
+      this.deps.log?.warn?.(
+        { threadId: entry.threadId, catId: entryCat, err },
+        '[QueueProcessor] auto-resume enqueue failed',
+      );
+    }
+  }
+
+  private async notifyOwnerAutoResumeExhausted(entry: QueueEntry, entryCat: string): Promise<void> {
+    try {
+      const source = {
+        connector: 'auto-resume',
+        label: '自动续跑',
+        icon: '⚠️',
+        meta: { presentation: 'system_notice', noticeTone: 'warning' },
+      } as const;
+      const stored = await this.deps.messageStore.append({
+        userId: 'system',
+        catId: null,
+        threadId: entry.threadId,
+        content: `⚠️ ${entryCat} 连续执行失败，自动续跑已用尽，需要你介入（可点它消息旁的「停止/重试」，或直接 @它 重新派活）。`,
+        mentions: [],
+        mentionsUser: true,
+        origin: 'callback',
+        timestamp: Date.now(),
+        source,
+      });
+      this.deps.socketManager?.broadcastToRoom(`thread:${entry.threadId}`, 'connector_message', {
+        threadId: entry.threadId,
+        message: {
+          id: stored.id,
+          type: 'connector',
+          content: stored.content,
+          source,
+          timestamp: stored.timestamp,
+          mentionsUser: true,
+        },
+      });
+    } catch {
+      /* 通知失败不阻塞主流程 */
+    }
+  }
+
   private drainCatWaiters(catId: string, completedThreadId: string): void {
     if ((Number(process.env.CAT_CAFE_PER_CAT_MAX_PARALLEL) || 0) <= 0) return;
     for (const tid of this.deps.queue.threadsWithQueuedCat(catId)) {
@@ -1820,12 +1927,14 @@ export class QueueProcessor {
           this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
           this.signalDeliveryBatchDone(threadId, status);
           this.drainCatWaiters(entryCat, threadId);
+          this.maybeAutoResumeOnFailure(entry, entryCat, status);
         },
         () => {
           this.processingSlots.delete(entrySk);
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
           this.signalDeliveryBatchDone(threadId, 'failed');
           this.drainCatWaiters(entryCat, threadId);
+          this.maybeAutoResumeOnFailure(entry, entryCat, 'failed');
         },
       );
 
@@ -1877,6 +1986,7 @@ export class QueueProcessor {
     }
 
     this.processingSlots.set(sk, Date.now());
+    const settledEntry = entry;
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
     void this.executeEntry(entry).then(
       (status) => {
@@ -1884,12 +1994,14 @@ export class QueueProcessor {
         this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
         this.signalDeliveryBatchDone(threadId, status);
         this.drainCatWaiters(entryCat, threadId);
+        this.maybeAutoResumeOnFailure(settledEntry, entryCat, status);
       },
       () => {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
         this.signalDeliveryBatchDone(threadId, 'failed');
         this.drainCatWaiters(entryCat, threadId);
+        this.maybeAutoResumeOnFailure(settledEntry, entryCat, 'failed');
       },
     );
 

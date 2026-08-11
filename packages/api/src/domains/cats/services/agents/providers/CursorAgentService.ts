@@ -3,6 +3,7 @@
 import { type CatId, createCatId } from '@cat-cafe/shared';
 import { getCatModel } from '../../../../../config/cat-models.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
+import { CliRawArchive } from '../../session/CliRawArchive.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import { isCliError, isCliTimeout, isLivenessWarning, spawnCli } from '../../../../../utils/cli-spawn.js';
@@ -27,6 +28,8 @@ interface CursorAgentServiceOptions {
   spawnFn?: SpawnFn;
   model?: string;
   cliCommand?: string;
+  /** 原始事件归档（诊断用；默认落 ./data/cli-raw-archive，可注入 mock）。 */
+  rawArchive?: { append(invocationId: string, payload: unknown): Promise<void>; getPath?(id: string): string };
 }
 
 /** 组装 cursor-agent 的 prompt：无 --append-system-prompt，身份提示前置拼入。 */
@@ -40,12 +43,14 @@ export class CursorAgentService implements AgentService {
   private readonly spawnFn: SpawnFn | undefined;
   private readonly model: string;
   private readonly cliCommand: string;
+  private readonly rawArchive: { append(invocationId: string, payload: unknown): Promise<void> };
 
   constructor(options?: CursorAgentServiceOptions) {
     this.catId = options?.catId ?? createCatId('cursor');
     this.spawnFn = options?.spawnFn;
     this.model = options?.model ?? getCatModel(this.catId as string);
     this.cliCommand = options?.cliCommand ?? 'cursor-agent';
+    this.rawArchive = options?.rawArchive ?? new CliRawArchive();
   }
 
   async *invoke(prompt: string, options?: AgentServiceOptions): AsyncIterable<AgentMessage> {
@@ -119,6 +124,10 @@ export class CursorAgentService implements AgentService {
       let thinkingBuffer = '';
 
       for await (const event of events) {
+        // 原始事件归档：诊断 cursor 首段重发 / exit 1 等,每个事件按序落 NDJSON。
+        if (options?.invocationId) {
+          void this.rawArchive.append(options.invocationId, event).catch(() => {});
+        }
         if (isCliTimeout(event)) {
           yield {
             type: 'error',

@@ -752,6 +752,23 @@ export const ENV_VARS: EnvDefinition[] = [
     category: 'budget',
     sensitive: false,
   },
+  {
+    name: 'CAT_CAFE_AUTO_RESUME_ON_FAILURE',
+    defaultValue: '1',
+    description:
+      '无人值守（A2A 接力 / 派工）的猫 CLI 异常失败后，自动让同一只猫 resume 续跑的最大次数（默认 1；0=关闭）。cursor exit 1 这类偶发崩溃大多一次续跑即恢复；耗尽仍失败会发一条 @铲屎官 的系统通知（触发桌面提醒 + 收件箱金标），不再静默卡死。仅对 autoExecute 的 agent 来源条目生效——用户手动发的消息失败不自动续跑（人在场，不擅自烧额度）。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
+    name: 'CAT_CAFE_AUTO_RESUME_DELAY_MS',
+    defaultValue: '15000',
+    description: '失败自动续跑前的退避毫秒（默认 15000）。给瞬态故障一点恢复时间，避免紧密重试循环。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
 
   // --- cli ---
   {
