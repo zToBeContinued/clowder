@@ -88,7 +88,7 @@ export function collectConfigSnapshot(): ConfigSnapshot {
 
   // A2A
   const a2aEnabled = parseBoolean(env.A2A_ENABLED, true);
-  const a2aMaxDepth = Number(env.MAX_A2A_DEPTH) || 15;
+  const a2aMaxDepth = Number(env.MAX_A2A_DEPTH) || 30;
 
   // Governance
   const govDegradationEnabled = parseBoolean(env.GOVERNANCE_DEGRADATION_ENABLED, true);

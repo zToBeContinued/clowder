@@ -16,13 +16,21 @@ import { catRegistry } from '@cat-cafe/shared';
 import { isCatAvailable } from '../../../../../config/cat-config-loader.js';
 import { resolveCatTarget } from './cat-target-resolver.js';
 
-/** Max A2A chain depth, configurable via env (read at call time for hot-reload) */
+/**
+ * A2A tuning knobs — all read at call time so `/config` and env hot-reload work.
+ * These are the SINGLE source of truth; every path (text-scan, MCP callback,
+ * worklist) must read through these getters, never a local hardcoded copy.
+ */
+
+/** Max A2A chain depth. env: MAX_A2A_DEPTH (default 30). */
 export function getMaxA2ADepth(): number {
-  return Number(process.env.MAX_A2A_DEPTH) || 15;
+  return Number(process.env.MAX_A2A_DEPTH) || 30;
 }
 
-/** Max number of distinct cats a single message can @mention (F27 safety limit) */
-const MAX_A2A_MENTION_TARGETS = 2;
+/** Max distinct cats a single message can @mention. env: CAT_CAFE_A2A_MAX_TARGETS (default 3). */
+export function getMaxA2AMentionTargets(): number {
+  return Number(process.env.CAT_CAFE_A2A_MAX_TARGETS) || 3;
+}
 export const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
 export const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
 const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
@@ -99,13 +107,14 @@ export function analyzeA2AMentions(
   entries.sort((a, b) => b.pattern.length - a.pattern.length);
 
   // 3. Line-start matching with token boundary — always actionable (no keyword gate)
+  const maxTargets = getMaxA2AMentionTargets();
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];
   const lines = stripped.split(/\r?\n/);
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const rawLine = lines[lineIndex]!;
-    if (found.length >= MAX_A2A_MENTION_TARGETS) break; // 5. Safety limit
+    if (found.length >= maxTargets) break; // 5. Safety limit
 
     const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
     const normalized = rawLine.slice(leadingWs).toLowerCase().replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
@@ -114,7 +123,7 @@ export function analyzeA2AMentions(
     }
 
     let cursor = 0;
-    while (cursor < normalized.length && found.length < MAX_A2A_MENTION_TARGETS) {
+    while (cursor < normalized.length && found.length < maxTargets) {
       const segment = normalized.slice(cursor);
       let matched = false;
 

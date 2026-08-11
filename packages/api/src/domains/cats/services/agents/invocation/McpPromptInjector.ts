@@ -28,12 +28,29 @@ export interface McpCallbackOptions {
 }
 
 /**
+ * Providers that CANNOT receive a native MCP bridge on the spawn command line,
+ * so Clowder must fall back to HTTP callback instruction injection.
+ *
+ * - cursor: `cursor-agent` has no `--mcp-config`; MCP is only configurable via
+ *   `.cursor/mcp.json` + `agent mcp login/enable` (see `cursor-agent --help`).
+ *   `--approve-mcps` only auto-approves; it does not wire the cat-cafe server.
+ *   Previously this function returned true unconditionally, so when a Cursor cat
+ *   had `mcpSupport=true` the caller treated MCP as "available" and SKIPPED the
+ *   HTTP fallback — leaving the cat with no collaboration tools at all.
+ */
+const CLIENTS_WITHOUT_NATIVE_MCP_BRIDGE: ReadonlySet<string> = new Set(['cursor']);
+
+/**
  * Whether Clowder wires native MCP into this provider's runtime invocation.
  *
- * Every currently routed subprocess provider wires a deterministic native MCP
- * bridge when the catalog marks MCP support and the server entry exists.
+ * Subprocess providers that accept an inline MCP config (claude `--mcp-config`,
+ * codex `--config mcp_servers.*`) or an ACP MCP whitelist (kiro/gemini) get a
+ * deterministic native bridge when the catalog marks MCP support and the server
+ * entry exists. Providers in CLIENTS_WITHOUT_NATIVE_MCP_BRIDGE do not, and must
+ * use the HTTP callback fallback (`needsMcpInjection`).
  */
-export function hasRuntimeNativeMcpBridge(_clientId?: string): boolean {
+export function hasRuntimeNativeMcpBridge(clientId?: string): boolean {
+  if (clientId && CLIENTS_WITHOUT_NATIVE_MCP_BRIDGE.has(clientId)) return false;
   return true;
 }
 

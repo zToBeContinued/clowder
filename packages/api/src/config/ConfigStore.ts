@@ -39,7 +39,9 @@ const CONFIG_KEY_DEFINITIONS: Record<string, ConfigKeyDefinition> = {
   'a2a.maxDepth': {
     envKey: 'MAX_A2A_DEPTH',
     snapshotPath: ['a2a', 'maxDepth'],
-    validate: (value) => Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 10,
+    // Ceiling raised 10→200: the old cap sat BELOW the default (15/30) and made
+    // `/config set a2a.maxDepth` reject any value that actually increased depth.
+    validate: (value) => Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 200,
     riskLevel: 'standard',
   },
   'codex.execution.model': {

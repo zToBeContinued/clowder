@@ -532,7 +532,7 @@ export const ENV_VARS: EnvDefinition[] = [
   },
   {
     name: 'MAX_A2A_DEPTH',
-    defaultValue: '15',
+    defaultValue: '30',
     description: 'A2A 猫猫互调最大深度',
     category: 'a2a',
     sensitive: false,

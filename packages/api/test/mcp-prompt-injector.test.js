@@ -19,6 +19,18 @@ describe('McpPromptInjector', () => {
     assert.equal(hasRuntimeNativeMcpBridge('anthropic'), true);
   });
 
+  it('does NOT report a native MCP bridge for cursor (no --mcp-config → must use HTTP fallback)', async () => {
+    const { hasRuntimeNativeMcpBridge, needsMcpInjection } = await import(
+      '../dist/domains/cats/services/agents/invocation/McpPromptInjector.js'
+    );
+
+    assert.equal(hasRuntimeNativeMcpBridge('cursor'), false);
+    // With no native bridge, mcpAvailable resolves false → HTTP callback injection kicks in,
+    // so a Cursor cat is not left with zero collaboration tools.
+    const mcpAvailable = true && true && hasRuntimeNativeMcpBridge('cursor');
+    assert.equal(needsMcpInjection(mcpAvailable, 'cursor'), true);
+  });
+
   // F041: parameter is now mcpAvailable (was mcpSupport), same boolean logic
   it('needsMcpInjection returns false when MCP is available (no fallback needed)', async () => {
     const { needsMcpInjection } = await import('../dist/domains/cats/services/agents/invocation/McpPromptInjector.js');

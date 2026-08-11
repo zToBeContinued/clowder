@@ -61,9 +61,20 @@ export interface WorklistEntry {
   streakPair?: { from: CatId; to: CatId; count: number };
 }
 
-/** F167 L1: streak thresholds. Hardcoded per KD (YAGNI — no config). */
-const PINGPONG_WARN_THRESHOLD = 2;
-const PINGPONG_BLOCK_THRESHOLD = 4;
+/**
+ * F167 L1: streak thresholds — env-configurable (read at call time for hot-reload).
+ * Defaults kept conservative (warn 2 / block 4): the breaker guards against two
+ * cats @-ing each other with no substantive content (long discussion and real
+ * tool calls are already exempt via isSubstantiveActivity). Raise only if you
+ * want longer back-and-forth loops before auto-termination:
+ *   CAT_CAFE_A2A_PINGPONG_WARN, CAT_CAFE_A2A_PINGPONG_LIMIT
+ */
+function getPingpongWarnThreshold(): number {
+  return Number(process.env.CAT_CAFE_A2A_PINGPONG_WARN) || 2;
+}
+function getPingpongBlockThreshold(): number {
+  return Number(process.env.CAT_CAFE_A2A_PINGPONG_LIMIT) || 4;
+}
 
 /**
  * F167 Phase D (KD-18): tools that are routing/holding themselves, not work evidence.
@@ -148,9 +159,11 @@ export function updateStreakOnPush(
     entry.streakPair = { from: callerCatId, to: target, count: 1 };
   }
   const count = entry.streakPair.count;
+  const warnThreshold = getPingpongWarnThreshold();
+  const blockThreshold = getPingpongBlockThreshold();
   return {
-    warnPingPong: count >= PINGPONG_WARN_THRESHOLD && count < PINGPONG_BLOCK_THRESHOLD,
-    blockPingPong: count >= PINGPONG_BLOCK_THRESHOLD,
+    warnPingPong: count >= warnThreshold && count < blockThreshold,
+    blockPingPong: count >= blockThreshold,
     count,
   };
 }

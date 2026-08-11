@@ -21,6 +21,7 @@ import {
 } from '../domains/cats/services/agents/invocation/a2a-idempotency.js';
 import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { InvocationTracker } from '../domains/cats/services/agents/invocation/InvocationTracker.js';
+import { getMaxA2ADepth } from '../domains/cats/services/agents/routing/a2a-mentions.js';
 import { persistA2APendingNotice } from '../domains/cats/services/agents/routing/route-helpers.js';
 import {
   getWorklist,
@@ -109,7 +110,10 @@ export async function enqueueA2ATargets(
   // This replaces both the worklist path and the fallback standalone invocation.
   // Guards mirror worklist protections: depth limit, duplicate detection.
   if (deps.invocationQueue) {
-    const MAX_A2A_DEPTH = 10;
+    // Single source of truth: read the same depth the text-scan/worklist path uses.
+    // Previously hardcoded 10 here, so raising MAX_A2A_DEPTH env had NO effect on the
+    // MCP post_message relay path (the common "cats keep passing the ball" path).
+    const MAX_A2A_DEPTH = getMaxA2ADepth();
 
     // F167 L1 AC-A4 + Phase D (cloud Codex P1): streak check must cover modern path
     // AND only fire when we know the target is actually about to enqueue — otherwise

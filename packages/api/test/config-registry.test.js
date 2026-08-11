@@ -134,13 +134,13 @@ describe('ConfigRegistry', () => {
     assert.equal(snapshot.a2a.maxDepth, 5);
   });
 
-  it('defaults a2a.maxDepth to 15', async () => {
+  it('defaults a2a.maxDepth to 30', async () => {
     setEnv('MAX_A2A_DEPTH', undefined);
 
     const { collectConfigSnapshot } = await import('../dist/config/ConfigRegistry.js');
     const snapshot = collectConfigSnapshot();
 
-    assert.equal(snapshot.a2a.maxDepth, 15);
+    assert.equal(snapshot.a2a.maxDepth, 30);
     assert.equal(snapshot.a2a.enabled, true);
   });
 
