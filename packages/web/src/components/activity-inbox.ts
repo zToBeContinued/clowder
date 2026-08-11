@@ -56,7 +56,7 @@ export function buildActivityInboxItems(
     let hasSpecificItem = false;
 
     for (const message of state.messages ?? []) {
-      if (!message || message.threadId && message.threadId !== thread.id) continue;
+      if (!message || (message.threadId && message.threadId !== thread.id)) continue;
       if (message.type === 'system' || message.type === 'summary') continue;
 
       const kind: ActivityInboxKind | null = message.mentionsUser ? 'mention' : message.replyTo ? 'reply' : null;
@@ -89,12 +89,28 @@ export function buildActivityInboxItems(
     }
   }
 
-  return items.sort((a, b) => b.timestamp - a.timestamp || a.threadTitle.localeCompare(b.threadTitle)).slice(0, limit);
+  return items
+    .sort((a, b) => {
+      // @你 的条目永远置顶（需要用户行动），其余按时间倒序
+      const aMention = a.kind === 'mention' ? 0 : 1;
+      const bMention = b.kind === 'mention' ? 0 : 1;
+      if (aMention !== bMention) return aMention - bMention;
+      return b.timestamp - a.timestamp || a.threadTitle.localeCompare(b.threadTitle);
+    })
+    .slice(0, limit);
 }
 
 export function countActivityUnread(snapshots: readonly ActivityInboxThreadSnapshot[]): number {
   return snapshots.reduce((total, { thread, state }) => {
     if (thread.deletedAt) return total;
     return total + Math.max(0, state.unreadCount ?? 0);
+  }, 0);
+}
+
+/** 有未读 @你 的频道数——徽章分层用（金色 @N vs 普通红色数字）。 */
+export function countActivityMentionThreads(snapshots: readonly ActivityInboxThreadSnapshot[]): number {
+  return snapshots.reduce((total, { thread, state }) => {
+    if (thread.deletedAt) return total;
+    return total + (state.hasUserMention ? 1 : 0);
   }, 0);
 }

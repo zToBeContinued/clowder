@@ -88,6 +88,7 @@ export function ThinkingContent({
   const [expanded, setExpanded] = useState(shouldExpand);
   const userInteracted = useRef(false);
   const hasMounted = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!userInteracted.current) {
       setExpanded((isExport && expandInExport) || defaultExpanded);
@@ -111,7 +112,11 @@ export function ThinkingContent({
   const surfaceInner = tintedDark(accent, 0.18);
 
   return (
-    <div className="mt-2 mb-1 w-full min-w-0 overflow-hidden" style={{ backgroundColor: surface, borderRadius: 10 }}>
+    <div
+      ref={rootRef}
+      className="mt-2 mb-1 w-full min-w-0 overflow-hidden"
+      style={{ backgroundColor: surface, borderRadius: 10 }}
+    >
       <button
         type="button"
         onClick={() => {
@@ -143,6 +148,28 @@ export function ThinkingContent({
           >
             <MarkdownContent content={content} className={className} />
           </div>
+          {/* 长思考滚到底后无需再滚回顶部：底部折叠按钮，收起并把面板滚回视口 */}
+          <button
+            type="button"
+            onClick={() => {
+              userInteracted.current = true;
+              setExpanded(false);
+              rootRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+            }}
+            className="w-full flex items-center justify-center gap-1.5 text-[11px] font-mono transition-opacity hover:opacity-80"
+            style={{ padding: '6px 12px', backgroundColor: surface, borderTop: `1px solid ${DIVIDER}` }}
+          >
+            <span
+              style={{
+                color: breedColor || 'var(--cafe-text-muted)',
+                transform: 'rotate(-90deg)',
+                display: 'inline-flex',
+              }}
+            >
+              <ThinkingChevron expanded={false} color={breedColor} />
+            </span>
+            <span style={{ color: 'rgba(255,255,255,0.6)' }}>收起思考</span>
+          </button>
         </div>
       )}
     </div>

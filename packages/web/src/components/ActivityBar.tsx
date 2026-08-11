@@ -6,7 +6,12 @@ import { useCafeTheme } from '@/hooks/useCafeTheme';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { useChatStore } from '@/stores/chatStore';
 import { scrollToMessage } from '@/utils/scrollToMessage';
-import { buildActivityInboxItems, countActivityUnread, type ActivityInboxItem } from './activity-inbox';
+import {
+  type ActivityInboxItem,
+  buildActivityInboxItems,
+  countActivityMentionThreads,
+  countActivityUnread,
+} from './activity-inbox';
 import { HubIcon } from './hub-icons';
 import { MemoryIcon } from './icons/MemoryIcon';
 import { isDailySettingsSection, SETTINGS_SECTIONS } from './settings/settings-nav-config';
@@ -105,14 +110,7 @@ function SettingsIcon({ className = 'w-5 h-5' }: { className?: string }) {
 }
 
 function VisualThemeIcon({ theme }: { theme: VisualTheme }) {
-  const label =
-    theme === 'slockv1'
-      ? 'V1'
-      : theme === 'kami'
-        ? 'K'
-        : theme === 'slock'
-            ? 'SL'
-            : 'C';
+  const label = theme === 'slockv1' ? 'V1' : theme === 'kami' ? 'K' : theme === 'slock' ? 'SL' : 'C';
 
   return (
     <span className="text-[11px] font-bold leading-none tracking-[-0.02em]" aria-hidden="true">
@@ -214,7 +212,8 @@ function activityKindLabel(kind: ActivityInboxItem['kind']): string {
 }
 
 function activityKindTone(kind: ActivityInboxItem['kind']): string {
-  if (kind === 'mention') return 'bg-[var(--console-rail-active)] text-[var(--console-rail-fg)]';
+  // @你 用铲屎官主题金色，和消息卡片的「需要你」标识同源，一眼可辨
+  if (kind === 'mention') return 'border border-[#F5A623]/40 bg-[#F5A623]/15 text-[#F5A623]';
   if (kind === 'reply') return 'bg-conn-amber-bg text-conn-amber-text';
   return 'bg-[var(--console-hover-bg)] text-[var(--clowder-sidebar-row-muted)]';
 }
@@ -281,6 +280,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
     .filter((value): value is NonNullable<typeof value> => value != null);
   const activityItems = buildActivityInboxItems(activitySnapshots, { limit: 30 });
   const activityUnread = countActivityUnread(activitySnapshots);
+  const activityMentionThreads = countActivityMentionThreads(activitySnapshots);
 
   useEffect(() => {
     if (!activityOpen) return;
@@ -342,8 +342,17 @@ export function ActivityBar({ className }: ActivityBarProps) {
       >
         <ActivityIcon className="h-5 w-5" />
         {activityUnread > 0 && (
-          <span className="slock-unread-badge absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-conn-red-text px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)]">
-            {activityUnread > 99 ? '99+' : activityUnread}
+          <span
+            className={`slock-unread-badge absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)] ${
+              activityMentionThreads > 0 ? 'bg-[#F5A623]' : 'bg-conn-red-text'
+            }`}
+            title={activityMentionThreads > 0 ? `${activityMentionThreads} 个频道有 @你` : `${activityUnread} 条未读`}
+          >
+            {activityMentionThreads > 0
+              ? `@${activityMentionThreads > 9 ? '9+' : activityMentionThreads}`
+              : activityUnread > 99
+                ? '99+'
+                : activityUnread}
           </span>
         )}
       </button>
