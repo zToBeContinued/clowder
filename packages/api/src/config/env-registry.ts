@@ -773,7 +773,7 @@ export const ENV_VARS: EnvDefinition[] = [
     name: 'CAT_CAFE_CLI_STALL_KILL_MS',
     defaultValue: '180000',
     description:
-      'CLI「零输出静默」多久判定为卡死并强杀（毫秒，默认 180000=3 分钟；>0 生效）。区别于崩溃退出（exit 1，立即失败→续跑）：卡死是进程挂起既不输出也不退出，必须靠这个阈值兜底。cursor 正常思考/工具调用都有增量输出会重置计时，真「零输出」3 分钟基本是挂起。杀掉后走失败自动续跑（CAT_CAFE_AUTO_RESUME_ON_FAILURE）恢复。调小=卡死恢复更快但可能误杀长时间无输出的任务；Windows 无法采样 CPU（busy-silent 延长不生效）故默认已适度缩短。',
+      'CLI「零输出静默」多久判定为卡死并强杀（毫秒，默认 180000=3 分钟；>0 生效）。区别于崩溃退出（exit 1，立即失败→续跑）：卡死是进程挂起既不输出也不退出，必须靠这个阈值兜底。cursor 正常思考/工具调用都有增量输出会重置计时，真「零输出」3 分钟基本是挂起。且只杀 idle-silent（CPU 平）；busy-silent（CPU 在涨，如长编译/测试）探针会识别并延长，不会误杀——Windows 经 PowerShell CIM 采样进程树 CPU，Unix 经 ps。杀掉后走失败自动续跑（CAT_CAFE_AUTO_RESUME_ON_FAILURE）恢复。',
     category: 'cli',
     sensitive: false,
     runtimeEditable: true,

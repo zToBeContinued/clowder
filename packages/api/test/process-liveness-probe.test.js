@@ -8,7 +8,11 @@ import { test } from 'node:test';
 
 const { ProcessLivenessProbe } = await import('../dist/utils/ProcessLivenessProbe.js');
 
-async function waitForBusySilent(probe, { timeoutMs = 3_000, burnMs = 180, settleMs = 40 } = {}) {
+// Windows CPU sampling goes through PowerShell CIM (~1-2s per sample, WMI cold
+// start can be slower) — give it a much wider window than the fast Unix `ps`.
+const busyWaitTimeoutMs = process.platform === 'win32' ? 15_000 : 3_000;
+
+async function waitForBusySilent(probe, { timeoutMs = busyWaitTimeoutMs, burnMs = 180, settleMs = 40 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const burnUntil = Date.now() + burnMs;
@@ -46,53 +50,41 @@ test('detects dead process (PID does not exist)', async () => {
   probe.stop();
 });
 
-test(
-  'classifies as busy-silent when CPU grows but no output (Unix only)',
-  { skip: process.platform === 'win32' && 'busy-silent requires ps CPU sampling (Unix only)' },
-  async () => {
-    const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
-    probe.start();
-    const reachedBusySilent = await waitForBusySilent(probe);
-    const state = probe.getState();
-    assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${state}`);
-    assert.equal(state, 'busy-silent');
-    probe.stop();
-  },
-);
+test('classifies as busy-silent when CPU grows but no output (ps on Unix, PowerShell CIM on Windows)', async () => {
+  const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
+  probe.start();
+  const reachedBusySilent = await waitForBusySilent(probe);
+  const state = probe.getState();
+  assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${state}`);
+  assert.equal(state, 'busy-silent');
+  probe.stop();
+});
 
-test(
-  'generates alive_but_silent warning at soft threshold (Unix only)',
-  { skip: process.platform === 'win32' && 'silence warnings require Windows platform guard (PR #250)' },
-  async () => {
-    const probe = new ProcessLivenessProbe(process.pid, {
-      sampleIntervalMs: 20,
-      softWarningMs: 50,
-      stallWarningMs: 500,
-    });
-    probe.start();
-    await new Promise((r) => setTimeout(r, 250));
-    const warnings = probe.drainWarnings();
-    assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
-    probe.stop();
-  },
-);
+test('generates alive_but_silent warning at soft threshold', async () => {
+  const probe = new ProcessLivenessProbe(process.pid, {
+    sampleIntervalMs: 20,
+    softWarningMs: 50,
+    stallWarningMs: 500,
+  });
+  probe.start();
+  await new Promise((r) => setTimeout(r, 250));
+  const warnings = probe.drainWarnings();
+  assert.ok(warnings.some((w) => w.level === 'alive_but_silent'));
+  probe.stop();
+});
 
-test(
-  'generates suspected_stall warning at stall threshold (Unix only)',
-  { skip: process.platform === 'win32' && 'silence warnings require Windows platform guard (PR #250)' },
-  async () => {
-    const probe = new ProcessLivenessProbe(process.pid, {
-      sampleIntervalMs: 20,
-      softWarningMs: 30,
-      stallWarningMs: 100,
-    });
-    probe.start();
-    await new Promise((r) => setTimeout(r, 350));
-    const warnings = probe.drainWarnings();
-    assert.ok(warnings.some((w) => w.level === 'suspected_stall'));
-    probe.stop();
-  },
-);
+test('generates suspected_stall warning at stall threshold', async () => {
+  const probe = new ProcessLivenessProbe(process.pid, {
+    sampleIntervalMs: 20,
+    softWarningMs: 30,
+    stallWarningMs: 100,
+  });
+  probe.start();
+  await new Promise((r) => setTimeout(r, 350));
+  const warnings = probe.drainWarnings();
+  assert.ok(warnings.some((w) => w.level === 'suspected_stall'));
+  probe.stop();
+});
 
 test('notifyActivity resets silence timer and clears warning state', async () => {
   const probe = new ProcessLivenessProbe(process.pid, {
@@ -110,18 +102,14 @@ test('notifyActivity resets silence timer and clears warning state', async () =>
   probe.stop();
 });
 
-test(
-  'shouldExtendTimeout returns true when busy-silent (Unix only)',
-  { skip: process.platform === 'win32' && 'busy-silent requires ps CPU sampling (Unix only)' },
-  async () => {
-    const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
-    probe.start();
-    const reachedBusySilent = await waitForBusySilent(probe);
-    assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${probe.getState()}`);
-    assert.equal(probe.shouldExtendTimeout(), true);
-    probe.stop();
-  },
-);
+test('shouldExtendTimeout returns true when busy-silent', async () => {
+  const probe = new ProcessLivenessProbe(process.pid, { sampleIntervalMs: 100 });
+  probe.start();
+  const reachedBusySilent = await waitForBusySilent(probe);
+  assert.ok(reachedBusySilent, `expected busy-silent within timeout, got ${probe.getState()}`);
+  assert.equal(probe.shouldExtendTimeout(), true);
+  probe.stop();
+});
 
 test('isHardCapExceeded returns true when elapsed >= factor * timeout', () => {
   const probe = new ProcessLivenessProbe(process.pid, { boundedExtensionFactor: 2 });
@@ -131,43 +119,43 @@ test('isHardCapExceeded returns true when elapsed >= factor * timeout', () => {
   probe.stop();
 });
 
-test(
-  'classifies as busy-silent when child process has growing CPU (Unix only)',
-  { skip: process.platform === 'win32' && 'child CPU detection requires ps (Unix only)' },
-  async () => {
-    const { spawn } = await import('node:child_process');
-    // Spawn a parent that is idle but has a CPU-busy child.
-    // Parent: just waits (idle CPU). Child: infinite loop (busy CPU).
-    const parent = spawn(
-      'node',
-      [
-        '-e',
-        `const { spawn } = require('child_process');
-       const c = spawn('node', ['-e', 'while(true){}'], { stdio: 'ignore' });
-       process.on('SIGTERM', () => { c.kill(); process.exit(0); });
-       setInterval(() => {}, 60000);`,
-      ],
-      { stdio: 'ignore' },
-    );
+test('classifies as busy-silent when child process has growing CPU', async () => {
+  const { spawn } = await import('node:child_process');
+  // Spawn a parent that is idle but has a CPU-busy child.
+  // Parent: just waits (idle CPU). Child: bounded busy loop (busy CPU).
+  // The busy loop is time-bounded (not while(true)) because on Windows
+  // SIGTERM handlers never run (kill = hard terminate), which would leak
+  // an orphaned CPU-burning child. The 40s bound self-cleans in all cases.
+  const parent = spawn(
+    'node',
+    [
+      '-e',
+      `const { spawn } = require('child_process');
+     const c = spawn('node', ['-e', 'const t=Date.now();while(Date.now()-t<40000){}'], { stdio: 'ignore' });
+     process.on('SIGTERM', () => { c.kill(); process.exit(0); });
+     c.on('exit', () => process.exit(0));
+     setInterval(() => {}, 60000);`,
+    ],
+    { stdio: 'ignore' },
+  );
 
-    let probe = null;
-    try {
-      // Give child time to start burning CPU
-      await new Promise((r) => setTimeout(r, 300));
+  let probe = null;
+  try {
+    // Give child time to start burning CPU
+    await new Promise((r) => setTimeout(r, 300));
 
-      probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 100 });
-      probe.start();
+    probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 100 });
+    probe.start();
 
-      const reachedBusySilent = await waitForState(probe, 'busy-silent');
-      const state = probe.getState();
-      assert.ok(reachedBusySilent, `parent with busy child should reach busy-silent, got ${state}`);
-      assert.equal(state, 'busy-silent', `parent with busy child should be busy-silent, got ${state}`);
-    } finally {
-      probe?.stop();
-      parent.kill('SIGTERM');
-    }
-  },
-);
+    const reachedBusySilent = await waitForState(probe, 'busy-silent', { timeoutMs: busyWaitTimeoutMs });
+    const state = probe.getState();
+    assert.ok(reachedBusySilent, `parent with busy child should reach busy-silent, got ${state}`);
+    assert.equal(state, 'busy-silent', `parent with busy child should be busy-silent, got ${state}`);
+  } finally {
+    probe?.stop();
+    parent.kill('SIGTERM');
+  }
+});
 
 const { parseCpuTime } = await import('../dist/utils/ProcessLivenessProbe.js');
 
@@ -185,31 +173,31 @@ test('parseCpuTime handles empty/invalid input', () => {
   assert.equal(parseCpuTime('  '), 0);
 });
 
-// --- Windows platform guard tests ---
+// --- Idle classification (both platforms; was the Windows "no CPU sampling" guard) ---
 
-test('on Windows, sampleOnce sets cpuGrowing=false (conservative idle-silent)', async () => {
-  // This test runs on Windows where the platform guard is active.
-  // The probe should classify silent processes as idle-silent (not busy-silent),
-  // preserving stall detection semantics.
-  if (process.platform !== 'win32') {
-    // On non-Windows, the Unix ps-based path runs instead — skip.
-    return;
+test('classifies idle child process as idle-silent (no false busy)', async () => {
+  // An idle process must NOT be classified busy-silent — otherwise stallAutoKill
+  // would never fire for a hung CLI. Uses a sleeping child (not process.pid:
+  // the test runner itself burns CPU). Startup CPU makes the first sample look
+  // "growing", so wait for a second sample where CPU is flat.
+  const { spawn } = await import('node:child_process');
+  const child = spawn('node', ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  let probe = null;
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    probe = new ProcessLivenessProbe(child.pid, {
+      sampleIntervalMs: 100,
+      softWarningMs: 100_000,
+      stallWarningMs: 200_000,
+    });
+    probe.start();
+    const reachedIdle = await waitForState(probe, 'idle-silent', { timeoutMs: busyWaitTimeoutMs });
+    assert.ok(reachedIdle, `idle child should classify idle-silent, got ${probe.getState()}`);
+    assert.equal(probe.shouldExtendTimeout(), false, 'idle-silent must NOT extend timeout');
+  } finally {
+    probe?.stop();
+    child.kill();
   }
-
-  const probe = new ProcessLivenessProbe(process.pid, {
-    sampleIntervalMs: 30,
-    softWarningMs: 200,
-    stallWarningMs: 500,
-  });
-  probe.start();
-  // Wait past sampleIntervalMs so silence kicks in
-  await new Promise((r) => setTimeout(r, 80));
-
-  const state = probe.getState();
-  // On Windows, with cpuGrowing=false, the state should be idle-silent (not busy-silent)
-  assert.equal(state, 'idle-silent', 'Windows guard must set cpuGrowing=false → idle-silent');
-  assert.equal(probe.shouldExtendTimeout(), false, 'idle-silent must NOT extend timeout');
-  probe.stop();
 });
 
 test('on Windows, silence warnings still fire correctly', async () => {

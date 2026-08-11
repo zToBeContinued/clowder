@@ -138,7 +138,13 @@ export class ProcessLivenessProbe {
   private sampleOnce(): void {
     // Guard against concurrent samples — nested async calls (ps→pgrep→ps) can
     // overlap when sampleIntervalMs is shorter than the async chain duration.
-    if (this.sampling) return;
+    if (this.sampling) {
+      // A Windows CPU sample (PowerShell ~1-2s) can outlast several ticks.
+      // Keep silence warnings responsive while the async sample is in flight —
+      // they are cheap, synchronous, and de-duped by the emitted flags.
+      if (process.platform === 'win32' && this.pidAlive) this.emitSilenceWarnings();
+      return;
+    }
     this.sampling = true;
 
     // Check PID existence first
@@ -150,13 +156,12 @@ export class ProcessLivenessProbe {
       return;
     }
 
-    // Windows: `ps` is not available. Use process.kill(pid, 0) for liveness
-    // and skip CPU sampling. Conservative: assume idle (cpuGrowing = false)
-    // so that idle-silent → stall detection still works on Windows.
+    // Windows: `ps` is not available — sample CPU via PowerShell CIM instead.
+    // Emit silence warnings synchronously first (matching the pre-sampling
+    // behavior) so they don't wait on the slow PowerShell round-trip.
     if (process.platform === 'win32') {
-      this.cpuGrowing = false;
       this.emitSilenceWarnings();
-      this.sampling = false;
+      this.sampleWindowsCpu();
       return;
     }
 
@@ -189,6 +194,56 @@ export class ProcessLivenessProbe {
       }
       this.updateCpuSample(mainCpu + childCpuTotal);
     });
+  }
+
+  /**
+   * Windows CPU sampling — PowerShell CIM query over Win32_Process.
+   * Mirrors the Unix ps semantics: sum CPU time of the main process + direct
+   * children (a CLI running a tool call is idle itself while the child burns
+   * CPU), emit "pid ppid cpuMs" lines, compare against the previous sample.
+   * UserModeTime/KernelModeTime are in 100ns units → /10000 = ms.
+   *
+   * On ANY failure (PowerShell missing, WMI hiccup, timeout) fall back to the
+   * previous conservative behavior: assume idle so stall detection still works.
+   * Dead detection is NOT this method's job — process.kill(pid, 0) in
+   * sampleOnce() owns it (WMI can transiently miss a live process).
+   */
+  private sampleWindowsCpu(): void {
+    const script =
+      `Get-CimInstance Win32_Process -Filter 'ProcessId=${this.pid} OR ParentProcessId=${this.pid}' | ` +
+      `ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, [math]::Round(($_.UserModeTime + $_.KernelModeTime) / 10000) }`;
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      { timeout: 20_000, windowsHide: true },
+      (err, stdout) => {
+        if (err) {
+          this.cpuGrowing = false;
+          this.emitSilenceWarnings();
+          this.sampling = false;
+          return;
+        }
+        let mainCpu = -1;
+        let childCpuTotal = 0;
+        for (const line of stdout.split('\n')) {
+          const parts = line.trim().split(/\s+/);
+          if (parts.length < 3) continue;
+          const pid = Number(parts[0]);
+          const ppid = Number(parts[1]);
+          const cpu = Number(parts[2]);
+          if (!Number.isFinite(pid) || !Number.isFinite(ppid) || !Number.isFinite(cpu)) continue;
+          if (pid === this.pid) mainCpu = cpu;
+          else if (ppid === this.pid) childCpuTotal += cpu;
+        }
+        if (mainCpu < 0) {
+          this.cpuGrowing = false;
+          this.emitSilenceWarnings();
+          this.sampling = false;
+          return;
+        }
+        this.updateCpuSample(mainCpu + childCpuTotal);
+      },
+    );
   }
 
   /** Update CPU tracking and emit warnings after sampling */
