@@ -757,7 +757,8 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CLI_TIMEOUT_MS',
     defaultValue: DEFAULT_CLI_TIMEOUT_LABEL,
-    description: 'CLI 调用超时',
+    description:
+      'CLI 静默超时（毫秒，0=禁用）。注意这不是总时长上限：任何 stdout/stderr 输出都会重置计时，长任务只要在产出（含 thinking 流/工具日志）就永不超时。纯静默时还有二级保护：每 60s 采样子进程 CPU，「沉默但 CPU 在涨」（大编译等）自动延长，直到硬上限=2×本值；超时后 SIGTERM→3s→SIGKILL。默认 30 分钟适合绝大多数场景，一般不需要调。',
     category: 'cli',
     sensitive: false,
   },
