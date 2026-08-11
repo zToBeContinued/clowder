@@ -77,53 +77,74 @@ function QueueEntryRow({
         {index + 1}
       </span>
 
-      {/* Content preview */}
+      {/* Content preview.
+          A2A 接力棒（isAgent）以「谁 → 派给谁 · 待接棒」为主行、传球内容为次行小字：
+          排队的是下一棒调用，不是消息本身——预览文本与聊天里已完成的源消息相同，
+          若把内容放大做主行会被误读成「消息卡在队列里重复了」。 */}
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-cafe-secondary truncate">{entry.content}</p>
-        <div className="flex items-center gap-1 mt-0.5">
-          {isAgent ? (
-            <svg className="w-2.5 h-2.5 text-[var(--color-opus-primary)]" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M4.5 11.5c-.28 0-.5-.22-.5-.5 0-1.93.76-3.74 2.13-5.1C7.5 4.52 9.31 3.76 11.24 3.76c.28 0 .5.22.5.5s-.22.5-.5.5c-1.66 0-3.22.65-4.4 1.82A6.18 6.18 0 005.02 11c0 .28-.22.5-.5.5zM8.02 20.25a1.25 1.25 0 01-1.18-1.63l1.12-3.36A4.01 4.01 0 014.1 11.5c0-2.2 1.79-3.99 3.99-3.99h7.82c2.2 0 3.99 1.79 3.99 3.99a4.01 4.01 0 01-3.86 3.76l1.12 3.36a1.25 1.25 0 01-1.18 1.63H8.02z" />
-            </svg>
-          ) : isUrgent ? (
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-conn-red-text" />
-          ) : (
-            <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-opus-primary)]" />
-          )}
-          <span
-            className={`text-xs ${isAgent ? 'text-[var(--color-opus-primary)] font-medium' : isUrgent ? 'text-conn-red-text' : 'text-cafe-muted'}`}
-          >
-            {sourceLabel}
-          </span>
-          {categoryLabel && (
-            <span
-              className={`text-[9px] px-1 py-px rounded font-medium ${
-                isUrgent
-                  ? 'bg-conn-red-bg text-conn-red-text'
-                  : 'bg-[var(--color-opus-primary)]/15 text-[var(--color-opus-primary)]'
-              }`}
-            >
-              {categoryLabel}
-            </span>
-          )}
-          {isAgent && entry.autoExecute && (
-            <span className="text-[9px] px-1 py-px rounded bg-[var(--color-opus-primary)]/15 text-[var(--color-opus-primary)] font-medium">
-              自动
-            </span>
-          )}
-          {imageCount > 0 && (
-            <span className="flex items-center gap-0.5 text-xs text-cafe-muted ml-1">
-              <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
-                <path
-                  fillRule="evenodd"
-                  d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
-                  clipRule="evenodd"
-                />
+        {isAgent ? (
+          <>
+            <div className="flex items-center gap-1.5 min-w-0">
+              <svg
+                className="w-2.5 h-2.5 shrink-0 text-[var(--color-opus-primary)]"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path d="M4.5 11.5c-.28 0-.5-.22-.5-.5 0-1.93.76-3.74 2.13-5.1C7.5 4.52 9.31 3.76 11.24 3.76c.28 0 .5.22.5.5s-.22.5-.5.5c-1.66 0-3.22.65-4.4 1.82A6.18 6.18 0 005.02 11c0 .28-.22.5-.5.5zM8.02 20.25a1.25 1.25 0 01-1.18-1.63l1.12-3.36A4.01 4.01 0 014.1 11.5c0-2.2 1.79-3.99 3.99-3.99h7.82c2.2 0 3.99 1.79 3.99 3.99a4.01 4.01 0 01-3.86 3.76l1.12 3.36a1.25 1.25 0 01-1.18 1.63H8.02z" />
               </svg>
-              {imageCount}
-            </span>
-          )}
-        </div>
+              <span className="text-sm font-medium text-[var(--color-opus-primary)] truncate">{sourceLabel}</span>
+              <span className="text-xs text-cafe-muted shrink-0">待接棒</span>
+              {categoryLabel && (
+                <span className="text-[9px] px-1 py-px rounded font-medium bg-[var(--color-opus-primary)]/15 text-[var(--color-opus-primary)]">
+                  {categoryLabel}
+                </span>
+              )}
+              {entry.autoExecute && (
+                <span className="text-[9px] px-1 py-px rounded bg-[var(--color-opus-primary)]/15 text-[var(--color-opus-primary)] font-medium">
+                  自动
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-cafe-muted truncate mt-0.5" title={entry.content}>
+              {entry.content}
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-cafe-secondary truncate">{entry.content}</p>
+            <div className="flex items-center gap-1 mt-0.5">
+              {isUrgent ? (
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-conn-red-text" />
+              ) : (
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-[var(--color-opus-primary)]" />
+              )}
+              <span className={`text-xs ${isUrgent ? 'text-conn-red-text' : 'text-cafe-muted'}`}>{sourceLabel}</span>
+              {categoryLabel && (
+                <span
+                  className={`text-[9px] px-1 py-px rounded font-medium ${
+                    isUrgent
+                      ? 'bg-conn-red-bg text-conn-red-text'
+                      : 'bg-[var(--color-opus-primary)]/15 text-[var(--color-opus-primary)]'
+                  }`}
+                >
+                  {categoryLabel}
+                </span>
+              )}
+              {imageCount > 0 && (
+                <span className="flex items-center gap-0.5 text-xs text-cafe-muted ml-1">
+                  <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+                    <path
+                      fillRule="evenodd"
+                      d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  {imageCount}
+                </span>
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Steer button */}
