@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { findMonorepoRoot } from '../utils/monorepo-root.js';
+import { injectWindowsSystemProxy } from './windows-system-proxy.js';
 
 function parseEnvLine(line: string): [string, string] | null {
   const trimmed = line.trim();
@@ -9,10 +10,7 @@ function parseEnvLine(line: string): [string, string] | null {
   if (!match) return null;
   const key = match[1]!;
   let value = match[2] ?? '';
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
     value = value.slice(1, -1);
   }
   return [key, value];
@@ -31,3 +29,5 @@ export function loadProjectEnv(start = process.cwd()): void {
 }
 
 loadProjectEnv();
+// .env 之后注入：显式代理配置（.env / 外部环境）优先于系统代理自动检测
+injectWindowsSystemProxy();
