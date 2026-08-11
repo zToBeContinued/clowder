@@ -7,6 +7,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { dirname, isAbsolute } from 'node:path';
 import type { Span } from '@opentelemetry/api';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
+import { CliRawArchive } from '../domains/cats/services/session/CliRawArchive.js';
 import { createModuleLogger } from '../infrastructure/logger.js';
 import { registerLivenessProbe, unregisterLivenessProbe } from '../infrastructure/telemetry/instruments.js';
 import { emitOtelLog } from '../infrastructure/telemetry/otel-logger.js';
@@ -38,6 +39,21 @@ export const KILL_GRACE_MS = 3_000;
 
 /** Grace period after semantic completion before force-killing a lingering process */
 export const SEMANTIC_COMPLETION_GRACE_MS = 5_000;
+
+/**
+ * 全 provider 通用的原始事件归档（诊断首段重发 / exit 1 / 事件序列反常）。
+ *
+ * provider 在自己**现有**的事件循环体里调用 `archiveRawEvent(invocationId, event)`
+ * 即可归档——fire-and-forget，不 await、不改迭代结构。刻意不做成「包一层
+ * async generator」的形式：那会在 spawnCli 与 provider 之间插入一次微任务
+ * 调度，打乱 claude steer 等对 stdin/init 精确时序敏感的 provider。
+ * codex 有自己的 sanitized 归档，不用本 helper。
+ */
+const sharedCliRawArchive = new CliRawArchive();
+
+export function archiveRawEvent(invocationId: string | undefined, event: unknown): void {
+  if (invocationId) void sharedCliRawArchive.append(invocationId, event).catch(() => {});
+}
 
 /**
  * Options for spawnCli (dependency injection for testing)
