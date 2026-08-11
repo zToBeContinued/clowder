@@ -2181,17 +2181,51 @@ export function useAgentMessages() {
     addMessage,
   ]);
 
-  /** Clear the timeout (called on done with isFinal) */
-  const clearDoneTimeout = useCallback((threadId?: string) => {
-    if (threadId && timeoutThreadRef.current && timeoutThreadRef.current !== threadId) {
-      return;
-    }
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-      timeoutThreadRef.current = null;
-    }
+  /**
+   * 猫状态回落：正常完成后让 done ✓ 短暂停留，再自动清回闲置。
+   * 此前 isFinal 完成时只取消 5 分钟 watchdog（而 watchdog 触发是唯一会
+   * clearCatStatuses 的路径），导致猫做完后永远停在 done，直到下一轮
+   * 对话才被重置——工作/闲置状态从不「及时切换」。
+   */
+  const IDLE_FALLBACK_MS = 30_000;
+  const idleFallbackTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const scheduleIdleFallback = useCallback((threadId: string) => {
+    const timers = idleFallbackTimersRef.current;
+    const existing = timers.get(threadId);
+    if (existing) clearTimeout(existing);
+    timers.set(
+      threadId,
+      setTimeout(() => {
+        timers.delete(threadId);
+        const store = useChatStore.getState();
+        const ts = store.getThreadState(threadId);
+        // 保护：期间若有新一轮/A2A 接力在跑（streaming/pending/spawning），
+        // 绝不误清正在进行的状态；等那一轮自己的 done 再重新调度回落。
+        const hasActive = Object.values(ts.catStatuses).some(
+          (s) => s === 'streaming' || s === 'pending' || s === 'spawning',
+        );
+        if (!hasActive) store.clearThreadCatStatuses(threadId);
+      }, IDLE_FALLBACK_MS),
+    );
   }, []);
+
+  /** Clear the timeout (called on done with isFinal) */
+  const clearDoneTimeout = useCallback(
+    (threadId?: string) => {
+      if (threadId && timeoutThreadRef.current && timeoutThreadRef.current !== threadId) {
+        return;
+      }
+      const fallbackThreadId = threadId ?? timeoutThreadRef.current ?? useChatStore.getState().currentThreadId;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+        timeoutThreadRef.current = null;
+      }
+      if (fallbackThreadId) scheduleIdleFallback(fallbackThreadId);
+    },
+    [scheduleIdleFallback],
+  );
 
   useEffect(
     () => () => {
@@ -2204,6 +2238,10 @@ export function useAgentMessages() {
         clearTimeout(timeout);
       }
       pendingCallbackFallbackTimeoutsRef.current.clear();
+      for (const timer of idleFallbackTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      idleFallbackTimersRef.current.clear();
     },
     [],
   );

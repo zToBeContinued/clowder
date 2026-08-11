@@ -626,7 +626,12 @@ export function ChatMessage({
         {catStyle && !isAssistantContinuation && (
           <div className="mb-1 flex flex-col gap-1 min-w-0 [line-height:var(--clowder-leading-tight)]">
             <div className="flex items-center gap-2 min-w-0">
-              <span className="[font-size:var(--clowder-type-sender)] font-semibold text-[var(--clowder-sender-agent)]">
+              {/* 用猫自己的主题色渲染名字（与头像/成员点同源），多猫协作时一眼可辨谁在发言。
+                  catStyle.color 此前被计算但从未使用，名字全部同色。 */}
+              <span
+                className="[font-size:var(--clowder-type-sender)] font-semibold text-[var(--clowder-sender-agent)]"
+                style={catStyle.color ? { color: catStyle.color } : undefined}
+              >
                 {catStyle.label}
               </span>
               <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">
@@ -710,7 +715,12 @@ export function ChatMessage({
               searchHighlight={searchHighlight}
             />
           ) : message.isStreaming ? (
-            <span className="[font-size:var(--clowder-type-meta)] text-cafe-secondary">Thinking...</span>
+            <span className="inline-flex items-center gap-1.5 [font-size:var(--clowder-type-meta)] text-cafe-secondary">
+              <span className="animate-pulse" aria-hidden>
+                ᓚᘏᗢ
+              </span>
+              <span className="animate-pulse">Thinking...</span>
+            </span>
           ) : null}
           {message.thinking && (
             <ThinkingContent
