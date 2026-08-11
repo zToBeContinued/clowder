@@ -204,6 +204,26 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(result, []);
   });
 
+  it('【To】行的方括号签名触发路由（quant 协议消息头，无 @）', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '【From】[kimi-x]（总负责人） 【To】[opus]·[codex] 【Re】abc123 新 P1 裁定\n\n一、P1 成立。';
+    const result = parseA2AMentions(text, 'kimi');
+    assert.deepEqual(result.sort(), ['codex', 'opus']);
+  });
+
+  it('【To】行解析不误伤 From/Re/正文里的 [签名]', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const text = '【From】[opus] 复盘\n\n正文里提到 [codex] 上轮的意见,不该触发。';
+    const result = parseA2AMentions(text, 'kimi');
+    assert.deepEqual(result, []);
+  });
+
+  it('To: 前缀（ASCII 形式）同样解析', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = parseA2AMentions('To: opus 请接手返修', 'codex');
+    assert.deepEqual(result, ['opus']);
+  });
+
   it('ignores @mention inside fenced code blocks', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const text = '看看这段代码：\n```\n@缅因猫 请review\n```\n没问题';

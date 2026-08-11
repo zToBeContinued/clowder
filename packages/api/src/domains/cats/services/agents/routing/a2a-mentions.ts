@@ -8,9 +8,12 @@
  *    要「提及某猫而不触发它」，用不带 @ 的纯文本名字
  * 3. 长匹配优先 + token boundary，避免 `@opus-45` 误命中 `@opus`；
  *    @ 紧跟在 handle 字符后（email/路径，如 user@host）不路由
- * 4. 过滤自调用
- * 5. F27: 返回所有匹配的猫 (上限 MAX_A2A_MENTION_TARGETS)
- * 6. 只在猫回复完整结束后解析 (由调用方保证)
+ * 4. 【To】行解析：协作文书消息头（【From】/【To】/【Re】）的 To 行是明确
+ *    路由意图，`【To】[gpt-5.6-sol-max]·[opus-5-max]` 方括号签名（无 @）
+ *    同样触发；From/Re/正文里的 [签名] 不触发
+ * 5. 过滤自调用
+ * 6. F27: 返回所有匹配的猫 (上限 MAX_A2A_MENTION_TARGETS)
+ * 7. 只在猫回复完整结束后解析 (由调用方保证)
  */
 
 import type { CatId, CatRoutingError } from '@cat-cafe/shared';
@@ -116,6 +119,19 @@ export function analyzeA2AMentions(
   const routing_warnings: CatRoutingError[] = [];
   const lower = stripped.toLowerCase();
 
+  const admit = (catId: CatId): void => {
+    if (seen.has(catId)) return;
+    // F182 KD-10: resolver check at match-time (not at pattern-build time)
+    const resolved = resolveCatTarget(catId);
+    if ('error' in resolved) {
+      seen.add(catId);
+      routing_warnings.push(resolved.error);
+      return;
+    }
+    seen.add(catId);
+    found.push(catId);
+  };
+
   for (let at = lower.indexOf('@'); at >= 0 && found.length < maxTargets; at = lower.indexOf('@', at + 1)) {
     // 左边界：@ 紧跟在 handle 字符后视为 email/路径的一部分（user@host），不路由
     if (at > 0 && HANDLE_CONTINUATION_RE.test(lower[at - 1]!)) continue;
@@ -126,18 +142,37 @@ export function analyzeA2AMentions(
       const charAfter = segment[entry.pattern.length];
       const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
       if (!isBoundary) continue;
-      // F182 KD-10: resolver check at match-time (not at pattern-build time)
-      const resolved = resolveCatTarget(entry.catId);
-      if ('error' in resolved) {
-        if (!seen.has(entry.catId)) {
-          seen.add(entry.catId);
-          routing_warnings.push(resolved.error);
-        }
-      } else if (!seen.has(entry.catId)) {
-        seen.add(entry.catId);
-        found.push(entry.catId);
-      }
+      admit(entry.catId);
       break; // longest-match-first: lock one winner at this @
+    }
+  }
+
+  // 3b. 【To】段解析——协作文书的消息头（【From】…【To】…【Re】… 常在同一行）里，
+  //     To 段是明确的路由意图：`【To】[gpt-5.6-sol-max]·[opus-5-max]` 这类
+  //     方括号签名（不带 @）也应触发接力，猫按协议写文书即自动路由。
+  //     捕获到行尾或下一个全角标记（【Re】等）为止；From/Re/正文里的 [签名] 不受影响。
+  const TO_LINE_RE = /(?:【to】|\[to\]|\bto[:：])\s*([^\n【]*)/gi;
+  for (const lineMatch of lower.matchAll(TO_LINE_RE)) {
+    if (found.length >= maxTargets) break;
+    const line = lineMatch[1] ?? '';
+    for (const entry of entries) {
+      if (found.length >= maxTargets) break;
+      const bare = entry.pattern.startsWith('@') ? entry.pattern.slice(1) : entry.pattern;
+      if (!bare) continue;
+      let from = 0;
+      while (from < line.length) {
+        const idx = line.indexOf(bare, from);
+        if (idx < 0) break;
+        from = idx + 1;
+        const prev = idx > 0 ? line[idx - 1]! : '';
+        const next = line[idx + bare.length];
+        const leftOk = !prev || !HANDLE_CONTINUATION_RE.test(prev);
+        const rightOk = !next || TOKEN_BOUNDARY_RE.test(next) || !HANDLE_CONTINUATION_RE.test(next);
+        if (leftOk && rightOk) {
+          admit(entry.catId);
+          break;
+        }
+      }
     }
   }
 
