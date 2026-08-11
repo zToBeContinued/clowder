@@ -20,6 +20,7 @@ export function HubGovernanceTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [ejecting, setEjecting] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
     setLoading(true);
@@ -104,6 +105,39 @@ export function HubGovernanceTab() {
     [fetchHealth],
   );
 
+  const handleEject = useCallback(
+    async (projectPath: string) => {
+      if (
+        !window.confirm(
+          `确认从「${projectPath}」移除 Clowder 治理痕迹？\n\n` +
+            '将删除：CLAUDE.md/AGENTS.md 等文件中的治理块、cat-cafe skill/hooks 软链、.cat-cafe 状态与注册表记录。\n' +
+            '你自己的文件和非 cat-cafe 的 skill 不受影响。',
+        )
+      ) {
+        return;
+      }
+      setEjecting(projectPath);
+      try {
+        const res = await apiFetch('/api/governance/eject', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectPath }),
+        });
+        if (res.ok) {
+          await fetchHealth();
+        } else {
+          const data = (await res.json()) as { error?: string };
+          setError(data.error ?? '清理失败');
+        }
+      } catch {
+        setError('网络错误');
+      } finally {
+        setEjecting(null);
+      }
+    },
+    [fetchHealth],
+  );
+
   if (loading) {
     return <p className="text-sm text-cafe-muted">加载治理状态中...</p>;
   }
@@ -166,16 +200,29 @@ export function HubGovernanceTab() {
                   <td className="px-3 py-2 text-xs text-cafe-secondary">{p.packVersion ?? '—'}</td>
                   <td className="px-3 py-2 text-xs text-cafe-secondary">{syncDate}</td>
                   <td className="px-3 py-2">
-                    {(p.status === 'stale' || p.status === 'never-synced') && (
-                      <button
-                        type="button"
-                        onClick={() => handleConfirm(p.projectPath)}
-                        disabled={confirming === p.projectPath}
-                        className="text-xs px-2 py-1 rounded bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] hover:opacity-90 disabled:opacity-50"
-                      >
-                        {confirming === p.projectPath ? '同步中...' : '立即同步'}
-                      </button>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {(p.status === 'stale' || p.status === 'never-synced') && (
+                        <button
+                          type="button"
+                          onClick={() => handleConfirm(p.projectPath)}
+                          disabled={confirming === p.projectPath}
+                          className="text-xs px-2 py-1 rounded bg-[var(--color-cafe-accent)] text-[var(--cafe-surface)] hover:opacity-90 disabled:opacity-50"
+                        >
+                          {confirming === p.projectPath ? '同步中...' : '立即同步'}
+                        </button>
+                      )}
+                      {p.status !== 'never-synced' && (
+                        <button
+                          type="button"
+                          onClick={() => handleEject(p.projectPath)}
+                          disabled={ejecting === p.projectPath}
+                          className="text-xs px-2 py-1 rounded bg-conn-red-bg text-conn-red-text hover:opacity-90 disabled:opacity-50"
+                          title="移除本项目的所有 Clowder 治理痕迹（保留你自己的文件）"
+                        >
+                          {ejecting === p.projectPath ? '清理中...' : '移除治理'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

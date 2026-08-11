@@ -75,6 +75,15 @@ export class GovernanceRegistry {
     return data.entries.find((e) => pathsEqual(e.projectPath, projectPath));
   }
 
+  /** Remove a project's registry entry (governance eject). Returns true if an entry was removed. */
+  async remove(projectPath: string): Promise<boolean> {
+    const data = await this.read();
+    const remaining = data.entries.filter((e) => !pathsEqual(e.projectPath, projectPath));
+    if (remaining.length === data.entries.length) return false;
+    await this.write({ entries: remaining });
+    return true;
+  }
+
   async listAll(): Promise<readonly RegistryEntry[]> {
     const data = await this.read();
     return data.entries;

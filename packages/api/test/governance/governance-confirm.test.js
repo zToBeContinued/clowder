@@ -22,7 +22,7 @@ describe('governance confirm flow', () => {
     await rm(externalProject, { recursive: true, force: true });
   });
 
-  it('confirm triggers bootstrap and registers project', async () => {
+  it('default confirm registers project without touching the project tree', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
     const report = await service.bootstrap(externalProject, { dryRun: false });
 
@@ -35,8 +35,16 @@ describe('governance confirm flow', () => {
     assert.ok(entry);
     assert.equal(entry.packVersion, GOVERNANCE_PACK_VERSION);
     assert.equal(entry.confirmedByUser, true);
+    assert.equal(entry.writeMode, 'state-only');
 
-    // Verify files
+    // No instruction files written by default
+    await assert.rejects(readFile(join(externalProject, 'CLAUDE.md'), 'utf-8'), { code: 'ENOENT' });
+  });
+
+  it('confirm with writeFiles opt-in (writeMode full) writes managed blocks', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    await service.bootstrap(externalProject, { dryRun: false, writeMode: 'full' });
+
     const claudeMd = await readFile(join(externalProject, 'CLAUDE.md'), 'utf-8');
     assert.ok(claudeMd.includes(MANAGED_BLOCK_START));
   });

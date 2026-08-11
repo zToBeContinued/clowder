@@ -15,7 +15,7 @@ describe('governance-preflight', () => {
   beforeEach(async () => {
     catCafeRoot = await mkdtemp(join(tmpdir(), 'cat-cafe-root-'));
     externalProject = await mkdtemp(join(tmpdir(), 'external-project-'));
-    // ADR-025: bootstrap needs at least one skill to create per-skill symlinks
+    // Some tests use full write mode, which needs at least one skill available
     await mkdir(join(catCafeRoot, 'cat-cafe-skills', 'tdd'), { recursive: true });
     await writeFile(join(catCafeRoot, 'cat-cafe-skills', 'tdd', 'SKILL.md'), '# TDD');
   });
@@ -53,59 +53,37 @@ describe('governance-preflight', () => {
     assert.ok(result.reason?.includes('confirmation'));
   });
 
-  it('passes for bootstrapped and confirmed project', async () => {
+  it('passes for state-only bootstrapped project with zero files on disk', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
-    await service.bootstrap(externalProject, { dryRun: false });
+    await service.bootstrap(externalProject, { dryRun: false }); // default: state-only
 
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
-    assert.equal(result.ready, true);
+    assert.equal(result.ready, true, 'registry confirmation alone must be sufficient');
   });
 
-  it('fails when registry confirmed but CLAUDE.md deleted', async () => {
+  it('passes for full-mode project even after instruction files were hand-deleted', async () => {
     const service = new GovernanceBootstrapService(catCafeRoot);
-    await service.bootstrap(externalProject, { dryRun: false });
+    await service.bootstrap(externalProject, { dryRun: false, writeMode: 'full' });
     await rm(join(externalProject, 'CLAUDE.md'));
-
-    const result = await checkGovernancePreflight(externalProject, catCafeRoot);
-    assert.equal(result.ready, false);
-    assert.ok(result.reason?.includes('CLAUDE.md'));
-  });
-
-  it('fails when registry confirmed but skills symlinks removed', async () => {
-    const service = new GovernanceBootstrapService(catCafeRoot);
-    await service.bootstrap(externalProject, { dryRun: false });
     for (const dir of ['.claude/skills', '.codex/skills', '.gemini/skills', '.kimi/skills']) {
       await rm(join(externalProject, dir), { recursive: true, force: true }).catch(() => {});
     }
 
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
-    assert.equal(result.ready, false);
-    assert.ok(result.reason?.includes('skills'));
+    assert.equal(result.ready, true, 'missing disk footprint must not block dispatch');
+  });
+
+  it('passes regardless of cat provider (no per-provider file requirements)', async () => {
+    const service = new GovernanceBootstrapService(catCafeRoot);
+    await service.bootstrap(externalProject, { dryRun: false });
+
+    const result = await checkGovernancePreflight(externalProject, catCafeRoot, 'kimi');
+    assert.equal(result.ready, true);
   });
 
   it('provides actionable bootstrapCommand for new projects', async () => {
     const result = await checkGovernancePreflight(externalProject, catCafeRoot);
     assert.equal(result.ready, false);
     assert.ok(result.bootstrapCommand, 'Should include a bootstrap command hint');
-  });
-
-  it('uses KIMI.md and .kimi/skills when preflighting a kimi project', async () => {
-    const service = new GovernanceBootstrapService(catCafeRoot);
-    await service.bootstrap(externalProject, { dryRun: false });
-    await rm(join(externalProject, 'KIMI.md'));
-
-    const result = await checkGovernancePreflight(externalProject, catCafeRoot, 'kimi');
-    assert.equal(result.ready, false);
-    assert.ok(result.reason?.includes('KIMI.md'));
-  });
-
-  it('requires .kimi/skills when preflighting a kimi project', async () => {
-    const service = new GovernanceBootstrapService(catCafeRoot);
-    await service.bootstrap(externalProject, { dryRun: false });
-    await rm(join(externalProject, '.kimi/skills'), { recursive: true, force: true });
-
-    const result = await checkGovernancePreflight(externalProject, catCafeRoot, 'kimi');
-    assert.equal(result.ready, false);
-    assert.ok(result.reason?.includes('.kimi/skills'));
   });
 });

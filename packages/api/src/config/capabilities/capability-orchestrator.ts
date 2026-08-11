@@ -1090,8 +1090,12 @@ export async function tryGovernanceBootstrap(
   }
 
   if (existing.confirmedByUser) {
-    // Already confirmed — auto-sync (idempotent, no skills by default — mount on demand)
-    await service.bootstrap(projectRoot, { dryRun: false, skillTier: 'none' });
+    // Already confirmed — refresh registry state only. Never (re)write instruction
+    // files/skills into the project tree from this auto path: doing so was the
+    // source of recurring footprint (deleted files kept coming back on every
+    // capability load). On-disk governance is an explicit opt-in via
+    // POST /api/governance/confirm { writeFiles: true }.
+    await service.bootstrap(projectRoot, { dryRun: false, skillTier: 'none', writeMode: 'state-only' });
     return { bootstrapped: true, needsConfirmation: false };
   }
 

@@ -171,6 +171,28 @@ const HANDOFF_TEMPLATE = `# 当前交接状态
 （记录历次交接，附日期。只追加。）
 `;
 
+/**
+ * Raw templates with `{{DATE}}` placeholders left in place.
+ * Used by governance-eject to recognize untouched skeleton files
+ * (same content modulo the creation date) that are safe to remove.
+ */
+export function getRawMethodologyTemplates(): MethodologyTemplate[] {
+  return [
+    { relativePath: 'BACKLOG.md', content: BACKLOG_TEMPLATE },
+    { relativePath: 'docs/SOP.md', content: SOP_TEMPLATE },
+    { relativePath: 'docs/features/.gitkeep', content: '' },
+    { relativePath: 'docs/decisions/.gitkeep', content: '' },
+    { relativePath: 'docs/discussions/.gitkeep', content: '' },
+    { relativePath: 'docs/features/TEMPLATE.md', content: FEATURE_TEMPLATE },
+    { relativePath: '.cat-cafe/memory/_TEMPLATE.md', content: AGENT_MEMORY_TEMPLATE },
+    { relativePath: '.cat-cafe/LESSONS.md', content: LESSONS_TEMPLATE },
+    { relativePath: '.cat-cafe/projects/_TEMPLATE-progress.md', content: PROJECT_PROGRESS_TEMPLATE },
+    { relativePath: '.cat-cafe/context-index.md', content: CONTEXT_INDEX_TEMPLATE },
+    { relativePath: '.cat-cafe/handoff/current.md', content: HANDOFF_TEMPLATE },
+    { relativePath: '.cat-cafe/handoff/.gitkeep', content: '' },
+  ];
+}
+
 export function getMethodologyTemplates(): MethodologyTemplate[] {
   const date = new Date().toISOString().slice(0, 10);
   const fill = (tpl: string) => tpl.replace(/\{\{DATE\}\}/g, date);

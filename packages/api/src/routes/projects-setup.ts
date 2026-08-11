@@ -264,8 +264,12 @@ export const projectSetupRoute: FastifyPluginAsync<ProjectSetupRouteOptions> = a
       const service = new GovernanceBootstrapService(catCafeRoot);
       const report = await service.bootstrap(validated, {
         dryRun: false,
-        activeProviders: body?.activeProviders as import('../config/governance/governance-pack.js').Provider[] | undefined,
+        activeProviders: body?.activeProviders as
+          | import('../config/governance/governance-pack.js').Provider[]
+          | undefined,
         skillTier: body?.skillTier ?? 'none',
+        // Default is a clean project tree; on-disk governance requires explicit opt-in.
+        writeMode: (body as { writeFiles?: boolean } | undefined)?.writeFiles === true ? 'full' : 'state-only',
       });
 
       // ── Optional project fact-source scaffold (lazy generation) ──

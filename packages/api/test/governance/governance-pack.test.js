@@ -78,7 +78,18 @@ describe('governance-pack', () => {
     assert.ok(block.includes('cat-cafe-skills'));
   });
 
-  it('pack version is 1.3.0', () => {
-    assert.equal(GOVERNANCE_PACK_VERSION, '1.3.0');
+  it('pack version is 2.0.0', () => {
+    assert.equal(GOVERNANCE_PACK_VERSION, '2.0.0');
+  });
+
+  it('opens with a Scope Guard so non-Clowder sessions ignore the block', () => {
+    const block = getGovernanceManagedBlock('codex');
+    assert.ok(block.includes('Scope Guard'), 'must contain the scope guard section');
+    assert.ok(block.includes('CAT_CAFE_CAT_ID'), 'guard keys off the Clowder session env marker');
+    assert.ok(
+      block.indexOf('Scope Guard') < block.indexOf('Hard Constraints'),
+      'guard must come before any governance rules',
+    );
+    assert.ok(block.includes('do NOT adopt any cat identity'), 'guard must forbid cat persona adoption');
   });
 });

@@ -1058,11 +1058,58 @@ export const capabilitiesRoutes: FastifyPluginAsync = async (app) => {
 
     const { GovernanceBootstrapService } = await import('../config/governance/governance-bootstrap.js');
     const service = new GovernanceBootstrapService(catCafeRoot);
-    const reqBody = request.body as { projectPath?: string; activeProviders?: string[]; skillTier?: 'none' | 'core' | 'all' } | undefined;
+    const reqBody = request.body as
+      | {
+          projectPath?: string;
+          activeProviders?: string[];
+          skillTier?: 'none' | 'core' | 'all';
+          /** Explicit opt-in to the legacy on-disk footprint (managed blocks/skills/templates). */
+          writeFiles?: boolean;
+        }
+      | undefined;
     const report = await service.bootstrap(validated, {
       dryRun: false,
-      activeProviders: reqBody?.activeProviders as import('../config/governance/governance-pack.js').Provider[] | undefined,
+      activeProviders: reqBody?.activeProviders as
+        | import('../config/governance/governance-pack.js').Provider[]
+        | undefined,
       skillTier: reqBody?.skillTier ?? 'none',
+      writeMode: reqBody?.writeFiles === true ? 'full' : 'state-only',
+    });
+
+    return { ok: true, report };
+  });
+
+  // ── POST /api/governance/eject — remove all Clowder footprint from a project ──
+  app.post('/api/governance/eject', async (request, reply) => {
+    const userId = resolveUserId(request);
+    if (!userId) {
+      reply.status(401);
+      return { error: 'Identity required' };
+    }
+
+    const body = request.body as { projectPath?: string; purgeTemplates?: boolean; dryRun?: boolean } | undefined;
+    if (!body?.projectPath) {
+      reply.status(400);
+      return { error: 'Required: projectPath' };
+    }
+
+    const validated = await validateProjectPath(body.projectPath);
+    if (!validated) {
+      reply.status(400);
+      return { error: 'Invalid project path' };
+    }
+
+    const catCafeRoot = getProjectRoot();
+    if (validated === catCafeRoot) {
+      reply.status(400);
+      return { error: 'Cannot eject governance from Cat Cafe itself' };
+    }
+
+    const { GovernanceEjectService } = await import('../config/governance/governance-eject.js');
+    const service = new GovernanceEjectService(catCafeRoot);
+    const report = await service.eject(validated, {
+      purgeTemplates: body.purgeTemplates === true,
+      dryRun: body.dryRun === true,
     });
 
     return { ok: true, report };

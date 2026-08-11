@@ -171,6 +171,14 @@ export interface GovernancePackMeta {
   readonly checksum: string;
   readonly syncedAt: number;
   readonly confirmedByUser: boolean;
+  /**
+   * How governance was written to the project.
+   * - 'state-only' (default since pack 2.0.0): only `.cat-cafe/` state; no
+   *   instruction files, skills or hooks in the project tree.
+   * - 'full': legacy on-disk footprint (managed blocks + optional symlinks).
+   * Absent on entries created before pack 2.0.0 (treat as 'full').
+   */
+  readonly writeMode?: 'state-only' | 'full';
 }
 
 /** F070: Per-project governance health */

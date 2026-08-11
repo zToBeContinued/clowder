@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 
 import { tryGovernanceBootstrap } from '../../dist/config/capabilities/capability-orchestrator.js';
-import { GOVERNANCE_PACK_VERSION, MANAGED_BLOCK_START } from '../../dist/config/governance/governance-pack.js';
+import { GOVERNANCE_PACK_VERSION } from '../../dist/config/governance/governance-pack.js';
 import { GovernanceRegistry } from '../../dist/config/governance/governance-registry.js';
 
 describe('governance integration with capability-orchestrator', () => {
@@ -29,7 +29,7 @@ describe('governance integration with capability-orchestrator', () => {
     assert.equal(result.needsConfirmation, true);
   });
 
-  it('auto-bootstraps confirmed project', async () => {
+  it('auto-syncs confirmed project WITHOUT writing files (state-only)', async () => {
     // Pre-register as confirmed
     const registry = new GovernanceRegistry(catCafeRoot);
     await registry.register(externalProject, {
@@ -43,9 +43,32 @@ describe('governance integration with capability-orchestrator', () => {
     assert.equal(result.bootstrapped, true);
     assert.equal(result.needsConfirmation, false);
 
-    // Verify files were actually written
-    const claudeMd = await readFile(join(externalProject, 'CLAUDE.md'), 'utf-8');
-    assert.ok(claudeMd.includes(MANAGED_BLOCK_START));
+    // The auto path must NEVER write instruction files into the project.
+    // (This was the source of recurring footprint: deleted files kept
+    // coming back on every capability load.)
+    await assert.rejects(readFile(join(externalProject, 'CLAUDE.md'), 'utf-8'), { code: 'ENOENT' });
+
+    // Registry entry refreshed to current pack + state-only
+    const entry = await registry.get(externalProject);
+    assert.equal(entry.writeMode, 'state-only');
+    assert.equal(entry.packVersion, GOVERNANCE_PACK_VERSION);
+  });
+
+  it('auto-sync never resurrects files a user deleted from a legacy full project', async () => {
+    // Legacy entry (no writeMode) — user has since deleted all managed files
+    const registry = new GovernanceRegistry(catCafeRoot);
+    await registry.register(externalProject, {
+      packVersion: '1.3.0',
+      checksum: 'legacy',
+      syncedAt: Date.now(),
+      confirmedByUser: true,
+    });
+
+    await tryGovernanceBootstrap(externalProject, catCafeRoot);
+
+    for (const f of ['CLAUDE.md', 'AGENTS.md', 'GEMINI.md', 'KIMI.md']) {
+      await assert.rejects(readFile(join(externalProject, f), 'utf-8'), { code: 'ENOENT' }, `${f} must not come back`);
+    }
   });
 
   it('does not auto-bootstrap unconfirmed project', async () => {

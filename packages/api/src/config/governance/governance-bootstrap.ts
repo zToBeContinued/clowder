@@ -25,7 +25,7 @@ import { computeSourceManifestHash, writeSkillsState } from './skills-state.js';
 const IS_WIN32 = process.platform === 'win32';
 
 /** Provider instruction file mapping */
-const PROVIDER_FILES: Record<Provider, string> = {
+export const PROVIDER_FILES: Record<Provider, string> = {
   claude: 'CLAUDE.md',
   codex: 'AGENTS.md',
   gemini: 'GEMINI.md',
@@ -33,7 +33,7 @@ const PROVIDER_FILES: Record<Provider, string> = {
 };
 
 /** Provider skills directory mapping */
-const PROVIDER_SKILLS_DIRS: Record<Provider, string> = {
+export const PROVIDER_SKILLS_DIRS: Record<Provider, string> = {
   claude: '.claude/skills',
   codex: '.codex/skills',
   gemini: '.gemini/skills',
@@ -41,7 +41,7 @@ const PROVIDER_SKILLS_DIRS: Record<Provider, string> = {
 };
 
 /** Provider hooks directory mapping (F070 Phase 2) */
-const PROVIDER_HOOKS_DIRS: Record<Provider, string> = {
+export const PROVIDER_HOOKS_DIRS: Record<Provider, string> = {
   claude: '.claude/hooks',
   codex: '.codex/hooks',
   gemini: '.gemini/hooks',
@@ -67,11 +67,15 @@ export const CORE_SKILLS: readonly string[] = [
   'knowledge-engineering',
 ] as const;
 
+/** How much governance footprint gets written into the target project tree. */
+export type GovernanceWriteMode = 'state-only' | 'full';
+
 export interface BootstrapOptions {
   dryRun: boolean;
   /**
    * Only generate files/symlinks for these providers.
    * If omitted or empty, defaults to ALL providers (legacy behavior).
+   * Only relevant when `writeMode` is 'full'.
    */
   activeProviders?: Provider[];
   /**
@@ -79,9 +83,19 @@ export interface BootstrapOptions {
    * - 'none': do NOT sync any skills (default — on-demand mount via API)
    * - 'core': only sync CORE_SKILLS
    * - 'all': sync all discovered skills (legacy behavior)
-   * Defaults to 'none'.
+   * Defaults to 'none'. Only relevant when `writeMode` is 'full'.
    */
   skillTier?: 'none' | 'core' | 'all';
+  /**
+   * - 'state-only' (default): write ONLY `.cat-cafe/` state + registry entry.
+   *   No CLAUDE.md/AGENTS.md/GEMINI.md/KIMI.md managed blocks, no skill/hook
+   *   symlinks, no methodology skeleton. Cats receive governance and skills at
+   *   runtime (system prompt + MCP tools); the project tree stays clean and
+   *   non-Clowder sessions in the same project are unaffected.
+   * - 'full': legacy on-disk footprint (managed blocks with Scope Guard,
+   *   optional skills/hooks symlinks, methodology skeleton). Explicit opt-in.
+   */
+  writeMode?: GovernanceWriteMode;
 }
 
 export class GovernanceBootstrapService {
@@ -96,9 +110,24 @@ export class GovernanceBootstrapService {
   }
 
   async bootstrap(targetProject: string, opts: BootstrapOptions): Promise<BootstrapReport> {
-    const actions: BootstrapAction[] = [];
     const packVersion = GOVERNANCE_PACK_VERSION;
     const checksum = computePackChecksum();
+    const writeMode: GovernanceWriteMode = opts.writeMode ?? 'state-only';
+
+    if (writeMode === 'state-only') {
+      return this.bootstrapStateOnly(targetProject, opts, packVersion, checksum);
+    }
+    return this.bootstrapFull(targetProject, opts, packVersion, checksum);
+  }
+
+  /** writeMode 'full' (explicit opt-in): legacy on-disk footprint. */
+  private async bootstrapFull(
+    targetProject: string,
+    opts: BootstrapOptions,
+    packVersion: string,
+    checksum: string,
+  ): Promise<BootstrapReport> {
+    const actions: BootstrapAction[] = [];
 
     // Determine active providers — default to all for backward compatibility
     const activeProviders: Provider[] =
@@ -116,8 +145,7 @@ export class GovernanceBootstrapService {
     // 2. Per-skill symlinks (only for active providers, filtered by tier)
     const skillTier = opts.skillTier ?? 'none';
     const allSkillNames = skillTier === 'none' ? [] : await this.discoverSkillNames();
-    const skillNames =
-      skillTier === 'core' ? allSkillNames.filter((n) => CORE_SKILLS.includes(n)) : allSkillNames;
+    const skillNames = skillTier === 'core' ? allSkillNames.filter((n) => CORE_SKILLS.includes(n)) : allSkillNames;
 
     for (const [provider, skillsDir] of Object.entries(PROVIDER_SKILLS_DIRS) as [Provider, string][]) {
       if (!activeProviders.includes(provider)) continue;
@@ -167,10 +195,55 @@ export class GovernanceBootstrapService {
         checksum,
         syncedAt: Date.now(),
         confirmedByUser: true,
+        writeMode: 'full',
       });
     }
 
     return report;
+  }
+
+  /**
+   * ZERO project-tree footprint: registry entry (in the Cat Cafe root) only.
+   * No instruction files, no symlinks, no templates, not even a report file
+   * inside the target project. If the registry is already up to date, skip
+   * the write entirely to avoid churn (tryGovernanceBootstrap re-runs this
+   * path on every capability load).
+   */
+  private async bootstrapStateOnly(
+    targetProject: string,
+    opts: BootstrapOptions,
+    packVersion: string,
+    checksum: string,
+  ): Promise<BootstrapReport> {
+    const existing = await this.registry.get(targetProject);
+    const upToDate =
+      existing?.writeMode === 'state-only' && existing.packVersion === packVersion && existing.checksum === checksum;
+
+    if (!opts.dryRun && !upToDate) {
+      await this.registry.register(targetProject, {
+        packVersion,
+        checksum,
+        syncedAt: Date.now(),
+        confirmedByUser: true,
+        writeMode: 'state-only',
+      });
+    }
+
+    return {
+      projectPath: targetProject,
+      timestamp: Date.now(),
+      packVersion,
+      actions: [
+        {
+          file: '(project tree)',
+          action: 'skipped',
+          reason: upToDate
+            ? 'state-only governance already up to date'
+            : 'write mode state-only — nothing written into the project tree',
+        },
+      ],
+      dryRun: opts.dryRun,
+    };
   }
 
   private async writeManagedBlock(
