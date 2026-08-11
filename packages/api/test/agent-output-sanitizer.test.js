@@ -327,3 +327,35 @@ describe('progress channel sanitizer (轻量版，不做叙事过滤)', () => {
     assert.equal(sanitize(''), '');
   });
 });
+
+describe('开头整段逐字重复去重（cursor 重发现场）', () => {
+  async function getSanitizer() {
+    const mod = await import('../dist/domains/cats/services/agents/routing/agent-output-sanitizer.js');
+    return mod.sanitizeAgentVisibleOutput;
+  }
+
+  test('A+A+后续 → A+后续（sol 现场：整段重复后接 @mention 与正文）', async () => {
+    const sanitize = await getSanitizer();
+    const A = '双变异红窗已稳定复现：配置载体逃逸未命中 CFG-MISSING，其余 47 个验收节点通过。';
+    const out = sanitize(`${A}${A}@cursor-fable-5-thinking-max`);
+    assert.equal(out, `${A}@cursor-fable-5-thinking-max`);
+  });
+
+  test('A+A → A（sol #238 现场：整条就是一段重复两遍）', async () => {
+    const sanitize = await getSanitizer();
+    const A = '候选已让既有 symlink 双红窗转绿，但相邻边界扫描发现新的稳定错误码缺口。';
+    assert.equal(sanitize(`${A}${A}`), A);
+  });
+
+  test('合法内容不误伤：开头段只出现一次时原样保留', async () => {
+    const sanitize = await getSanitizer();
+    const text = '结论：方案可行。\n\n下一步：补测试。';
+    assert.equal(sanitize(text), text);
+  });
+
+  test('合法内容不误伤：开头两句不同不去重', async () => {
+    const sanitize = await getSanitizer();
+    const text = '第一点是这样。第二点是那样。第三点收尾。';
+    assert.equal(sanitize(text), text);
+  });
+});

@@ -189,11 +189,37 @@ function isUserFacingLine(line: string): boolean {
  * This runs in the write pipeline, not in prompts, so it removes leaked runtime
  * protocol/log artifacts without changing how the agent reasons or chooses tools.
  */
+/**
+ * 消除「开头整段逐字相邻重复」。
+ *
+ * 现场（2026-08-11，Redis 铁证）：cursor 猫的多条消息落库内容形如 `A + A + 后续`，
+ * 开头一整段一字不差连着出现两遍（provider 收到的原始流里就重发了开头段，被忠实透传）。
+ * 一整段（≥10 字、以句末标点/换行结尾）逐字相邻重复，在任何正常输出里都不可能合法出现，
+ * 因此安全去掉一份。只处理开头、只查到首个命中、不递归——把误伤压到零。
+ */
+function collapseLeadingDuplicateBlock(s: string): string {
+  if (s.length < 20) return s;
+  const boundary = /[。.!?！？\n]/g;
+  let m: RegExpExecArray | null;
+  // biome-ignore lint/suspicious/noAssignInExpressions: 迭代句末边界寻找重复段
+  while ((m = boundary.exec(s)) !== null) {
+    const k = m.index + 1;
+    if (k > 600) break; // 只在开头范围内找
+    const prefix = s.slice(0, k);
+    if (prefix.trim().length < 10) continue;
+    if (s.length >= 2 * k && s.slice(k, 2 * k) === prefix) {
+      return prefix + s.slice(2 * k);
+    }
+  }
+  return s;
+}
+
 export function sanitizeAgentVisibleOutput(content: string): string {
   if (!content) return content;
 
   // 先切掉回显泄漏的下一轮 prompt：必须在按空行分块之前做，因为泄漏段本身跨多个块。
-  const normalized = stripLeakedPromptEnvelope(content.replace(/\r\n/g, '\n'));
+  const deduped = collapseLeadingDuplicateBlock(content);
+  const normalized = stripLeakedPromptEnvelope(deduped.replace(/\r\n/g, '\n'));
   const blocks = normalized.split(/\n{2,}/);
   const cleanedBlocks: string[] = [];
   let suppressNarrativeAfterProgress = false;
@@ -242,7 +268,8 @@ export function sanitizeAgentVisibleOutput(content: string): string {
 export function sanitizeAgentProgressOutput(content: string): string {
   if (!content) return content;
 
-  const normalized = stripLeakedPromptEnvelope(content.replace(/\r\n/g, '\n'));
+  const deduped = collapseLeadingDuplicateBlock(content);
+  const normalized = stripLeakedPromptEnvelope(deduped.replace(/\r\n/g, '\n'));
   const blocks = normalized.split(/\n{2,}/);
   const cleanedBlocks: string[] = [];
 
