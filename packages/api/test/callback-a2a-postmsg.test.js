@@ -128,8 +128,9 @@ describe('post_message A2A mention invocation', () => {
     assert.equal(mockRouter.getExecutions().length, 0, 'routeExecution should not be called');
   });
 
-  // P1-2 regression: inline @ → no invocation
-  test('post-message with inline @ (行中) does NOT trigger invocation', async () => {
+  // 2026-08-11: @ anywhere = call — inline @ DOES trigger invocation now.
+  // 提及而不呼叫时应写不带 @ 的纯文本名（下一条测试覆盖）。
+  test('post-message with inline @ (行中) DOES trigger invocation (2026-08-11)', async () => {
     const app = await createApp();
     const { invocationId, callbackToken } = await registry.create('user-1', 'opus', { threadId: 't1' });
 
@@ -143,11 +144,24 @@ describe('post_message A2A mention invocation', () => {
     });
 
     assert.equal(response.statusCode, 200);
-    assert.equal(
-      invocationRecordStore.getRecords().length,
-      0,
-      'Inline @mentions (行中) must not trigger A2A invocation',
-    );
+    assert.equal(invocationRecordStore.getRecords().length, 1, 'Inline @mention now triggers A2A invocation');
+  });
+
+  test('plain-text cat name without @ does NOT trigger invocation (提及不呼叫)', async () => {
+    const app = await createApp();
+    const { invocationId, callbackToken } = await registry.create('user-1', 'opus', { threadId: 't1' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/callbacks/post-message',
+      headers: { 'x-invocation-id': invocationId, 'x-callback-token': callbackToken },
+      payload: {
+        content: '这个方案里，之前缅因猫提过类似的思路',
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(invocationRecordStore.getRecords().length, 0, 'Plain-text name must not trigger invocation');
   });
 
   // P1-2 regression: @ inside code block → no invocation

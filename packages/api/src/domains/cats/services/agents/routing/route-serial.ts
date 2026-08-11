@@ -1523,7 +1523,7 @@ export async function* routeSerial(
                 userId: 'system',
                 catId: null,
                 threadId,
-                content: `[路由语法]: ${inlineList} 写在行中不会触发路由 — 把 @句柄 移到最后一行行首独立一行即可。`,
+                content: `[路由语法]: ${inlineList} 未能路由 — 请确认句柄拼写正确且该猫可用；只想提及而不路由时，用不带 @ 的纯文本名字。`,
                 mentions: [],
                 timestamp: Date.now(),
                 source: hintSource,

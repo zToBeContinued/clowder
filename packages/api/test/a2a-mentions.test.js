@@ -106,7 +106,7 @@ describe('parseA2AMentions', () => {
     }
   });
 
-  it('does not treat later inline mentions as actionable once prose starts on the line', async () => {
+  it('routes inline mentions after prose too (2026-08-11: @ anywhere = call)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const { loadCatConfig, toAllCatConfigs } = await import('../dist/config/cat-config-loader.js');
 
@@ -119,10 +119,10 @@ describe('parseA2AMentions', () => {
         catRegistry.register(id, config);
       }
 
-      // Inline @codex mention after prose — should NOT be routed (keyword-gated inline rule).
+      // Inline @codex after prose IS routed — @ = 呼叫, 提及不呼叫用纯文本名。
       const text = '@opus 请继续推进，如果需要再找 @codex';
       const result = parseA2AMentions(text, 'kimi');
-      assert.deepEqual(result, ['opus']);
+      assert.deepEqual(result, ['opus', 'codex']);
     } finally {
       catRegistry.reset();
       for (const [id, config] of Object.entries(originalConfigs)) {
@@ -186,9 +186,21 @@ describe('parseA2AMentions', () => {
     assert.deepEqual(relaxed, ['opus']);
   });
 
-  it('does NOT trigger for non-line-start @mention', async () => {
+  it('triggers for mid-sentence @mention (2026-08-11: @ anywhere = call)', async () => {
     const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
     const result = parseA2AMentions('之前布偶猫说的 @布偶猫 方案不错', 'codex');
+    assert.deepEqual(result, ['opus']);
+  });
+
+  it('plain-text cat name without @ does NOT trigger (提及不呼叫)', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = parseA2AMentions('之前布偶猫说的方案不错，opus 的意见也一致', 'codex');
+    assert.deepEqual(result, []);
+  });
+
+  it('does NOT trigger for email-like user@host form (left boundary)', async () => {
+    const { parseA2AMentions } = await import('../dist/domains/cats/services/agents/routing/a2a-mentions.js');
+    const result = parseA2AMentions('联系 admin@opus.example.com 获取权限', 'codex');
     assert.deepEqual(result, []);
   });
 

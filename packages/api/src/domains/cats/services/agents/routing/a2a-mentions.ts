@@ -2,10 +2,12 @@
  * A2A Mention Detection
  * 从猫回复文本中检测对其他猫的 @mention。
  *
- * 规则 (F046 简化 — 行首即路由):
+ * 规则 (2026-08-11 起 — 任意位置 @ 即路由，与用户消息对齐):
  * 1. 剥离围栏代码块 (```...```) 后再解析
- * 2. 仅匹配行首 mention（可带前导空白）→ 直接路由，无需动作词
- * 3. 长匹配优先 + token boundary，避免 `@opus-45` 误命中 `@opus`
+ * 2. 文中任意位置的 @mention → 直接路由，无需动作词、无需行首；
+ *    要「提及某猫而不触发它」，用不带 @ 的纯文本名字
+ * 3. 长匹配优先 + token boundary，避免 `@opus-45` 误命中 `@opus`；
+ *    @ 紧跟在 handle 字符后（email/路径，如 user@host）不路由
  * 4. 过滤自调用
  * 5. F27: 返回所有匹配的猫 (上限 MAX_A2A_MENTION_TARGETS)
  * 6. 只在猫回复完整结束后解析 (由调用方保证)
@@ -33,7 +35,6 @@ export function getMaxA2AMentionTargets(): number {
 }
 export const TOKEN_BOUNDARY_RE = /[\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]/;
 export const HANDLE_CONTINUATION_RE = /[a-z0-9_.-]/;
-const LEADING_MARKDOWN_MENTION_PREFIX_RE = /^(?:(?:>\s*)|(?:[-*+]\s+)|(?:\d+[.)]\s+))+/;
 
 interface MentionPatternEntry {
   readonly catId: CatId;
@@ -106,56 +107,37 @@ export function analyzeA2AMentions(
   }
   entries.sort((a, b) => b.pattern.length - a.pattern.length);
 
-  // 3. Line-start matching with token boundary — always actionable (no keyword gate)
+  // 3. Anywhere-in-text matching with token boundary — always actionable (no keyword gate).
+  //    2026-08-11 起与用户消息路由对齐：任意位置的 @ 都是呼叫；
+  //    要「提及而不触发」，用不带 @ 的纯文本名字。
   const maxTargets = getMaxA2AMentionTargets();
   const found: CatId[] = [];
   const seen = new Set<string>();
   const routing_warnings: CatRoutingError[] = [];
-  const lines = stripped.split(/\r?\n/);
-  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-    const rawLine = lines[lineIndex]!;
-    if (found.length >= maxTargets) break; // 5. Safety limit
+  const lower = stripped.toLowerCase();
 
-    const leadingWs = rawLine.match(/^\s*/)?.[0].length ?? 0;
-    const normalized = rawLine.slice(leadingWs).toLowerCase().replace(LEADING_MARKDOWN_MENTION_PREFIX_RE, '');
-    if (!normalized.startsWith('@')) {
-      continue;
-    }
+  for (let at = lower.indexOf('@'); at >= 0 && found.length < maxTargets; at = lower.indexOf('@', at + 1)) {
+    // 左边界：@ 紧跟在 handle 字符后视为 email/路径的一部分（user@host），不路由
+    if (at > 0 && HANDLE_CONTINUATION_RE.test(lower[at - 1]!)) continue;
+    const segment = lower.slice(at);
 
-    let cursor = 0;
-    while (cursor < normalized.length && found.length < maxTargets) {
-      const segment = normalized.slice(cursor);
-      let matched = false;
-
-      for (const entry of entries) {
-        if (!segment.startsWith(entry.pattern)) continue;
-        const charAfter = segment[entry.pattern.length];
-        const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
-        if (!isBoundary) continue;
-        // F182 KD-10: resolver check at match-time (not at pattern-build time)
-        const resolved = resolveCatTarget(entry.catId);
-        if ('error' in resolved) {
-          if (!seen.has(entry.catId)) {
-            seen.add(entry.catId);
-            routing_warnings.push(resolved.error);
-          }
-        } else if (!seen.has(entry.catId)) {
+    for (const entry of entries) {
+      if (!segment.startsWith(entry.pattern)) continue;
+      const charAfter = segment[entry.pattern.length];
+      const isBoundary = !charAfter || TOKEN_BOUNDARY_RE.test(charAfter) || !HANDLE_CONTINUATION_RE.test(charAfter);
+      if (!isBoundary) continue;
+      // F182 KD-10: resolver check at match-time (not at pattern-build time)
+      const resolved = resolveCatTarget(entry.catId);
+      if ('error' in resolved) {
+        if (!seen.has(entry.catId)) {
           seen.add(entry.catId);
-          found.push(entry.catId);
+          routing_warnings.push(resolved.error);
         }
-        cursor += entry.pattern.length;
-        matched = true;
-        break; // longest-match-first: lock one winner at current cursor
+      } else if (!seen.has(entry.catId)) {
+        seen.add(entry.catId);
+        found.push(entry.catId);
       }
-
-      if (!matched) break;
-
-      while (cursor < normalized.length && TOKEN_BOUNDARY_RE.test(normalized[cursor]!)) {
-        cursor += 1;
-      }
-      if (normalized[cursor] !== '@') {
-        break;
-      }
+      break; // longest-match-first: lock one winner at this @
     }
   }
 

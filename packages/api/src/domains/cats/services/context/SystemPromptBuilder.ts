@@ -340,7 +340,7 @@ const PROGRESS_VISIBILITY_SECTION = `## 即时开工回执与长任务心跳
 
 const DISCUSSION_EXECUTION_GATE_SECTION = `## 讨论 / 执行门禁（先判阶段）
 - 先判定用户是在讨论还是明确要求行动，再应用行动纪律。
-- 用户在陈述目标、发散讨论、征求意见（如“探讨/怎么看/是否/如何”），且未给明确执行口令时：只听清、给分析和选项、收敛方案；不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单。
+- 用户在陈述目标、发散讨论、征求意见（如“探讨/怎么看/是否/如何”），且未给明确执行口令时：只听清、给分析和选项、收敛方案；不认领、不发 ack、不建 task、不 @ 任何猫、不切工单。
 - “开工/按这个做/安排/执行”等明确执行口令出现后才进入行动流程：认领 → ack → 执行 → 交付。`;
 
 /**
@@ -478,7 +478,7 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
   return [
     '## Clowder Task Gate（本轮动态）',
     `surface: ${surface}`,
-    '阶段先判：用户只在陈述目标、发散讨论或征求意见，且未明确“开工/按这个做/安排/执行”时，只分析和收敛；不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单。明确执行口令出现后才进入下面的行动纪律。',
+    '阶段先判：用户只在陈述目标、发散讨论或征求意见，且未明确“开工/按这个做/安排/执行”时，只分析和收敛；不认领、不发 ack、不建 task、不 @ 任何猫、不切工单。明确执行口令出现后才进入下面的行动纪律。',
     '行动任务先认领当前消息或匹配任务；未认领前不写文件、不改代码、不启动构建；如果任务被别人认领，停止并说明冲突。',
     '文件删除权限：用户或 A2A 派工已明确要求删除，且文件受 git 版本控制时，可直接删除并用 git diff/status 留证；这不是不可逆操作。§10.4 的“删数据”指数据库、生产资源或不可恢复数据。',
     '交付必须有证据；完成后切到待验收，阻塞就写清缺什么。',
@@ -487,7 +487,10 @@ function buildRuntimeTaskGateLines(context: InvocationContext): string[] {
 }
 
 function formatA2ATriggerContent(content: string | undefined): string {
-  const normalized = (content ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalized = (content ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!normalized) return '';
   const limit = 360;
   return normalized.length <= limit ? normalized : `${normalized.slice(0, limit - 1)}…`;
@@ -709,18 +712,13 @@ export function buildStaticIdentity(catId: CatId, options?: StaticIdentityOption
       lines.push(`同族多分身时：默认 \`@显示名\`，其它用**唯一句柄**（例如 \`${example}\`）。`);
       lines.push(`同名队友并存时，请优先使用唯一句柄（例如 \`${example}\`）避免歧义。`);
     }
-    lines.push('格式：另起一行行首写 @猫名（行中无效，多猫各占一行），上文或下文写请求均可。');
-    lines.push(`[正确] ${exampleTarget}\\n请帮忙  [正确] 内容...\\n${exampleTarget}`);
-    // F167 Phase F KD-22: model 在 narrative context 会把 @句柄写句中以为会路由。
-    // 注意：parseA2AMentions 会 **剥离** markdown 前缀 (`> ` / `- ` / `* ` / `+ ` / `1. `)
-    // 再匹配，所以 `- @cat` / `> @cat` 是**合法路由**（不是陷阱）。真正的陷阱是
-    // @ 不在剥离后的行首位置——句中 / URL 内 / 任意非首字符。
+    lines.push('格式：@猫名 写在消息任意位置都会路由（与用户 @ 你的规则一致），多个目标各写各的 @。');
+    lines.push(`[正确] ${exampleTarget} 请帮忙  [正确] 内容...\\n${exampleTarget}`);
+    // 2026-08-11 起任意位置 @ 即路由。email/URL 里的 @（user@host 形态）不会误触发。
     lines.push(
-      `[错误] 句中 ${exampleTarget}（@ 不是行首也不是剥离 markdown 前缀后的首字符）· URL 内 ${exampleTarget} · 任何非行首位置的 @ 都不会触发路由。`,
+      '注意：**@ = 呼叫**。每个 @句柄 都会真的把那只猫拉起来干活；只想提及某猫而不叫它时，写不带 @ 的纯文本名字（如「这是 sol 上轮提的问题」）。围栏代码块内的 @ 不路由。',
     );
-    lines.push(
-      `发前自检：我消息里想路由的 @句柄 都在"独立一行的行首"或"markdown 列表/引用前缀后的首字符"吗？URL 内 / 句中任意位置的 @ 不是路由指令。`,
-    );
+    lines.push(`发前自检：我消息里的每个 @句柄 都是我**真的要呼叫**的猫吗？叙述/引用历史时把 @ 去掉。`);
     lines.push('');
   }
 
@@ -930,7 +928,7 @@ export function buildInvocationContext(context: InvocationContext): string {
   // A2A: lightweight routing reminder from simplified shared-rules.
   if (context.mode !== 'parallel' && context.a2aEnabled) {
     lines.push(
-      'A2A 路由：行首 @ 才触发；需要行动才 @；无明确执行任务只短确认，不做全量接续检查。',
+      'A2A 路由：任意位置 @ 都会触发；需要对方行动才 @，纯提及用不带 @ 的名字；无明确执行任务只短确认，不做全量接续检查。',
       '',
     );
   }
@@ -939,7 +937,7 @@ export function buildInvocationContext(context: InvocationContext): string {
   if (context.mentionRoutingFeedback && context.mentionRoutingFeedback.items?.length > 0) {
     const items = context.mentionRoutingFeedback.items.slice(0, 2).map((it) => `@${it.targetCatId}`);
     lines.push(
-      `[路由提醒] 上次你提到了 ${items.join('、')} 但没有用行首 @ 路由。如果需要对方行动，请在行首独立一行写 @句柄。`,
+      `[路由提醒] 上次你提到了 ${items.join('、')} 但未触发路由。如果需要对方行动，直接在消息里写 @句柄（任意位置）即可。`,
       '',
     );
   }

@@ -85,6 +85,7 @@ function createMockDeps(services, appendCalls, feedbackWrites, broadcasts) {
       getByThread: () => [],
       getByThreadAfter: () => [],
       getByThreadBefore: () => [],
+      getById: async () => null,
     },
     socketManager: {
       broadcastToRoom(room, event, payload) {
@@ -103,40 +104,42 @@ function findA2ADeferredNotice(appendCalls) {
 }
 
 describe('route-serial notice contract', () => {
-  it('emits routing-syntax-hint with explicit system_notice presentation metadata', async () => {
-    // F167 Phase H AC-H5 (2026-04-24): Phase H `routing-syntax-hint` is now the
-    // primary emission for slot-internal inline @handles. It suppresses the
-    // legacy `inline-mention-hint` (#417) on the same turn. The legacy
-    // setMentionRoutingFeedback path remains — cats get next-turn correction.
+  it('inline @ routes directly — no syntax hint, no feedback (2026-08-11: @ anywhere = call)', async () => {
+    // 2026-08-11: inline @mentions route directly (aligned with user-message rule).
+    // Phase H routing-syntax-hint no longer fires for inline @ of routable cats;
+    // #417 feedback stays empty because the mention IS routed.
     const { routeSerial } = await import('../dist/domains/cats/services/agents/routing/route-serial.js');
     const appendCalls = [];
     const feedbackWrites = [];
     const broadcasts = [];
-    const deps = createMockDeps({ opus: createInlineMentionService('opus') }, appendCalls, feedbackWrites, broadcasts);
+    const codexCalls = [];
+    const codexService = {
+      calls: codexCalls,
+      async *invoke(prompt) {
+        codexCalls.push(prompt);
+        yield { type: 'text', catId: 'codex', content: 'ack, reviewed.', timestamp: Date.now() };
+        yield { type: 'done', catId: 'codex', timestamp: Date.now() };
+      },
+    };
+    const deps = createMockDeps(
+      { opus: createInlineMentionService('opus'), codex: codexService },
+      appendCalls,
+      feedbackWrites,
+      broadcasts,
+    );
 
     for await (const _msg of routeSerial(deps, ['opus'], 'review this', 'user1', 'thread-1')) {
     }
 
-    assert.equal(feedbackWrites.length, 1, 'should still write routing feedback (next-turn correction preserved)');
+    assert.equal(feedbackWrites.length, 0, 'no #417 feedback — the inline mention was actually routed');
 
     const hintAppend = appendCalls.find((msg) => msg.source?.connector === 'routing-syntax-hint');
-    assert.ok(hintAppend, 'should append a routing-syntax-hint (Phase H primary)');
-    assert.equal(hintAppend.userId, 'system');
-    assert.equal(hintAppend.catId, null);
-    assert.equal(hintAppend.source.meta.presentation, 'system_notice');
-    assert.equal(hintAppend.source.meta.noticeTone, 'warning');
+    assert.equal(hintAppend, undefined, 'no routing-syntax-hint — inline @ is now a legitimate route');
 
-    // AC-H5: legacy inline-mention-hint is suppressed when Phase H hits
     const legacyHint = appendCalls.find((msg) => msg.source?.connector === 'inline-mention-hint');
-    assert.equal(legacyHint, undefined, 'AC-H5: legacy inline-mention-hint must be suppressed when Phase H hits');
+    assert.equal(legacyHint, undefined, 'no legacy inline-mention-hint either');
 
-    const hintBroadcast = broadcasts.find(
-      (entry) =>
-        entry.event === 'connector_message' && entry.payload.message.source?.connector === 'routing-syntax-hint',
-    );
-    assert.ok(hintBroadcast, 'should broadcast the routing-syntax-hint in real-time');
-    assert.equal(hintBroadcast.payload.message.source.meta.presentation, 'system_notice');
-    assert.equal(hintBroadcast.payload.message.source.meta.noticeTone, 'warning');
+    assert.ok(codexCalls.length >= 1, 'codex must actually be invoked via the inline @ route');
   });
 
   it('persists an A2A deferred notice after queued user messages delay a durable handoff', async () => {

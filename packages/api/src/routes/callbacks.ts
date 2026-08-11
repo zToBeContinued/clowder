@@ -980,7 +980,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     // F52: Detect cross-thread post (used for both A2A exemption and crossPost metadata)
     const isCrossThread = effectiveThreadId !== actor.threadId;
 
-    // Parse line-start @mentions (A2A rule: only line-start, strip code blocks, single target)
+    // Parse @mentions anywhere in text (A2A rule: strip code blocks, token boundary, max targets)
     // Uses analyzeA2AMentions to capture routing_warnings for disabled cats (F182 KD-10).
     // F52: Cross-thread posts skip self-reference filter so @codex can trigger target thread's codex
     const senderCatId = createCatId(actor.catId);
@@ -1024,7 +1024,7 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
             droppedTargets,
             retainedTarget: primaryTarget,
           },
-          '[A2A/fail-closed] Single line-start mention detected; dropped extra merged targets',
+          '[A2A/fail-closed] Single content mention detected; dropped extra merged targets',
         );
       }
     }

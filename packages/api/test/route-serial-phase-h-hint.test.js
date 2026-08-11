@@ -142,25 +142,17 @@ async function runRouteWithTool(text, threadId, toolName, toolInput) {
 }
 
 describe('F167 Phase H AC-H3: route-serial routing-syntax-hint emission', () => {
-  test('inline @ in final slot + no legitimate exit → emits routing-syntax-hint', async () => {
+  test('inline @ routes directly → NO routing-syntax-hint (2026-08-11: @ anywhere = call)', async () => {
     const { appended } = await runRoute('我让 @codex 看了下', 'thread-ph-1');
     const hint = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
-    assert.ok(hint, 'must append routing-syntax-hint when slot has inline @ with no exit');
-    assert.equal(hint.userId, 'system');
-    assert.equal(hint.catId, null);
-    assert.match(hint.content, /@codex/);
-    assert.match(hint.content, /行中|行首/);
-    assert.equal(hint.source.icon, '⚠️');
-    assert.equal(hint.source.meta.presentation, 'system_notice');
-    assert.equal(hint.source.meta.noticeTone, 'warning');
+    assert.equal(hint, undefined, 'inline @ is now a legitimate route — no syntax hint');
   });
 
-  test('legitimate line-start @ exit → NO routing-syntax-hint', async () => {
-    // Last paragraph has line-start @codex → legitimate route; no hint even
-    // though an earlier paragraph has inline @gpt52.
-    const { appended } = await runRoute('之前我问过 @gpt52 的意见。\n\n@codex review', 'thread-ph-2');
+  test('legitimate @ exit → NO routing-syntax-hint', async () => {
+    // Plain-text gpt52 (no @) is a pure mention — new rule: 提及不呼叫用纯文本名。
+    const { appended } = await runRoute('之前我问过 gpt52 的意见。\n\n@codex review', 'thread-ph-2');
     const hint = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
-    assert.equal(hint, undefined, 'line-start @ exit must suppress routing-syntax-hint');
+    assert.equal(hint, undefined, '@ exit must suppress routing-syntax-hint');
   });
 
   test('@ only inside fenced code block → NO routing-syntax-hint', async () => {
@@ -192,11 +184,11 @@ describe('F167 Phase H AC-H3: route-serial routing-syntax-hint emission', () => 
 });
 
 describe('F167 Phase H after legacy hold hint removal', () => {
-  test('inline @ + LGTM in slot → emits routing-syntax-hint only', async () => {
+  test('inline @ + LGTM in slot → routes directly, no hints (2026-08-11)', async () => {
     const { appended } = await runRoute('LGTM, 我让 @codex 看了下', 'thread-ph-7');
     const phaseH = appended.find((m) => m.source?.connector === 'routing-syntax-hint');
     const verdictHint = appended.find((m) => m.source?.connector === 'verdict-no-pass-hint');
-    assert.ok(phaseH, 'Phase H hint must emit (root cause)');
+    assert.equal(phaseH, undefined, 'inline @ routes directly — Phase H hint no longer fires');
     assert.equal(verdictHint, undefined, 'legacy verdict-no-pass-hint must not emit');
   });
 

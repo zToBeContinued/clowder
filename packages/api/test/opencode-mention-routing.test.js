@@ -169,10 +169,10 @@ describe('parseA2AMentions — opencode A2A chain', () => {
     assert.deepEqual(result, []);
   });
 
-  it('ignores non-line-start mentions', () => {
+  it('routes mid-sentence mentions too (2026-08-11: @ anywhere = call)', () => {
     const text = '请联系 @opencode 来帮忙';
     const result = parseA2AMentions(text, 'opus');
-    assert.deepEqual(result, []); // not at line start
+    assert.deepEqual(result, ['opencode']);
   });
 });
 
