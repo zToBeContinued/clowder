@@ -125,6 +125,17 @@ curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/update-task \
   -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg tid "任务ID" --arg s "doing" '{invocationId:$i,callbackToken:$t,taskId:$tid,status:$s}')"
 ```
 
+**切 done / in_review 时必须同步交付证据（evidence）**——任务卡上的「交付证据 0/5」就是这五项，不交等于没验收：
+
+```bash
+curl -sS -X POST $CAT_CAFE_API_URL/api/callbacks/update-task \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -nc --arg i "$CAT_CAFE_INVOCATION_ID" --arg t "$CAT_CAFE_CALLBACK_TOKEN" --arg tid "任务ID" '{invocationId:$i,callbackToken:$t,taskId:$tid,status:"in_review",evidence:{tests:"pnpm test 通过 38/38,命令+退出码",build:"pnpm build exit 0",screenshot:"（UI 改动附截图路径/说明,无 UI 写 N/A）",review:"@reviewer 待复核 / review 结论",lesson:"本次踩坑或方法沉淀,无则写 无"}}')"
+```
+
+- 五个字段都是可选的、**深合并**——先交 tests，之后补 review 不会冲掉之前的，可分多轮增量填。
+- 有什么交什么：跑过测试就填 tests，构建过就填 build；确实不适用的字段写 `N/A` 而不是留空。
+
 ### List Tasks
 ```bash
 curl "$CAT_CAFE_API_URL/api/callbacks/list-tasks?invocationId=$CAT_CAFE_INVOCATION_ID&callbackToken=$CAT_CAFE_CALLBACK_TOKEN"

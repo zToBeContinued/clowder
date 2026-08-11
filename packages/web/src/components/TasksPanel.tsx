@@ -199,20 +199,20 @@ function TaskCardView({
   return (
     <article
       className="rounded-[14px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-3 text-[var(--task-ink)] shadow-[5px_5px_0_#111] transition-transform hover:-translate-y-0.5"
-      role={onOpenThread ? 'button' : undefined}
-      tabIndex={onOpenThread ? 0 : undefined}
-      title={onOpenThread ? `任务 Thread：${task.title}` : undefined}
-      onClick={() => onOpenThread?.(task)}
+      role="button"
+      tabIndex={0}
+      title={expanded ? '收起任务详情' : '展开任务详情与交付证据'}
+      onClick={() => onToggleEvidence(task)}
       onKeyDown={(event) => {
-        if (!onOpenThread) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
-        onOpenThread(task);
+        onToggleEvidence(task);
       }}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--task-subtle)]">#{task.id.slice(0, 6)}</div>
+          {/* id 以创建时间戳开头，前缀在同一时段全相同——取尾部随机段才有区分度 */}
+          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--task-subtle)]">#{task.id.slice(-6)}</div>
           <h3 className="mt-1 line-clamp-2 text-sm font-black leading-snug text-[var(--task-ink)]" title={task.title}>
             {task.title}
           </h3>
@@ -234,7 +234,19 @@ function TaskCardView({
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t-2 border-dashed border-[var(--task-ink)]/20 pt-2 text-[11px] font-semibold text-[var(--task-muted)]">
         <span>Owner: {getOwnerLabel(task)}</span>
-        {onOpenThread && <span>接手入口：任务 Thread</span>}
+        {onOpenThread && (
+          <button
+            type="button"
+            className="rounded-full border border-[var(--task-ink)]/40 bg-[var(--task-control)] px-2 py-0.5 text-[10px] font-black text-[var(--task-ink)] transition hover:border-[var(--task-ink)]"
+            title="打开任务 Thread（猫的接手工作区）"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenThread(task);
+            }}
+          >
+            任务 Thread ↗
+          </button>
+        )}
         <span>{formatTaskTime(task.updatedAt || task.createdAt)}</span>
         <span>By: {task.createdBy === 'user' ? 'user' : task.createdBy}</span>
       </div>
@@ -274,6 +286,12 @@ function TaskCardView({
           className="mt-3 rounded-xl border-2 border-[var(--task-ink)] bg-[var(--task-control)] p-3"
           onClick={(event) => event.stopPropagation()}
         >
+          {task.why && (
+            <div className="mb-3 rounded-lg border border-[var(--task-ink)]/20 bg-[var(--task-card)] px-3 py-2">
+              <div className="text-[10px] font-black uppercase tracking-[0.08em] text-[var(--task-subtle)]">Why · 任务背景</div>
+              <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--task-ink)]">{task.why}</p>
+            </div>
+          )}
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <div className="text-xs font-black text-[var(--task-ink)]">交付证据</div>
@@ -537,11 +555,11 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
         )}
 
         {!isLoading && !error && sortedTasks.length > 0 && viewMode === 'board' && (
-          <div className="flex min-h-[520px] items-start gap-4 overflow-x-auto pb-4">
+          <div className="grid items-start gap-4 pb-4 [grid-template-columns:repeat(auto-fit,minmax(225px,1fr))]">
             {groupedTasks.map((column) => (
               <section
                 key={column.status}
-                className="flex min-w-[290px] flex-1 flex-col gap-3 rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-column)] p-3 shadow-[5px_5px_0_#111]"
+                className="flex min-w-0 flex-col gap-3 rounded-[18px] border-2 border-[var(--task-ink)] bg-[var(--task-column)] p-3 shadow-[5px_5px_0_#111]"
               >
                 <div className="flex items-center justify-between gap-2 border-b-2 border-[var(--task-ink)] pb-3">
                   <TaskStatusChip status={column.status} count={column.tasks.length} />

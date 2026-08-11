@@ -90,6 +90,7 @@ export function buildMcpCallbackInstructions(opts: McpCallbackOptions): string {
 @队友: 独占一行写唯一句柄（如 \`${exampleHandle}\`）+动作；勿为 @ 调 post-message。
 凭证: \`$CAT_CAFE_INVOCATION_ID\` + \`$CAT_CAFE_CALLBACK_TOKEN\`
 工具: post-progress/post-message/register-pr-tracking/check-inbox/thread-context/fetch-thread-history/message-search/list-threads/feat-index/list-tasks/pending-mentions/create-task/claim-task/update-task/create-rich-block/search-evidence/reflect/retain-memory/request-permission/submit-game-action
+完成/交审必附 evidence{tests,build,screenshot,review,lesson}，可分次补。
 跨 thread: cross-post-message + \`threadId\`
 检索: [Inbox]→check-inbox→thread-context(\`keyword\`/\`catId\`)或 fetch-thread-history；跨历史 message-search(\`q\`)；feature 用 feat-index。
 文档: \`$CAT_CAFE_API_URL/api/callbacks/instructions\`
