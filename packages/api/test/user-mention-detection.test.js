@@ -11,8 +11,13 @@ describe('detectUserMention', () => {
     assert.equal(detectUserMention('@co-creator 请帮忙看看'), true);
   });
 
-  it('ignores @铲屎官 in middle of line', () => {
-    assert.equal(detectUserMention('告诉@铲屎官这件事'), false);
+  it('detects @铲屎官 in middle of line (2026-08-11: @ anywhere = call)', () => {
+    assert.equal(detectUserMention('告诉@铲屎官这件事'), true);
+    assert.equal(detectUserMention('请 @铲屎官 确认 QMT 目视结果'), true);
+  });
+
+  it('ignores email-like user@host form (left boundary)', () => {
+    assert.equal(detectUserMention('联系 admin@co-creator.example 获取权限'), false);
   });
 
   it('ignores @co-creator inside code block', () => {

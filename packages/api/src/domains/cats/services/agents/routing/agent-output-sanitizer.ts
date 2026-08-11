@@ -203,9 +203,11 @@ export function sanitizeAgentVisibleOutput(content: string): string {
     if (isInternalRuntimeJsonBlock(block)) continue;
     if (isInternalProtocolBlock(block)) continue;
 
-    const rawLines = block
-      .split('\n')
-      .map((line) => normalizeUserVisibleTerms(stripInlineArtifacts(line)).replace(/[ \t]{2,}/g, ' ').trimEnd());
+    const rawLines = block.split('\n').map((line) =>
+      normalizeUserVisibleTerms(stripInlineArtifacts(line))
+        .replace(/[ \t]{2,}/g, ' ')
+        .trimEnd(),
+    );
     const hasInternalProgress = rawLines.some(isInternalProgressLine);
     const hasUserFacingLine = rawLines.some(isUserFacingLine);
 
@@ -223,6 +225,41 @@ export function sanitizeAgentVisibleOutput(content: string): string {
     if (cleanedLines.length > 0) {
       cleanedBlocks.push(cleanedLines.join('\n'));
     }
+  }
+
+  return cleanedBlocks.join('\n\n').trim();
+}
+
+/**
+ * Progress 通道（ack/heartbeat）专用轻量清洗。
+ *
+ * progress 的语义就是「我正在做什么」，而 INTERNAL_PROGRESS_LINE_PATTERNS
+ * 那套内部独白启发式（为正文防泄漏设计，几乎全是中文短语：初步结果/
+ * 我开始做/收尾验证…）在这里语义完全错位——猫用中文正常汇报进度必然
+ * 命中，整块被吞，实测表现为「只有 ASCII 能过」。这里只做协议泄漏与
+ * 引用伪影清理，不做任何叙事过滤。
+ */
+export function sanitizeAgentProgressOutput(content: string): string {
+  if (!content) return content;
+
+  const normalized = stripLeakedPromptEnvelope(content.replace(/\r\n/g, '\n'));
+  const blocks = normalized.split(/\n{2,}/);
+  const cleanedBlocks: string[] = [];
+
+  for (const block of blocks) {
+    if (!block.trim()) continue;
+    if (isInternalRuntimeJsonBlock(block)) continue;
+    if (isInternalProtocolBlock(block)) continue;
+
+    const lines = block
+      .split('\n')
+      .map((line) =>
+        stripInlineArtifacts(line)
+          .replace(/[ \t]{2,}/g, ' ')
+          .trimEnd(),
+      )
+      .filter((line) => line.trim().length > 0);
+    if (lines.length > 0) cleanedBlocks.push(lines.join('\n'));
   }
 
   return cleanedBlocks.join('\n\n').trim();

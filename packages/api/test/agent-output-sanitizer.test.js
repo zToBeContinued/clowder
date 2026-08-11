@@ -294,3 +294,36 @@ describe('leaked prompt envelope (kiro-cli turn wrapper)', () => {
     assert.ok(output.includes('建议：第二段。'));
   });
 });
+
+describe('progress channel sanitizer (轻量版，不做叙事过滤)', () => {
+  async function getProgressSanitizer() {
+    const mod = await import('../dist/domains/cats/services/agents/routing/agent-output-sanitizer.js');
+    return mod.sanitizeAgentProgressOutput;
+  }
+
+  test('中文进度不被内部独白启发式误杀（此前实测只有 ASCII 能过）', async () => {
+    const sanitize = await getProgressSanitizer();
+    // 这些句式全部命中 INTERNAL_PROGRESS_LINE_PATTERNS，完整版会整块吞掉
+    const input = '我开始做：M3-B C-01 返修。初步结果：七条 P1 已定位，收尾验证稍后补。';
+
+    const output = sanitize(input);
+
+    assert.ok(output.includes('我开始做'), '进度通道必须保留「我开始做」句式');
+    assert.ok(output.includes('初步结果'), '进度通道必须保留「初步结果」句式');
+    assert.ok(output.includes('收尾验证'), '进度通道必须保留「收尾验证」句式');
+  });
+
+  test('协议泄漏与引用伪影仍然清除', async () => {
+    const sanitize = await getProgressSanitizer();
+    const output = sanitize('正在返修 cite:turn0view0\n\nShared-state preflight passed');
+
+    assert.ok(output.includes('正在返修'));
+    assert.ok(!output.includes('cite:turn0view0'), 'citation 伪影必须清除');
+    assert.ok(!output.includes('Shared-state'), '协议块必须清除');
+  });
+
+  test('空内容原样返回', async () => {
+    const sanitize = await getProgressSanitizer();
+    assert.equal(sanitize(''), '');
+  });
+});

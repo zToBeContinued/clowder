@@ -601,10 +601,17 @@ export function ChatMessage({
     );
   }
 
+  // 猫 @ 了铲屎官（需要用户确认/参与）→ 卡片级显著标识，扫一眼就能看到自己的部分。
+  const needsUserAttention = message.mentionsUser === true;
+
   return (
     <div
       data-message-id={message.id}
-      className={`group flex gap-2 items-start transition-colors [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${assistantAppearClass} ${isAssistantContinuation ? 'mb-1' : 'mb-4'}`}
+      className={`group flex gap-2 items-start transition-colors [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${assistantAppearClass} ${isAssistantContinuation ? 'mb-1' : 'mb-4'} ${
+        needsUserAttention
+          ? 'border-l-[3px] border-[#F5A623] bg-[#F5A623]/[0.07] rounded-r-lg pl-2 pr-2 py-2 -ml-2'
+          : ''
+      }`}
     >
       {catData && !isAssistantContinuation && (
         <button
@@ -634,6 +641,12 @@ export function ChatMessage({
               >
                 {catStyle.label}
               </span>
+              {needsUserAttention && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#F5A623]/40 bg-[#F5A623]/15 px-2 py-0.5 font-semibold text-[#F5A623] [font-size:var(--clowder-type-meta)]">
+                  <span aria-hidden>👋</span>
+                  <span>@你 · 需要你</span>
+                </span>
+              )}
               <span className="[font-size:var(--clowder-type-meta)] font-normal text-cafe-muted">
                 {formatTime(message.timestamp)}
               </span>

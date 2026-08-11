@@ -18,7 +18,10 @@ import type { InvocationTracker } from '../domains/cats/services/agents/invocati
 import { MessageDeliveryService } from '../domains/cats/services/agents/invocation/MessageDeliveryService.js';
 import { getRichBlockBuffer } from '../domains/cats/services/agents/invocation/RichBlockBuffer.js';
 import { analyzeA2AMentions } from '../domains/cats/services/agents/routing/a2a-mentions.js';
-import { sanitizeAgentVisibleOutput } from '../domains/cats/services/agents/routing/agent-output-sanitizer.js';
+import {
+  sanitizeAgentProgressOutput,
+  sanitizeAgentVisibleOutput,
+} from '../domains/cats/services/agents/routing/agent-output-sanitizer.js';
 import { resolveCatTarget } from '../domains/cats/services/agents/routing/cat-target-resolver.js';
 import { extractRichFromText } from '../domains/cats/services/agents/routing/rich-block-extract.js';
 import {
@@ -540,7 +543,8 @@ export const callbacksRoutes: FastifyPluginAsync<CallbackRoutesOptions> = async 
     }
 
     const { content, kind, threadId, replyTo, clientMessageId } = parsed.data;
-    const storedContent = sanitizeAgentVisibleOutput(content);
+    // progress 通道用轻量清洗：完整版的内部独白启发式会把正常中文进度整块误杀
+    const storedContent = sanitizeAgentProgressOutput(content);
     if (!storedContent.trim()) {
       reply.status(400);
       return { error: 'Progress content is empty after sanitization' };
