@@ -2202,10 +2202,10 @@ export function useAgentMessages() {
         const ts = store.getThreadState(threadId);
         // 保护：期间若有新一轮/A2A 接力在跑（streaming/pending/spawning），
         // 绝不误清正在进行的状态；等那一轮自己的 done 再重新调度回落。
-        const hasActive = Object.values(ts.catStatuses).some(
+        const hasActive = Object.values(ts?.catStatuses ?? {}).some(
           (s) => s === 'streaming' || s === 'pending' || s === 'spawning',
         );
-        if (!hasActive) store.clearThreadCatStatuses(threadId);
+        if (!hasActive) store.clearThreadCatStatuses?.(threadId);
       }, IDLE_FALLBACK_MS),
     );
   }, []);

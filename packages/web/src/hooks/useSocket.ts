@@ -1121,6 +1121,18 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('disconnect', (...args: unknown[]) => {
       setSocketConnected(false);
+      // 服务停止/断连后，「正在工作」的猫状态点已不可信——立即清空，
+      // 头像绿点同步熄灭；重连后 reconcileInvocationStateOnReconnect
+      // 会按服务器真相重建，短暂断连的活跃状态不会永久丢失。
+      try {
+        const store = useChatStore.getState();
+        for (const tid of Object.keys(store.threadStates ?? {})) {
+          store.clearThreadCatStatuses(tid);
+        }
+        store.clearCatStatuses();
+      } catch {
+        // 状态清理失败不阻塞断连处理
+      }
       const [reason, details] = args;
       console.warn('[ws] Disconnected', {
         reason: typeof reason === 'string' ? reason : String(reason),
