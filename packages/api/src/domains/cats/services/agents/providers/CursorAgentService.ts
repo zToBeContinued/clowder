@@ -112,6 +112,11 @@ export class CursorAgentService implements AgentService {
 
       let emittedSessionInit = Boolean(options?.sessionId);
       let sawAssistantDelta = false;
+      // Cursor 的 thinking 以逐词 delta 流出。此前每个 delta 直接透传成独立
+      // thinking 事件，下游（route-serial appendThinkingChunk）把每个词当成
+      // 独立段落并用 "---" 分隔渲染 → 展开后一词一行。仿 Claude parser 的
+      // 做法：缓冲整块，块边界（completed/assistant/result 等非 delta 事件）再发。
+      let thinkingBuffer = '';
 
       for await (const event of events) {
         if (isCliTimeout(event)) {
@@ -169,14 +174,20 @@ export class CursorAgentService implements AgentService {
 
         const thinking = readThinkingDelta(event);
         if (thinking) {
+          thinkingBuffer += thinking;
+          continue;
+        }
+        // 非 delta 事件 = 思考块边界（含 {"type":"thinking","subtype":"completed"}），
+        // 把缓冲的整块一次性发出。多个思考块（想→说→再想）各自成块。
+        if (thinkingBuffer) {
           yield {
             type: 'system_info',
             catId: this.catId,
-            content: JSON.stringify({ type: 'thinking', catId: this.catId, text: thinking }),
+            content: JSON.stringify({ type: 'thinking', catId: this.catId, text: thinkingBuffer }),
             metadata,
             timestamp: Date.now(),
           };
-          continue;
+          thinkingBuffer = '';
         }
 
         if (event.type === 'assistant') {
@@ -200,6 +211,18 @@ export class CursorAgentService implements AgentService {
             yield { type: 'error', catId: this.catId, error: errText, metadata, timestamp: Date.now() };
           }
         }
+      }
+
+      // 流意外收尾（无 completed/后续事件）时不丢已缓冲的思考内容
+      if (thinkingBuffer) {
+        yield {
+          type: 'system_info',
+          catId: this.catId,
+          content: JSON.stringify({ type: 'thinking', catId: this.catId, text: thinkingBuffer }),
+          metadata,
+          timestamp: Date.now(),
+        };
+        thinkingBuffer = '';
       }
 
       yield { type: 'done', catId: this.catId, metadata, timestamp: Date.now() };

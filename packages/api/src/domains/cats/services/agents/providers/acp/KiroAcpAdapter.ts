@@ -4,7 +4,7 @@ import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata }
 import { isContextWindowOverflowError, TRANSIENT_PROVIDER_ERROR_CODE } from '../../invocation/invoke-helpers.js';
 import { AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool } from './AcpProcessPool.js';
-import { transformAcpEvent } from './acp-event-transformer.js';
+import { AcpThinkingCoalescer, transformAcpEvent } from './acp-event-transformer.js';
 import { resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { materializeSessionMcpServers } from './acp-session-env.js';
 import type { AcpMcpServer, AcpSessionUpdate } from './types.js';
@@ -130,14 +130,19 @@ export class KiroAcpAdapter implements AgentService {
       // AcpClient owns the AbortSignal and its request-scoped exactly-once cancel.
       options?.signal?.removeEventListener('abort', onAbort);
       const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
+      const thinkingCoalescer = new AcpThinkingCoalescer(this.catId);
       for await (const event of client.promptStream(sessionId, effectivePrompt, { signal: options?.signal })) {
         const synthetic = this.transformSyntheticEvent(event, metadata);
         if (synthetic) {
           yield synthetic;
           continue;
         }
-        const message = transformAcpEvent(event, this.catId, metadata);
-        if (message) yield message;
+        for (const message of thinkingCoalescer.push(transformAcpEvent(event, this.catId, metadata), metadata)) {
+          yield message;
+        }
+      }
+      for (const message of thinkingCoalescer.drain(metadata)) {
+        yield message;
       }
       yield this.doneMessage(metadata);
     } catch (error) {

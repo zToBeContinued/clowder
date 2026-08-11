@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-const { transformAcpEvent } = await import(
+const { transformAcpEvent, AcpThinkingCoalescer } = await import(
   '../../dist/domains/cats/services/agents/providers/acp/acp-event-transformer.js'
 );
 
@@ -203,5 +203,57 @@ describe('transformAcpEvent', () => {
     const result = transformAcpEvent(update, catId, metadata);
     assert.equal(result.type, 'text');
     assert.equal(result.content, '');
+  });
+});
+
+describe('AcpThinkingCoalescer', () => {
+  const thought = (text) =>
+    transformAcpEvent(
+      { sessionId: 's1', update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } } },
+      catId,
+      metadata,
+    );
+  const answer = (text) =>
+    transformAcpEvent(
+      { sessionId: 's1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } },
+      catId,
+      metadata,
+    );
+
+  it('连续 thought chunk 合并为一条整块 thinking（不再逐 chunk 透传）', () => {
+    const c = new AcpThinkingCoalescer(catId);
+    assert.deepEqual(c.push(thought('让我'), metadata), []);
+    assert.deepEqual(c.push(thought('想一想'), metadata), []);
+    const out = c.push(answer('答案'), metadata);
+    assert.equal(out.length, 2, '非 thinking 消息到达时先 flush 整块再放行');
+    assert.equal(JSON.parse(out[0].content).text, '让我想一想');
+    assert.equal(out[1].content, '答案');
+  });
+
+  it('流结束 drain 残余缓冲，不丢内容', () => {
+    const c = new AcpThinkingCoalescer(catId);
+    c.push(thought('想到一半'), metadata);
+    const out = c.drain(metadata);
+    assert.equal(out.length, 1);
+    assert.equal(JSON.parse(out[0].content).text, '想到一半');
+    assert.deepEqual(c.drain(metadata), [], '二次 drain 为空');
+  });
+
+  it('无缓冲时非 thinking 消息原样通过，null 不产出', () => {
+    const c = new AcpThinkingCoalescer(catId);
+    assert.deepEqual(c.push(null, metadata), []);
+    const out = c.push(answer('直接说'), metadata);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].content, '直接说');
+  });
+
+  it('想→说→再想 产出两个独立 thinking 块', () => {
+    const c = new AcpThinkingCoalescer(catId);
+    c.push(thought('第一段'), metadata);
+    const mid = c.push(answer('说话'), metadata);
+    assert.equal(JSON.parse(mid[0].content).text, '第一段');
+    c.push(thought('第二段'), metadata);
+    const tail = c.drain(metadata);
+    assert.equal(JSON.parse(tail[0].content).text, '第二段');
   });
 });

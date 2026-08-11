@@ -46,6 +46,49 @@ test('starts Cursor with approvals bypassed and sandbox disabled', async () => {
   assert.equal(messages.at(-1)?.type, 'done');
 });
 
+test('thinking 逐词 delta 缓冲为整块（不再一词一行）', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's1', model: 'm' };
+    // Cursor 实际会把 thinking 拆成逐词 delta 流出
+    yield { type: 'thinking', subtype: 'delta', text: '让我', timestamp_ms: 1 };
+    yield { type: 'thinking', subtype: 'delta', text: '想一想', timestamp_ms: 2 };
+    yield { type: 'thinking', subtype: 'delta', text: '这个问题', timestamp_ms: 3 };
+    yield { type: 'thinking', subtype: 'completed' };
+    yield {
+      type: 'assistant',
+      timestamp_ms: Date.now(),
+      message: { role: 'assistant', content: [{ type: 'text', text: '答案' }] },
+    };
+    yield { type: 'result', subtype: 'success', is_error: false };
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+
+  const thinkingEvents = messages.filter(
+    (m) => m.type === 'system_info' && typeof m.content === 'string' && m.content.includes('"thinking"'),
+  );
+  assert.equal(thinkingEvents.length, 1, '多个 delta 必须合并为一条 thinking 事件（此前每个 delta 一条）');
+  const payload = JSON.parse(thinkingEvents[0].content);
+  assert.equal(payload.text, '让我想一想这个问题', 'delta 必须按序拼接为完整段落');
+});
+
+test('流中断时已缓冲的 thinking 不丢失（收尾 flush）', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's2', model: 'm' };
+    yield { type: 'thinking', subtype: 'delta', text: '想到一半', timestamp_ms: 1 };
+    // 流在这里意外结束：无 completed、无 assistant、无 result
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+  const thinkingEvents = messages.filter(
+    (m) => m.type === 'system_info' && typeof m.content === 'string' && m.content.includes('"thinking"'),
+  );
+  assert.equal(thinkingEvents.length, 1, '收尾必须 flush 残余缓冲');
+  assert.equal(JSON.parse(thinkingEvents[0].content).text, '想到一半');
+});
+
 test('full-access flags override conflicting member args and survive resume', async () => {
   const capture = {};
   const service = new CursorAgentService({ model: 'cursor-test-model' });

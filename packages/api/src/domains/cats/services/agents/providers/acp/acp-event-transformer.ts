@@ -127,3 +127,57 @@ export function transformAcpEvent(
       return null;
   }
 }
+
+/**
+ * 把逐 chunk 流出的 thinking 事件合并成整块再下发。
+ *
+ * ACP 的 agent_thought_chunk 是流式小片段（句子甚至词组级）。若逐条透传，
+ * 下游 route-serial 的 appendThinkingChunk 会把每个片段当成独立段落并用
+ * "---" 分隔渲染 → 展开后碎成一行一段。与 Claude/Cursor provider 的整块
+ * 缓冲行为对齐：thinking 连续累积，遇到非 thinking 消息或流结束时 flush。
+ * 每次 prompt 新建一个实例（不跨 prompt 复用）。
+ */
+export class AcpThinkingCoalescer {
+  private buffer = '';
+
+  constructor(private readonly catId: CatId) {}
+
+  private readThinkingText(msg: AgentMessage): string | null {
+    if (msg.type !== 'system_info' || typeof msg.content !== 'string') return null;
+    try {
+      const parsed = JSON.parse(msg.content) as { type?: string; text?: string };
+      return parsed.type === 'thinking' && typeof parsed.text === 'string' ? parsed.text : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private flushMessage(metadata: MessageMetadata): AgentMessage {
+    const text = this.buffer;
+    this.buffer = '';
+    return {
+      type: 'system_info',
+      catId: this.catId,
+      content: JSON.stringify({ type: 'thinking', text }),
+      metadata,
+      timestamp: Date.now(),
+    };
+  }
+
+  /** 吸收一条已转换消息，返回应当下发的消息列表（0~2 条）。 */
+  push(msg: AgentMessage | null, metadata: MessageMetadata): AgentMessage[] {
+    if (!msg) return [];
+    const thinkingText = this.readThinkingText(msg);
+    if (thinkingText !== null) {
+      this.buffer += thinkingText;
+      return [];
+    }
+    if (this.buffer) return [this.flushMessage(metadata), msg];
+    return [msg];
+  }
+
+  /** 流结束时取出残余缓冲（若有）。 */
+  drain(metadata: MessageMetadata): AgentMessage[] {
+    return this.buffer ? [this.flushMessage(metadata)] : [];
+  }
+}

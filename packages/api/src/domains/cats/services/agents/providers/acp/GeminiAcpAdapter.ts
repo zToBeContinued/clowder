@@ -18,7 +18,7 @@ import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
 import type { AcpLease, AcpProcessPool, PoolKey } from './AcpProcessPool.js';
-import { transformAcpEvent } from './acp-event-transformer.js';
+import { AcpThinkingCoalescer, transformAcpEvent } from './acp-event-transformer.js';
 import { resolveUserProjectMcpServers } from './acp-mcp-resolver.js';
 import { callbackEnvDiagnostic, materializeSessionMcpServers } from './acp-session-env.js';
 import type { AcpMcpServer } from './types.js';
@@ -194,6 +194,7 @@ export class GeminiAcpAdapter implements AgentService {
       const promptDigest = createPromptDigest(effectivePrompt);
       log.info({ ...ctx, sessionId, promptDigest }, 'ACP promptStream starting');
       eventCount = 0;
+      const thinkingCoalescer = new AcpThinkingCoalescer(this.catId);
       for await (const event of client.promptStream(sessionId, effectivePrompt)) {
         // F149: Capacity signal injected by AcpClient.promptStream from stderr.
         // Breaks through zero-event stalls where the old listener-only path couldn't.
@@ -239,8 +240,12 @@ export class GeminiAcpAdapter implements AgentService {
           const firstEventLatencyMs = Date.now() - promptStreamStartedAt;
           log.info({ ...ctx, sessionId, firstEventLatencyMs }, 'ACP first event received');
         }
-        const msg = transformAcpEvent(event, this.catId, metadata);
-        if (msg) yield msg;
+        for (const msg of thinkingCoalescer.push(transformAcpEvent(event, this.catId, metadata), metadata)) {
+          yield msg;
+        }
+      }
+      for (const msg of thinkingCoalescer.drain(metadata)) {
+        yield msg;
       }
       log.info({ ...ctx, sessionId, eventCount }, 'ACP promptStream completed');
       // Successful prompt — provider has recovered; clear stale capacity signal
