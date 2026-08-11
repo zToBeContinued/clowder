@@ -1482,10 +1482,16 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       invocationId,
       ...(sessionId ? { cliSessionId: sessionId } : {}),
       // F118 Phase B: Enable liveness probe with defaults for all CLI providers
-      // #774: stallAutoKill — auto-kill on idle-silent stall (~5min) instead of waiting 30min
+      // #774: stallAutoKill — auto-kill on idle-silent stall instead of waiting 30min.
+      // 静默多久判定卡死并强杀（随后失败→自动续跑）。默认 180s：cursor 正常思考/工具
+      // 调用都有增量输出会重置计时，真「零输出」静默 3 分钟基本是 CLI 挂起。Windows
+      // 上无法采样 CPU（busy-silent 延长不生效），故适度缩短让卡住更快恢复。
+      // 可用 CAT_CAFE_CLI_STALL_KILL_MS 调整（>0 生效）。
       livenessProbe: {
         softWarningMs: 30_000,
-        stallWarningMs: 300_000,
+        stallWarningMs: Number(process.env.CAT_CAFE_CLI_STALL_KILL_MS) > 0
+          ? Number(process.env.CAT_CAFE_CLI_STALL_KILL_MS)
+          : 180_000,
         stallAutoKill: true,
       },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
