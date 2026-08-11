@@ -17,22 +17,22 @@ import { useTaskThreadActions } from '@/contexts/TaskThreadActionsContext';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
+import { getMentionRe } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
 /* ── @mention highlighting ─────────────────────────────────── */
-// 名字内部的点是 handle 的一部分（如 @cursor-gpt-5.6-sol-max），句末的点仍作边界：
-// 点必须后跟 ASCII handle 字符才继续（与后端 a2a-mentions HANDLE_CONTINUATION_RE 对齐）。
-const GENERIC_MENTION_RE =
-  /@[^\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]+(?:\.[a-zA-Z0-9_-]+)*/g;
-
+// 高亮与路由用同一张别名表（getMentionRe，来自 /api/cats 的 mentionPatterns）：
+// 亮了 = 这个 @ 会真的路由到猫；不亮 = 不是注册句柄（如中文句子里的「@到具体猫」），
+// 不会误染色误导用户。别名含点号（@cursor-gpt-5.6-sol-max）由表内转义精确匹配。
 function highlightMentions(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
   let lastIdx = 0;
   let m: RegExpExecArray | null;
 
-  GENERIC_MENTION_RE.lastIndex = 0;
-  while ((m = GENERIC_MENTION_RE.exec(text)) !== null) {
+  const mentionRe = getMentionRe();
+  mentionRe.lastIndex = 0;
+  while ((m = mentionRe.exec(text)) !== null) {
     if (m.index > lastIdx) parts.push(text.slice(lastIdx, m.index));
     parts.push(
       <span
@@ -42,7 +42,7 @@ function highlightMentions(text: string): ReactNode[] {
         {m[0]}
       </span>,
     );
-    lastIdx = GENERIC_MENTION_RE.lastIndex;
+    lastIdx = mentionRe.lastIndex;
   }
   if (lastIdx < text.length) parts.push(text.slice(lastIdx));
   return parts;

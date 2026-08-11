@@ -47,6 +47,17 @@ describe('MarkdownContent mention highlighting', () => {
         roleDescription: '',
         personality: '',
       },
+      {
+        id: 'cursor-gpt-5.6-sol-max',
+        displayName: 'GPT-5.6 Sol Max - Reviewer',
+        color: { primary: '#12A594', secondary: '#D6F5F0' },
+        mentionPatterns: ['@cursor-gpt-5.6-sol-max', '@sol'],
+        clientId: 'cursor',
+        defaultModel: 'gpt-5.6-sol-max',
+        avatar: '',
+        roleDescription: '',
+        personality: '',
+      },
     ]);
   });
 
@@ -72,5 +83,19 @@ describe('MarkdownContent mention highlighting', () => {
     expect(htmlEnd).not.toContain('@opus.</span>');
     const htmlCjk = render('交给 @opus.然后收尾');
     expect(htmlCjk).toContain('@opus</span>');
+  });
+
+  it('非注册句柄不误染色——高亮与路由同一张别名表（@到具体猫）', () => {
+    const html = render('上次没@到具体猫，我修改了平台代码，应该可以了');
+    // 「到具体猫」不是任何猫的别名：不高亮（否则视觉上像真的 @ 了一只猫）
+    expect(html).not.toContain('@到具体猫</span>');
+    expect(html).not.toContain('bg-[var(--cafe-accent)]/15');
+  });
+
+  it('同句中注册句柄照常高亮，未注册的不亮', () => {
+    const html = render('@opus 看下，上次没@到人');
+    expect(html).toContain('@opus</span>');
+    // 只有 @opus 一个胶囊；「@到人」保持普通文本（无第二个高亮 class）
+    expect(html.match(/bg-\[var\(--cafe-accent\)\]\/15/g)).toHaveLength(1);
   });
 });
