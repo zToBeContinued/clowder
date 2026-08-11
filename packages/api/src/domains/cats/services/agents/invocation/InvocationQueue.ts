@@ -679,6 +679,21 @@ export class InvocationQueue {
     return count;
   }
 
+  /** Threads (other than none) that still have queued agent entries targeting this cat.
+   *  Used to re-kick waiting threads after a per-cat global parallelism slot frees up
+   *  (CAT_CAFE_PER_CAT_MAX_PARALLEL drain path). */
+  threadsWithQueuedCat(catId: string): string[] {
+    const threadIds = new Set<string>();
+    for (const q of this.queues.values()) {
+      for (const e of q) {
+        if (e.source === 'agent' && e.status === 'queued' && e.targetCats.includes(catId)) {
+          threadIds.add(e.threadId);
+        }
+      }
+    }
+    return [...threadIds];
+  }
+
   /** F122B: Check if a specific cat already has a queued agent entry for this thread.
    *  Used by callback-a2a-trigger for dedup — only checks 'queued' so that new handoffs
    *  can still be enqueued while an earlier entry is processing.

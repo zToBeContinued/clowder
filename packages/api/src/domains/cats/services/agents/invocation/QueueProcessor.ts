@@ -109,6 +109,8 @@ interface TrackerLike {
     catIds?: string[],
   ): boolean;
   has(threadId: string, catId?: string): boolean;
+  /** Active invocation count for a cat across ALL threads (per-cat global soft cap). */
+  countActiveForCat?(catId: string): number;
 }
 
 export interface InvocationRecordStoreLike {
@@ -1720,6 +1722,9 @@ export class QueueProcessor {
     const entryCat = entry.targetCats[0] ?? 'unknown';
     const sk = QueueProcessor.slotKey(entry.threadId, entryCat);
     if (this.processingSlots.has(sk) || this.deps.invocationTracker.has(entry.threadId, entryCat)) return false;
+    // Per-cat GLOBAL soft cap: skip (entry stays queued) when this cat is already
+    // running in enough other threads; drainCatWaiters re-kicks us on release.
+    if (this.isCatGloballySaturated(entryCat)) return false;
     if (!this.deps.queue.markProcessingById(entry.threadId, entry.id)) return false;
     this.processingSlots.set(sk, Date.now());
     void this.executeEntry(entry).then(
@@ -1727,11 +1732,13 @@ export class QueueProcessor {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(entry.threadId, entryCat, status).catch(() => {});
         this.signalDeliveryBatchDone(entry.threadId, status);
+        this.drainCatWaiters(entryCat, entry.threadId);
       },
       () => {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(entry.threadId, entryCat, 'failed').catch(() => {});
         this.signalDeliveryBatchDone(entry.threadId, 'failed');
+        this.drainCatWaiters(entryCat, entry.threadId);
       },
     );
     return true;
@@ -1755,6 +1762,32 @@ export class QueueProcessor {
     return false;
   }
 
+  /**
+   * Per-cat GLOBAL parallelism soft cap (CAT_CAFE_PER_CAT_MAX_PARALLEL, 0 = off).
+   * Applies only to queue auto-execution: the same cat driven from many channels
+   * at once shares one provider account/rate-limit, so unattended fan-out is
+   * throttled here. User-sent messages are never gated (same as a human opening
+   * several CLI windows deliberately).
+   */
+  private isCatGloballySaturated(catId: string): boolean {
+    const limit = Number(process.env.CAT_CAFE_PER_CAT_MAX_PARALLEL) || 0;
+    if (limit <= 0) return false;
+    const active = this.deps.invocationTracker.countActiveForCat?.(catId);
+    if (active === undefined) return false;
+    return active >= limit;
+  }
+
+  /** After a cat finishes anywhere, re-kick other threads whose queued entries
+   * for that cat were skipped by the global cap — otherwise they would sit
+   * until their own thread happened to get new activity. */
+  private drainCatWaiters(catId: string, completedThreadId: string): void {
+    if ((Number(process.env.CAT_CAFE_PER_CAT_MAX_PARALLEL) || 0) <= 0) return;
+    for (const tid of this.deps.queue.threadsWithQueuedCat(catId)) {
+      if (tid === completedThreadId) continue;
+      void this.tryAutoExecute(tid);
+    }
+  }
+
   private async tryExecuteNextAcrossUsers(
     threadId: string,
     catId: string,
@@ -1770,7 +1803,11 @@ export class QueueProcessor {
       const entryCat = entry.targetCats[0] ?? catId;
       const entrySk = QueueProcessor.slotKey(threadId, entryCat);
 
-      if (this.processingSlots.has(entrySk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+      if (
+        this.processingSlots.has(entrySk) ||
+        this.deps.invocationTracker.has(threadId, entryCat) ||
+        this.isCatGloballySaturated(entryCat)
+      ) {
         this.deps.queue.rollbackProcessing(threadId, entry.id);
         busyCats.add(entryCat);
         continue;
@@ -1782,11 +1819,13 @@ export class QueueProcessor {
           this.processingSlots.delete(entrySk);
           this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
           this.signalDeliveryBatchDone(threadId, status);
+          this.drainCatWaiters(entryCat, threadId);
         },
         () => {
           this.processingSlots.delete(entrySk);
           this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
           this.signalDeliveryBatchDone(threadId, 'failed');
+          this.drainCatWaiters(entryCat, threadId);
         },
       );
 
@@ -1825,7 +1864,11 @@ export class QueueProcessor {
       entryCat = entry.targetCats[0] ?? 'unknown';
       sk = QueueProcessor.slotKey(threadId, entryCat);
 
-      if (this.processingSlots.has(sk) || this.deps.invocationTracker.has(threadId, entryCat)) {
+      if (
+        this.processingSlots.has(sk) ||
+        this.deps.invocationTracker.has(threadId, entryCat) ||
+        this.isCatGloballySaturated(entryCat)
+      ) {
         this.deps.queue.rollbackProcessing(threadId, entry.id);
         busyCats.add(entryCat);
         continue;
@@ -1840,11 +1883,13 @@ export class QueueProcessor {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(threadId, entryCat, status).catch(() => {});
         this.signalDeliveryBatchDone(threadId, status);
+        this.drainCatWaiters(entryCat, threadId);
       },
       () => {
         this.processingSlots.delete(sk);
         this.onInvocationComplete(threadId, entryCat, 'failed').catch(() => {});
         this.signalDeliveryBatchDone(threadId, 'failed');
+        this.drainCatWaiters(entryCat, threadId);
       },
     );
 

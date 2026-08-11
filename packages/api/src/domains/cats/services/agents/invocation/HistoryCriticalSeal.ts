@@ -46,7 +46,10 @@ async function forceCriticalMemoryWriteback(input: HistoryCriticalSealInput): Pr
         assistantText: input.assistantText,
         completedAt: Date.now(),
       },
-      { ...(projectRoot ? { projectRoot } : {}), force: true },
+      // 改为项目分片（集中在 Clowder 根）：此前把 projectRoot 重定向到外部项目，
+      // 记忆写进外部项目的 .cat-cafe/memory/ 却从不被读回（读取侧只读 Clowder 根），
+      // 既落盘污染又白写。分片与常规 auto-write 同一位置，读取侧可见。
+      { ...(projectRoot ? { projectPath: projectRoot } : {}), force: true },
     );
   } catch (err) {
     log.warn(

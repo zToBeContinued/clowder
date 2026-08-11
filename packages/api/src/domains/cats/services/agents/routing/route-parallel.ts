@@ -353,7 +353,12 @@ export async function* routeParallel(
         const { getActivePackBlocks } = await import('../../../../packs/getActivePackBlocks.js');
         packBlocks = await getActivePackBlocks(deps.packStore);
       }
-      const agentMemoryContext = await readAgentMemoryForPrompt(catId as string);
+      // 记忆按项目分区：外部项目 thread 注入「该项目分片 + 全局」，避免多项目并行串味
+      const memoryProjectPath =
+        routeThread?.projectPath && routeThread.projectPath !== 'default' && !routeThread.projectPath.startsWith('games/')
+          ? routeThread.projectPath
+          : undefined;
+      const agentMemoryContext = await readAgentMemoryForPrompt(catId as string, memoryProjectPath);
       const lessonsContext = loadStandardContext ? await readLessonsForPrompt() : null;
       const contextLayerPlan = resolveContextLayerPlan({
         message,

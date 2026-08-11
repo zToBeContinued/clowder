@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
-import { AGENT_MEMORY_MAX_CHARS, getAgentMemoryDir, getAgentMemoryPath } from './AgentMemoryStore.js';
+import { pathsEqual } from '../../../../../utils/project-path.js';
+import { AGENT_MEMORY_MAX_CHARS, getAgentMemoryPath, getAgentProjectMemoryPath } from './AgentMemoryStore.js';
 
 export const MEMORY_AUTO_WRITE_MIN_INTERVAL_MS = 60_000;
 const MAX_SUMMARY_CHARS = 500;
@@ -31,6 +32,13 @@ export interface AgentMemoryAutoWriteResult {
 
 export interface AgentMemoryAutoWriterOptions {
   projectRoot?: string;
+  /**
+   * Path of the project the cat was working in. When set, the write goes to the
+   * per-project shard memory/{catId}/{projectSlug}.md (kept in the Clowder root,
+   * NOT inside the external project) so parallel work on different projects no
+   * longer overwrites the same「当前状态/最近交付」lines.
+   */
+  projectPath?: string;
   now?: () => number;
   minIntervalMs?: number;
   force?: boolean;
@@ -229,8 +237,15 @@ export async function autoUpdateAgentMemory(
   }
 
   const projectRoot = options.projectRoot ?? findMonorepoRoot();
-  const memoryDir = getAgentMemoryDir(projectRoot);
-  const memoryPath = getAgentMemoryPath(summary.catId, projectRoot);
+  // Project shard when the invocation ran in an EXTERNAL project; the Clowder
+  // host project itself keeps writing the global file (it is "home", not a
+  // side gig). Rate-limit + write lock are keyed by path, so shards throttle
+  // independently and parallel projects never clobber each other's state.
+  const useProjectShard = Boolean(options.projectPath && !pathsEqual(options.projectPath, findMonorepoRoot()));
+  const memoryPath = useProjectShard
+    ? getAgentProjectMemoryPath(summary.catId, options.projectPath!, projectRoot)
+    : getAgentMemoryPath(summary.catId, projectRoot);
+  const memoryDir = dirname(memoryPath);
   return withMemoryWriteLock(memoryPath, async () => {
     const lastWriteAt = lastWriteAtByMemoryPath.get(memoryPath) ?? 0;
     if (!options.force && now - lastWriteAt < minIntervalMs) {

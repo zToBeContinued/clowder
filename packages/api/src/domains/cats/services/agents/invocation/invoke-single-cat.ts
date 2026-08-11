@@ -476,6 +476,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
   const startTime = Date.now();
 
   let threadCreatedAt: number | undefined;
+  /** 记忆分区用：本次调用所在的外部项目路径（在 try 内解析，finally 的记忆回写使用） */
+  let memoryProjectPath: string | undefined;
 
   // F118 AC-C5: Flags for finally block fallback audit (must be before any early return)
   let hadError = false;
@@ -845,6 +847,7 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
           // to avoid triggering the F070 governance gate on a non-existent path.
           if (!thread.projectPath.startsWith('games/') && isUnderAllowedRoot(thread.projectPath)) {
             workingDirectory = thread.projectPath;
+            memoryProjectPath = thread.projectPath;
           }
         }
       } catch {
@@ -2633,14 +2636,19 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
     }
 
     if (!freshnessProtected && !params.deferMemoryWriteback && otelStatus === 'ok' && assistantTextForMemory.trim()) {
-      autoUpdateAgentMemory({
-        catId,
-        invocationId,
-        threadId,
-        ...(params.currentUserMessageId ? { currentUserMessageId: params.currentUserMessageId } : {}),
-        assistantText: assistantTextForMemory,
-        completedAt: Date.now(),
-      }).catch((err) => {
+      autoUpdateAgentMemory(
+        {
+          catId,
+          invocationId,
+          threadId,
+          ...(params.currentUserMessageId ? { currentUserMessageId: params.currentUserMessageId } : {}),
+          assistantText: assistantTextForMemory,
+          completedAt: Date.now(),
+        },
+        // 记忆按项目分区：外部项目的工作状态写进该项目的分片，
+        // 避免同一只猫多项目并行时互相覆盖（AutoWriter 内部对 host 项目回落全局）。
+        memoryProjectPath ? { projectPath: memoryProjectPath } : {},
+      ).catch((err) => {
         log.warn({ catId, threadId, invocationId, err }, 'memory auto-update failed (non-blocking)');
       });
     }

@@ -1220,7 +1220,10 @@ async function main(): Promise<void> {
           const profile = createKiroAcpProfile(config);
           const acpCommand = resolveAcpBootstrapCommand(acpProjectRoot, cliCommand ?? profile.command);
           const acpArgs = resolveAcpBootstrapArgs(acpProjectRoot, profile.startupArgs);
-          const maxLiveProcesses = 3;
+          // Kiro is the only non-multiplexing ACP carrier: each concurrent thread
+          // occupies one pool process, so this cap IS the cross-thread parallelism
+          // ceiling for Kiro cats. Raise via env for multi-channel workloads.
+          const maxLiveProcesses = Math.max(1, Number(process.env.CAT_CAFE_ACP_POOL_MAX_PROCESSES) || 3);
           const idleTtlMs = getKiroAcpIdleTtlMs();
           const healthCheckIntervalMs = 30_000;
           const poolFingerprint = createAcpPoolFingerprint({

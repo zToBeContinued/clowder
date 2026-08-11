@@ -84,6 +84,22 @@ export class InvocationTracker {
   }
 
   /**
+   * Count active invocations for one cat across ALL threads (TTL-aware).
+   * Basis for the per-cat global parallelism soft cap
+   * (CAT_CAFE_PER_CAT_MAX_PARALLEL) that protects provider quota when the
+   * same cat is driven from many channels at once.
+   */
+  countActiveForCat(catId: string): number {
+    let count = 0;
+    for (const [key, inv] of [...this.active]) {
+      if (inv.catId !== catId) continue;
+      if (this.isExpired(key, inv)) continue;
+      count++;
+    }
+    return count;
+  }
+
+  /**
    * F122 Phase A.1: Non-preemptive thread-level start.
    * Atomically checks if ANY slot in the thread is active (or deleting),
    * then registers the new slot — all in one synchronous operation.
