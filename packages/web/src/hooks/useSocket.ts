@@ -158,6 +158,7 @@ export interface SocketCallbacks {
   onSpawnStarted?: (data: { threadId: string; targetCats: string[]; invocationId: string }) => void;
   onTaskCreated?: (task: Record<string, unknown>) => void;
   onTaskUpdated?: (task: Record<string, unknown>) => void;
+  onTaskDeleted?: (data: { id: string; threadId: string }) => void;
   onHeartbeat?: (data: { threadId: string; timestamp: number }) => void;
   onMessageDeleted?: (data: { messageId: string; threadId: string; deletedBy: string }) => void;
   onMessageRestored?: (data: { messageId: string; threadId: string }) => void;
@@ -768,6 +769,10 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
 
     socket.on('task_updated', (task: Record<string, unknown>) => {
       callbacksRef.current.onTaskUpdated?.(task);
+    });
+
+    socket.on('task_deleted', (data: { id: string; threadId: string }) => {
+      callbacksRef.current.onTaskDeleted?.(data);
     });
 
     socket.on('task_attention', (task: Record<string, unknown>) => {

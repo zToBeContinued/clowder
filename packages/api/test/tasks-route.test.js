@@ -974,4 +974,57 @@ describe('Tasks Routes', () => {
 
     assert.equal(response.statusCode, 404);
   });
+
+  // ---- Bug fixes: evidence deep-merge + delete broadcast ----
+
+  test('PATCH evidence deep-merges (incremental delivery does not wipe prior fields)', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-1', title: '交付证据分次补', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    // First: only tests
+    const r1 = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { evidence: { tests: '单测通过' } },
+    });
+    assert.equal(r1.statusCode, 200);
+    assert.equal(r1.json().evidence.tests, '单测通过');
+
+    // Later: only review — must NOT wipe tests
+    const r2 = await app.inject({
+      method: 'PATCH',
+      url: `/api/tasks/${taskId}`,
+      payload: { evidence: { review: '跨家族复核通过' } },
+    });
+    assert.equal(r2.statusCode, 200);
+    const ev = r2.json().evidence;
+    assert.equal(ev.tests, '单测通过', 'previous tests evidence must survive a later review-only update');
+    assert.equal(ev.review, '跨家族复核通过');
+    assert.equal(typeof ev.updatedAt, 'number');
+  });
+
+  test('DELETE broadcasts task_deleted so UIs can drop the card in real time', async () => {
+    const app = await createApp();
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/tasks',
+      payload: { threadId: 'thread-del', title: '删我', why: '', createdBy: 'opus' },
+    });
+    const taskId = createRes.json().id;
+
+    const before = socketManager.getEvents().length;
+    const delRes = await app.inject({ method: 'DELETE', url: `/api/tasks/${taskId}` });
+    assert.equal(delRes.statusCode, 204);
+
+    const deletedEvent = socketManager.getEvents().slice(before).find((e) => e.event === 'task_deleted');
+    assert.ok(deletedEvent, 'DELETE must broadcast task_deleted');
+    assert.equal(deletedEvent.data.id, taskId);
+    assert.equal(deletedEvent.data.threadId, 'thread-del');
+    assert.equal(deletedEvent.room, 'thread:thread-del');
+  });
 });

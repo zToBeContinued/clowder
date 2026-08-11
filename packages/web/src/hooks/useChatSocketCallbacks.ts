@@ -44,7 +44,7 @@ export function useChatSocketCallbacks({
     patchMessage,
     requestStreamCatchUp,
   } = useChatStore();
-  const { addTask, updateTask } = useTaskStore();
+  const { addTask, updateTask, removeTask } = useTaskStore();
 
   return useMemo<SocketCallbacks>(
     () => ({
@@ -94,6 +94,10 @@ export function useChatSocketCallbacks({
         const t = task as Record<string, unknown>;
         if (t.threadId !== threadId || t.kind === 'pr_tracking') return;
         updateTask(task as unknown as TaskItem);
+      },
+      onTaskDeleted: (data) => {
+        if (data.threadId !== threadId) return;
+        removeTask(data.id);
       },
       // onThreadSummary removed (clowder-ai#343): summaries no longer injected into chat flow.
       onHeartbeat: (data) => {
@@ -150,6 +154,7 @@ export function useChatSocketCallbacks({
       addActiveInvocation,
       addTask,
       updateTask,
+      removeTask,
       removeThreadMessage,
       patchMessage,
       requestStreamCatchUp,

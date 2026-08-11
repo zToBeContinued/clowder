@@ -51,17 +51,19 @@ const TASK_STATUS_META: Record<
     dot: 'bg-[var(--task-blocked)]',
     next: 'doing',
   },
+  // next must be a legal backend transition (done→failed, failed→todo),
+  // otherwise the click PATCHes an illegal move and 409s.
   done: {
     chip: 'border-[var(--task-done)] bg-[var(--task-done-bg)] text-[var(--task-done-text)]',
     badge: 'border-[var(--task-done)] bg-[var(--task-done-soft)] text-[var(--task-done-text)]',
     dot: 'bg-[var(--task-done)]',
-    next: 'todo',
+    next: 'failed',
   },
   failed: {
     chip: 'border-[var(--task-failed)] bg-[var(--task-failed-bg)] text-[var(--task-failed-text)]',
     badge: 'border-[var(--task-failed)] bg-[var(--task-failed-soft)] text-[var(--task-failed-text)]',
     dot: 'bg-[var(--task-failed)]',
-    next: 'doing',
+    next: 'todo',
   },
 };
 

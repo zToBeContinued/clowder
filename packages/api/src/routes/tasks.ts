@@ -608,7 +608,14 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       }
     }
 
-    const updated = await taskStore.update(id, toUpdateInput(result.data));
+    const updateInput = toUpdateInput(result.data);
+    // Deep-merge evidence: partial evidence updates (e.g. adding only `tests`)
+    // must NOT wipe previously-recorded fields (e.g. `review`). Delivery evidence
+    // is filled incrementally, so overwrite-whole would silently drop 交付证据.
+    if (updateInput.evidence && previous.evidence) {
+      updateInput.evidence = { ...previous.evidence, ...updateInput.evidence };
+    }
+    const updated = await taskStore.update(id, updateInput);
     if (!updated) {
       reply.status(404);
       return { error: 'Task not found' };
@@ -624,10 +631,19 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
   // DELETE /api/tasks/:id
   app.delete('/api/tasks/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    // Capture threadId before delete so the UI can drop the card in real time
+    // (previously DELETE emitted nothing, so lists/badges kept a stale entry).
+    const existing = await taskStore.get(id);
     const deleted = await taskStore.delete(id);
     if (!deleted) {
       reply.status(404);
       return { error: 'Task not found' };
+    }
+    if (existing) {
+      socketManager.broadcastToRoom(`thread:${existing.threadId}`, 'task_deleted', {
+        id,
+        threadId: existing.threadId,
+      });
     }
     reply.status(204);
   });

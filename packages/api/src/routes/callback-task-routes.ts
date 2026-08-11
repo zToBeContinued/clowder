@@ -169,7 +169,10 @@ export function registerCallbackTaskRoutes(
     if (failureClass) updateData.failureClass = failureClass;
     if (failureReason) updateData.failureReason = failureReason;
     if (why) updateData.why = why;
-    if (evidence) updateData.evidence = { ...evidence, updatedAt: Date.now() };
+    // Deep-merge so cats can add evidence fields incrementally (tests now, review
+    // later) without wiping earlier ones — matches the MCP guidance to fill 交付证据
+    // across turns.
+    if (evidence) updateData.evidence = { ...existing.evidence, ...evidence, updatedAt: Date.now() };
     // 代切时记录真实 actor 和代切者
     if (isDelegating) {
       updateData.eventCatId = delegateActorId;

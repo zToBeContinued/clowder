@@ -1,7 +1,7 @@
 'use client';
 
 import type { TaskItem } from '@cat-cafe/shared';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { apiFetch } from '@/utils/api-client';
@@ -17,6 +17,7 @@ const SECTIONS = [
   { key: 'blocked', label: '阻塞中', icon: '⊘', defaultCollapsed: false },
   { key: 'todo', label: '待办', icon: '○', defaultCollapsed: true },
   { key: 'done', label: '已完成', icon: '●', defaultCollapsed: true },
+  { key: 'failed', label: '失败', icon: '✕', defaultCollapsed: true },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]['key'];
@@ -31,6 +32,7 @@ const SECTION_STYLES: Record<SectionKey, { text: string; border: string; section
   },
   todo: { text: 'text-cafe-muted', border: 'border-l-cafe-muted', sectionBg: '' },
   done: { text: 'text-conn-emerald-text', border: 'border-l-[var(--color-conn-emerald-text)]', sectionBg: '' },
+  failed: { text: 'text-conn-red-text', border: 'border-l-conn-red-text', sectionBg: '' },
 };
 
 function sortTasks(tasks: TaskItem[]): TaskItem[] {
@@ -40,6 +42,7 @@ function sortTasks(tasks: TaskItem[]): TaskItem[] {
     blocked: 2,
     todo: 3,
     done: 4,
+    failed: 5,
   };
   return [...tasks].sort((a, b) => {
     const rankA = rank[a.status as SectionKey] ?? 99;
@@ -49,8 +52,28 @@ function sortTasks(tasks: TaskItem[]): TaskItem[] {
   });
 }
 
+/** Merge live store tasks (current thread, socket-driven) over the one-shot global
+ * snapshot so `task_updated` / new tasks reflect in real time instead of freezing
+ * at first load. Store version wins when it's same-or-newer by updatedAt. */
+function mergeLiveTasks(globalTasks: TaskItem[] | null, storeTasks: TaskItem[]): TaskItem[] {
+  if (!globalTasks) return sortTasks(storeTasks);
+  const byId = new Map(globalTasks.map((t) => [t.id, t]));
+  for (const t of storeTasks) {
+    const g = byId.get(t.id);
+    if (!g || (t.updatedAt || t.createdAt) >= (g.updatedAt || g.createdAt)) byId.set(t.id, t);
+  }
+  return sortTasks([...byId.values()]);
+}
+
 function getDefaultCollapsed(): Record<SectionKey, boolean> {
-  const defaults: Record<SectionKey, boolean> = { doing: false, in_review: false, blocked: false, todo: true, done: true };
+  const defaults: Record<SectionKey, boolean> = {
+    doing: false,
+    in_review: false,
+    blocked: false,
+    todo: true,
+    done: true,
+    failed: true,
+  };
   if (typeof window === 'undefined') return defaults;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -163,7 +186,7 @@ export function TaskBoardPanel() {
     });
   };
 
-  const tasks = globalTasks ?? storeTasks;
+  const tasks = useMemo(() => mergeLiveTasks(globalTasks, storeTasks), [globalTasks, storeTasks]);
   const attentionCount = countAttentionTasks(tasks);
   const grouped = SECTIONS.map((section) => ({
     section,

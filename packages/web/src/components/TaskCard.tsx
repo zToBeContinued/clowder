@@ -22,13 +22,16 @@ const SOURCE_LABELS: Record<PromptSource, string> = {
   memory: 'memory',
 };
 
+// Must follow the backend TASK_VALID_TRANSITIONS, otherwise clicking the pill
+// PATCHes an illegal transition and 409s (looked like "点了没反应/卡住"):
+//   done → only failed;  failed → only todo.
 const STATUS_CYCLE: Record<TaskStatus, TaskStatus> = {
   todo: 'doing',
   doing: 'in_review',
   in_review: 'done',
   blocked: 'doing',
-  done: 'todo',
-  failed: 'doing',
+  done: 'failed',
+  failed: 'todo',
 };
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
