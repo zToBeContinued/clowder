@@ -98,7 +98,7 @@ describe('MessageActions convert to task', () => {
     });
     await act(async () => {
       Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
-        .find((button) => button.textContent === 'Convert to Task')
+        .find((button) => button.textContent === '转为任务')
         ?.click();
     });
 

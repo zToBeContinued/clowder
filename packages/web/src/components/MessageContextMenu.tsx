@@ -1,5 +1,7 @@
 'use client';
 
+import { useLayoutEffect, useRef, useState } from 'react';
+
 interface MessageContextMenuProps {
   x: number;
   y: number;
@@ -15,6 +17,8 @@ interface MessageContextMenuProps {
   onHardDelete?: () => void;
 }
 
+const VIEWPORT_MARGIN = 8;
+
 export function MessageContextMenu({
   x,
   y,
@@ -29,30 +33,53 @@ export function MessageContextMenu({
   onSoftDelete,
   onHardDelete,
 }: MessageContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ top: y, left: x });
+
+  // 视口边界钳制：菜单从消息右缘/光标处弹出时可能超出屏幕右/下边界，
+  // 在绘制前按实际尺寸把位置收回视口内（useLayoutEffect 在 paint 前执行，不闪烁）。
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (el == null || typeof window === 'undefined') {
+      setPos({ top: y, left: x });
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    let left = x;
+    let top = y;
+    if (left + rect.width > window.innerWidth - VIEWPORT_MARGIN) {
+      left = Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.width - VIEWPORT_MARGIN);
+    }
+    if (top + rect.height > window.innerHeight - VIEWPORT_MARGIN) {
+      top = Math.max(VIEWPORT_MARGIN, window.innerHeight - rect.height - VIEWPORT_MARGIN);
+    }
+    setPos({ top, left });
+  }, [x, y]);
+
   const items = [
     {
-      label: 'Copy link',
+      label: '复制链接',
       onClick: () => {
         void navigator.clipboard.writeText(`${window.location.origin}${window.location.pathname}#${messageId}`);
         onClose();
       },
     },
     {
-      label: 'Copy markdown',
+      label: '复制 Markdown',
       onClick: () => {
         void navigator.clipboard.writeText(content);
         onClose();
       },
     },
     {
-      label: 'Save message',
+      label: '收藏消息',
       onClick: () => {
         onSave?.();
         onClose();
       },
     },
     {
-      label: 'Convert to Task',
+      label: '转为任务',
       onClick: () => {
         onConvertToTask?.();
         onClose();
@@ -61,7 +88,7 @@ export function MessageContextMenu({
     ...(onPin
       ? [
           {
-            label: 'Pin message',
+            label: '固定消息',
             onClick: () => {
               onPin();
               onClose();
@@ -72,7 +99,7 @@ export function MessageContextMenu({
     ...(onEdit
       ? [
           {
-            label: 'Edit message',
+            label: '编辑消息',
             onClick: () => {
               onEdit();
               onClose();
@@ -81,7 +108,7 @@ export function MessageContextMenu({
         ]
       : []),
     {
-      label: 'Share messages...',
+      label: '分享消息…',
       onClick: () => {
         onShare?.();
         onClose();
@@ -90,7 +117,7 @@ export function MessageContextMenu({
     ...(onSoftDelete
       ? [
           {
-            label: 'Delete message',
+            label: '删除消息',
             onClick: () => {
               onSoftDelete();
               onClose();
@@ -101,7 +128,7 @@ export function MessageContextMenu({
     ...(onHardDelete
       ? [
           {
-            label: 'Delete permanently',
+            label: '永久删除',
             onClick: () => {
               onHardDelete();
               onClose();
@@ -115,8 +142,9 @@ export function MessageContextMenu({
     <>
       <div className="fixed inset-0 z-[9998]" onClick={onClose} aria-hidden="true" />
       <div
+        ref={menuRef}
         className="fixed z-[9999] min-w-[160px] rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface)] py-1 shadow-lg"
-        style={{ top: y, left: x }}
+        style={{ top: pos.top, left: pos.left }}
         role="menu"
       >
         {items.map((item) => (
