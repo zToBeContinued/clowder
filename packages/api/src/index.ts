@@ -1999,7 +1999,7 @@ async function main(): Promise<void> {
     fetchPrs: fetchPrsForSync,
     fetchPrReviews: fetchPrReviewsForSync,
   });
-  await app.register(backlogRoutes, { backlogStore, threadStore, messageStore });
+  await app.register(backlogRoutes, { backlogStore, threadStore, messageStore, invocationQueue, queueProcessor });
 
   // F076: External projects + Need Audit
   const { ExternalProjectStore } = await import('./domains/projects/external-project-store.js');

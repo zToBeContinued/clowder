@@ -5,7 +5,13 @@
  * GET  /api/callbacks/multi-mention-status — Poll request status
  */
 
-import { type CatId, catRegistry, createCatId, DEFAULT_TIMEOUT_MINUTES } from '@cat-cafe/shared';
+import {
+  type CatId,
+  catRegistry,
+  createCatId,
+  DEFAULT_TIMEOUT_MINUTES,
+  type MultiMentionResult,
+} from '@cat-cafe/shared';
 import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
@@ -19,9 +25,9 @@ import {
 } from '../domains/cats/services/agents/routing/MultiMentionOrchestrator.js';
 import { parseIntent } from '../domains/cats/services/context/IntentParser.js';
 import type { AgentRouter } from '../domains/cats/services/index.js';
-import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import type { IInvocationRecordStore } from '../domains/cats/services/stores/ports/InvocationRecordStore.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
+import { mergeTokenUsage, type TokenUsage } from '../domains/cats/services/types.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 import { requireCallbackAuth } from './callback-auth-prehandler.js';
 import { claimCallbackSideEffect } from './callback-freshness-side-effect.js';
@@ -37,6 +43,9 @@ export function getMultiMentionOrchestrator(): MultiMentionOrchestrator {
 /** For test reset */
 export function resetMultiMentionOrchestrator(): void {
   globalOrchestrator = undefined;
+  flushedRequests.clear();
+  for (const timer of activeTimers.values()) clearTimeout(timer);
+  activeTimers.clear();
 }
 
 // ── Schema ───────────────────────────────────────────────────────────
@@ -85,13 +94,43 @@ export interface MultiMentionRouteDeps {
 // ── Timeout tracking ────────────────────────────────────────────────
 const activeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-function scheduleTimeout(requestId: string, timeoutMinutes: number, log: FastifyBaseLogger): void {
+/** Requests whose result has already been flushed, to keep flush idempotent
+ * across the done-path and the timeout-path (a late timer must not double-post). */
+const flushedRequests = new Set<string>();
+
+/**
+ * Timeout handler (exported for tests): mark missing targets as timeout in the
+ * orchestrator AND flush the aggregated result. Previously the timer only called
+ * handleTimeout, so partial results stayed trapped in the in-memory orchestrator
+ * and the initiator never saw a summary — the multi-cat "ask → collect → continue"
+ * loop dead-ended on timeout. Now timeout produces the same summary + wake path as
+ * completion (with received answers preserved, missing ones marked 超时).
+ */
+export async function onMultiMentionTimeout(
+  deps: MultiMentionRouteDeps,
+  requestId: string,
+  threadId: string,
+  userId: string,
+  log: FastifyBaseLogger,
+): Promise<void> {
+  const orch = getMultiMentionOrchestrator();
+  orch.handleTimeout(requestId);
+  activeTimers.delete(requestId);
+  await flushResult(deps, requestId, threadId, userId, log);
+}
+
+function scheduleTimeout(
+  deps: MultiMentionRouteDeps,
+  requestId: string,
+  threadId: string,
+  userId: string,
+  timeoutMinutes: number,
+  log: FastifyBaseLogger,
+): void {
   const ms = timeoutMinutes * 60_000;
   const timer = setTimeout(() => {
-    const orch = getMultiMentionOrchestrator();
     log.info({ requestId, timeoutMinutes }, '[F086] Multi-mention timeout fired');
-    orch.handleTimeout(requestId);
-    activeTimers.delete(requestId);
+    void onMultiMentionTimeout(deps, requestId, threadId, userId, log);
   }, ms);
   // Unref so it doesn't keep the process alive
   timer.unref();
@@ -103,6 +142,72 @@ function cancelTimeout(requestId: string): void {
   if (timer) {
     clearTimeout(timer);
     activeTimers.delete(requestId);
+  }
+}
+
+/** Auto-continue is on by default; set CAT_CAFE_MM_AUTO_CONTINUE=0/false to disable. */
+function isAutoContinueEnabled(): boolean {
+  const v = process.env.CAT_CAFE_MM_AUTO_CONTINUE?.trim().toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'off';
+}
+
+const MAX_MM_QUEUE_DEPTH = 10;
+
+/**
+ * After a summary is flushed, wake the initiator (callbackTo) so it can act on the
+ * aggregated answers WITHOUT a human forwarding them. This closes the multi-cat
+ * "ask several cats → collect → keep going" loop that previously stopped at a
+ * posted-but-inert summary (flush used mentions:[] and never re-invoked anyone).
+ *
+ * Guardrails: only when queue deps exist; only if at least one real answer came
+ * back (no point waking someone to read all-timeouts); respects queue depth and
+ * skips if the initiator is already queued; disabled via CAT_CAFE_MM_AUTO_CONTINUE=0.
+ */
+function wakeInitiatorAfterFlush(
+  deps: MultiMentionRouteDeps,
+  result: MultiMentionResult,
+  summary: string,
+  threadId: string,
+  userId: string,
+  log: FastifyBaseLogger,
+): void {
+  const { invocationQueue, queueProcessor } = deps;
+  if (!invocationQueue || !queueProcessor) return;
+  if (!isAutoContinueEnabled()) return;
+
+  const hasRealAnswer = result.responses.some((r) => r.status === 'received');
+  if (!hasRealAnswer) return;
+
+  const callbackTo = result.request.callbackTo;
+  if (invocationQueue.countAgentEntriesForThread(threadId) >= MAX_MM_QUEUE_DEPTH) {
+    log.info({ threadId, callbackTo }, '[F086] auto-continue skipped: queue depth limit');
+    return;
+  }
+  if (invocationQueue.hasQueuedAgentForCat(threadId, callbackTo)) {
+    log.info({ threadId, callbackTo }, '[F086] auto-continue skipped: initiator already queued');
+    return;
+  }
+
+  const content = [
+    `[Multi-Mention 汇总回传] 你之前请多位猫回答的问题已收齐，汇总如下。`,
+    `请据此继续推进（无需等人转发）；如果还需要别人补充，再发起新的协作。`,
+    '',
+    summary,
+  ].join('\n');
+
+  const enqueued = invocationQueue.enqueue({
+    threadId,
+    userId,
+    content,
+    source: 'agent',
+    targetCats: [callbackTo],
+    intent: 'execute',
+    autoExecute: true,
+    callerCatId: callbackTo,
+  });
+  if (enqueued.outcome === 'enqueued') {
+    log.info({ threadId, callbackTo }, '[F086] auto-continue: initiator woken with summary');
+    void queueProcessor.tryAutoExecute?.(threadId);
   }
 }
 
@@ -292,7 +397,7 @@ async function dispatchToTarget(
           ? 'failed'
           : pendingProviderErrors.size > 0
             ? 'failed'
-          : 'succeeded';
+            : 'succeeded';
       await invocationRecordStore.update(invocationId, {
         status: finalInvocationStatus,
         ...(governanceErrorCode
@@ -383,6 +488,10 @@ async function flushResult(
   userId: string,
   log: FastifyBaseLogger,
 ): Promise<void> {
+  // Idempotent: done-path and timeout-path can both reach here; only flush once.
+  if (flushedRequests.has(requestId)) return;
+  flushedRequests.add(requestId);
+
   const orch = getMultiMentionOrchestrator();
   const result = orch.getResult(requestId);
   const { messageStore, socketManager } = deps;
@@ -448,6 +557,9 @@ async function flushResult(
     },
     '[F086] Multi-mention result flushed',
   );
+
+  // Close the loop: wake the initiator so it acts on the summary automatically.
+  wakeInitiatorAfterFlush(deps, result, content, threadId, userId, log);
 }
 
 // ── Route registration ───────────────────────────────────────────────
@@ -523,7 +635,7 @@ export function registerMultiMentionRoutes(app: FastifyInstance, deps: MultiMent
 
     // Start + schedule timeout
     orch.start(mmRequest.id);
-    scheduleTimeout(mmRequest.id, mmRequest.timeoutMinutes, request.log);
+    scheduleTimeout(deps, mmRequest.id, record.threadId, record.userId, mmRequest.timeoutMinutes, request.log);
 
     // Dispatch to all targets in parallel (fire and forget)
     // F122B B6: Use InvocationQueue when available, legacy direct dispatch as fallback

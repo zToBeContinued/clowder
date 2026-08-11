@@ -1726,3 +1726,122 @@ describe('Import sync hard-fails on parse error (zero writes)', () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 });
+
+describe('Backlog dispatch auto-start (唤醒 owner)', () => {
+  let backlogStore;
+  let threadStore;
+  let messageStore;
+  let mockQueue;
+  let autoExecuteCalls;
+
+  beforeEach(async () => {
+    const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
+    const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
+    const { MessageStore } = await import('../dist/domains/cats/services/stores/ports/MessageStore.js');
+    backlogStore = new BacklogStore();
+    threadStore = new ThreadStore();
+    messageStore = new MessageStore();
+
+    const entries = [];
+    autoExecuteCalls = [];
+    mockQueue = {
+      entries,
+      enqueue(input) {
+        const entry = { id: `q-${entries.length}`, ...input };
+        entries.push(entry);
+        return { outcome: 'enqueued', entry };
+      },
+      hasQueuedAgentForCat(threadId, catId) {
+        return entries.some((e) => e.threadId === threadId && e.targetCats?.includes(catId));
+      },
+      countAgentEntriesForThread(threadId) {
+        return entries.filter((e) => e.threadId === threadId && e.source === 'agent').length;
+      },
+    };
+  });
+
+  const H = { 'x-cat-cafe-user': 'default-user' };
+
+  async function makeApp(withQueue) {
+    const { backlogRoutes } = await import('../dist/routes/backlog.js');
+    const app = Fastify();
+    await app.register(backlogRoutes, {
+      backlogStore,
+      threadStore,
+      messageStore,
+      ...(withQueue
+        ? {
+            invocationQueue: mockQueue,
+            queueProcessor: {
+              tryAutoExecute: (threadId) => {
+                autoExecuteCalls.push(threadId);
+                return Promise.resolve();
+              },
+            },
+          }
+        : {}),
+    });
+    return app;
+  }
+
+  async function suggestAndApprove(app, title) {
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/backlog/items',
+      headers: H,
+      payload: { title, summary: 's', priority: 'p1', tags: ['t'] },
+    });
+    const itemId = createRes.json().id;
+    await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/suggest-claim`,
+      headers: H,
+      payload: { catId: 'codex', why: 'mine', plan: 'do it', requestedPhase: 'coding' },
+    });
+    const approveRes = await app.inject({
+      method: 'POST',
+      url: `/api/backlog/items/${itemId}/decide-claim`,
+      headers: H,
+      payload: { decision: 'approve', threadPhase: 'coding' },
+    });
+    assert.equal(approveRes.statusCode, 200);
+    return approveRes.json();
+  }
+
+  test('dispatch 后自动把 owner 入队唤醒（带任务背景 + autoExecute）', async () => {
+    const app = await makeApp(true);
+    const approved = await suggestAndApprove(app, 'Auto start me');
+
+    const wake = mockQueue.entries.find((e) => e.targetCats?.includes('codex'));
+    assert.ok(wake, 'owner codex 应被自动入队');
+    assert.equal(wake.source, 'agent');
+    assert.equal(wake.autoExecute, true);
+    assert.equal(wake.threadId, approved.thread.id);
+    assert.match(wake.content, /Auto start me/);
+    assert.ok(autoExecuteCalls.includes(approved.thread.id), 'tryAutoExecute 应被调用');
+
+    // kickoff 消息也应 @ 到 owner（而非空 mentions）
+    const msgs = await messageStore.getByThread(approved.thread.id, 10, 'default-user');
+    assert.ok(msgs[0].mentions?.includes('codex'), 'kickoff 应 mention owner');
+  });
+
+  test('无 queue 依赖时退化为原行为（贴 kickoff，不唤醒）', async () => {
+    const app = await makeApp(false);
+    const approved = await suggestAndApprove(app, 'Legacy path');
+    const msgs = await messageStore.getByThread(approved.thread.id, 10, 'default-user');
+    assert.equal(msgs.length, 1, '仍贴一条 kickoff');
+    // 无队列即无入队副作用（mockQueue 未接线）
+    assert.equal(mockQueue.entries.length, 0);
+  });
+
+  test('CAT_CAFE_BACKLOG_AUTO_START=0 时禁用唤醒', async () => {
+    process.env.CAT_CAFE_BACKLOG_AUTO_START = '0';
+    try {
+      const app = await makeApp(true);
+      await suggestAndApprove(app, 'Disabled autostart');
+      assert.equal(mockQueue.entries.length, 0, '开关关闭时不应入队');
+    } finally {
+      delete process.env.CAT_CAFE_BACKLOG_AUTO_START;
+    }
+  });
+});

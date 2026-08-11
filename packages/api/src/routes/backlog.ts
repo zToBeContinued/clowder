@@ -3,6 +3,7 @@ import { catIdSchema, catRegistry } from '@cat-cafe/shared';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getMissionHubSelfClaimScope } from '../config/cat-config-loader.js';
+import type { InvocationQueue } from '../domains/cats/services/agents/invocation/InvocationQueue.js';
 import type { IBacklogStore } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import { BacklogTransitionError } from '../domains/cats/services/stores/ports/BacklogStore.js';
 import { generateSortableId, type IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
@@ -27,6 +28,14 @@ export interface BacklogRoutesOptions {
   /** F058 Phase G: override path to docs/features/ directory for done-feature import */
   featuresDir?: string;
   resolveSelfClaimScope?: (catId: CatId) => MissionHubSelfClaimScope;
+  /**
+   * Optional: when provided, dispatching an approved backlog item auto-wakes the
+   * claiming cat (owner) so work actually starts, instead of posting an inert
+   * kickoff message that nobody acts on until a human enters the thread and @s them.
+   * Absent → legacy behavior (kickoff posted, no auto-start).
+   */
+  invocationQueue?: Pick<InvocationQueue, 'enqueue' | 'hasQueuedAgentForCat' | 'countAgentEntriesForThread'>;
+  queueProcessor?: { tryAutoExecute?(threadId: string): Promise<void> };
 }
 
 const createBacklogSchema = z.object({
@@ -173,9 +182,52 @@ function isActiveLeaseOwner(item: BacklogItem, catId: CatId, now: number): boole
   );
 }
 
+/** Backlog auto-start is on by default; set CAT_CAFE_BACKLOG_AUTO_START=0/false to disable. */
+function isBacklogAutoStartEnabled(): boolean {
+  const v = process.env.CAT_CAFE_BACKLOG_AUTO_START?.trim().toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'off';
+}
+
+/** The owner of a dispatched item is the cat whose claim was approved. */
+function resolveDispatchOwner(item: BacklogItem): CatId | undefined {
+  if (item.suggestion?.status === 'approved') return item.suggestion.catId;
+  return undefined;
+}
+
 export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (app, opts) => {
-  const { backlogStore, threadStore, messageStore, backlogDocPath } = opts;
+  const { backlogStore, threadStore, messageStore, backlogDocPath, invocationQueue, queueProcessor } = opts;
   const resolveSelfClaimScope = opts.resolveSelfClaimScope ?? ((catId: CatId) => getMissionHubSelfClaimScope(catId));
+
+  const MAX_BACKLOG_QUEUE_DEPTH = 10;
+
+  /**
+   * Wake the owning cat after a successful dispatch so the task actually starts.
+   * Only fires when queue deps exist, auto-start is enabled, and this call just
+   * created the kickoff (so re-dispatch/recovery does not double-wake).
+   */
+  function wakeOwnerForDispatch(item: BacklogItem, threadId: string, userId: string, phase: ThreadPhase): void {
+    if (!invocationQueue || !queueProcessor) return;
+    if (!isBacklogAutoStartEnabled()) return;
+    const owner = resolveDispatchOwner(item);
+    if (!owner) return;
+    if (invocationQueue.countAgentEntriesForThread(threadId) >= MAX_BACKLOG_QUEUE_DEPTH) return;
+    if (invocationQueue.hasQueuedAgentForCat(threadId, owner)) return;
+
+    const enqueued = invocationQueue.enqueue({
+      threadId,
+      userId,
+      content: buildKickoffMessage(item, phase),
+      source: 'agent',
+      targetCats: [owner],
+      intent: 'execute',
+      autoExecute: true,
+      callerCatId: owner,
+    });
+    if (enqueued.outcome === 'enqueued') {
+      app.log.info({ threadId, owner, itemId: item.id }, '[backlog] dispatch auto-start: owner woken');
+      void queueProcessor.tryAutoExecute?.(threadId);
+    }
+  }
 
   async function dispatchApprovedItem(item: BacklogItem, userId: string, phase: ThreadPhase) {
     // Acquire in-flight dispatch lock to prevent concurrent races (Redis only, 30s TTL)
@@ -245,17 +297,20 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
 
     // Step 3: Send kickoff message (idempotent via idempotencyKey)
     let kickoffMessageId = next.kickoffMessageId;
+    let justCreatedKickoff = false;
     if (!kickoffMessageId) {
+      const owner = resolveDispatchOwner(next);
       const kickoffMessage = await messageStore.append({
         userId,
         catId: null,
         threadId,
         idempotencyKey: `kickoff:${next.id}:${next.dispatchAttemptId}`,
         content: buildKickoffMessage(next, phase),
-        mentions: [],
+        mentions: owner ? [owner] : [],
         timestamp: Date.now(),
       });
       kickoffMessageId = kickoffMessage.id;
+      justCreatedKickoff = true;
     }
 
     // Step 4: Atomic state transition (Lua) or multi-step fallback
@@ -294,6 +349,13 @@ export const backlogRoutes: FastifyPluginAsync<BacklogRoutesOptions> = async (ap
         'failed to persist thread backlog reverse link after dispatch',
       );
     }
+    // Step 6: Auto-start the owner so dispatched work actually begins (F: no human
+    // relay needed). Only when this call created the kickoff, so re-dispatch/recovery
+    // does not re-wake an already-running owner.
+    if (justCreatedKickoff) {
+      wakeOwnerForDispatch(dispatched, threadId, userId, phase);
+    }
+
     const refreshedThread = await threadStore.get(threadId);
     return { statusCode: 200 as const, payload: { item: dispatched, thread: refreshedThread } };
   }
