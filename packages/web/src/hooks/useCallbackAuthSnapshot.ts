@@ -121,7 +121,8 @@ export function useCallbackAuthSnapshot(options: Options = {}): UseCallbackAuthS
   const fetchAndReschedule = useCallback(
     async (generation: number) => {
       try {
-        const res = await apiFetch('/api/debug/callback-auth');
+        // owner-gated：非 owner 会话 401/403 是预期响应，不触发全局会话失败 toast
+        const res = await apiFetch('/api/debug/callback-auth', undefined, { silentAuthFailure: true });
         if (generationRef.current !== generation) return; // unmounted / disabled mid-flight
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };

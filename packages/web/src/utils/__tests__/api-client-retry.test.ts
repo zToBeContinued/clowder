@@ -137,6 +137,23 @@ describe('apiFetch 401 retry', () => {
     expect(toasts[0]?.title).toContain('会话');
   });
 
+  it('silentAuthFailure: owner-gated 端点持续 401 时不弹全局会话失败 toast', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/session')) {
+        return Promise.resolve({ ok: true, status: 200 });
+      }
+      // owner-gate 拒绝：非 owner 会话的预期业务响应
+      return Promise.resolve({ ok: false, status: 401, json: () => Promise.resolve({ error: 'owner only' }) });
+    });
+    globalThis.fetch = mockFetch;
+
+    const { apiFetch, useToastStore } = await loadApiModules();
+    const res = await apiFetch('/api/debug/callback-auth', undefined, { silentAuthFailure: true });
+
+    expect(res.status).toBe(401);
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+  });
+
   it('retries session bootstrap on the next call after a bootstrap network failure', async () => {
     const calls: string[] = [];
     let sessionAttempts = 0;

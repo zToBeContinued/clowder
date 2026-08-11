@@ -114,6 +114,15 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
   };
 }
 
+export interface ApiFetchOptions {
+  /**
+   * 该端点的 401/403 属预期业务响应（如 owner-gated 的
+   * /api/debug/callback-auth 对非 owner 会话），由调用方自行处理，
+   * 不触发全局「会话恢复失败」toast。重试逻辑不变。
+   */
+  silentAuthFailure?: boolean;
+}
+
 /**
  * Fetch wrapper with session-cookie identity.
  *
@@ -123,8 +132,9 @@ function ensureBodyForMutation(init?: RequestInit): RequestInit | undefined {
  *
  * @param path - API path starting with '/' (e.g. '/api/messages')
  * @param init - Standard RequestInit options
+ * @param opts - Clowder-specific fetch behavior flags
  */
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(path: string, init?: RequestInit, opts?: ApiFetchOptions): Promise<Response> {
   await ensureSession();
   const normalized = ensureBodyForMutation(init);
   const res = await fetch(`${API_URL}${path}`, {
@@ -137,15 +147,16 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
     try {
       await ensureSession();
     } catch {
-      notifySessionFailure();
+      if (!opts?.silentAuthFailure) notifySessionFailure();
       return res;
     }
     const retryRes = await fetch(`${API_URL}${path}`, {
       ...normalized,
       credentials: 'include',
     });
-    // Only notify if retry also fails with 401 — silent recovery is normal after restart
-    if (retryRes.status === 401) {
+    // Only notify if retry also fails with 401 — silent recovery is normal after restart.
+    // Endpoint-level auth rejections (owner-gate 等) opt out via silentAuthFailure.
+    if (retryRes.status === 401 && !opts?.silentAuthFailure) {
       notifySessionFailure();
     }
     return retryRes;

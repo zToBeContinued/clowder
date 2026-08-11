@@ -176,9 +176,13 @@ export const useCallbackAuthStore = create<CallbackAuthState>((set, get) => ({
       // clears on panel open and stays cleared.
       //
       // Server defaults to Date.now() when no body provided.
-      const res = await apiFetch('/api/debug/callback-auth/mark-viewed', {
-        method: 'POST',
-      });
+      const res = await apiFetch(
+        '/api/debug/callback-auth/mark-viewed',
+        { method: 'POST' },
+        {
+          silentAuthFailure: true,
+        },
+      );
       if (!res.ok) return; // silently no-op on error — badge will catch up on next poll
       // Cloud Codex P2 #1425 round 2: don't blindly zero — derive optimistic
       // unviewed from snapshot using SERVER's authoritative lastViewedAt
