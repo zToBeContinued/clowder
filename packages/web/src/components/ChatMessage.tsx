@@ -1,12 +1,14 @@
 'use client';
 
 import type { TaskItem } from '@cat-cafe/shared';
+import { useCallback, useState } from 'react';
 import { type CatData, formatCatName } from '@/hooks/useCatData';
 import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { getMentionRe, getMentionToCat } from '@/lib/mention-highlight';
 import { parseDirection } from '@/lib/parse-direction';
 import { type ChatMessage as ChatMessageType, resolveBubbleExpanded, useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
+import { apiFetch } from '@/utils/api-client';
 import { getAgentVisibleContent, isUserVisibleChatMessage } from '@/utils/chat-message-visibility';
 import { CatAvatar } from './CatAvatar';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
@@ -336,6 +338,31 @@ export function ChatMessage({
     catRuntimeStatus === 'spawning' || catRuntimeStatus === 'pending' || catRuntimeStatus === 'streaming'
       ? 'active'
       : 'idle';
+
+  // 气泡级停止（与底部执行条同一条取消链路：POST /api/threads/:id/cancel/:catId）。
+  // 只挂在该猫「最新」的气泡上，猫在跑（spawning/pending/streaming）时显示。
+  const [stopPending, setStopPending] = useState(false);
+  const isLatestFromCat =
+    !!message.catId &&
+    !threadMessages.some(
+      (m) =>
+        m.catId === message.catId &&
+        m.id !== message.id &&
+        (m.timestamp > message.timestamp || (m.timestamp === message.timestamp && m.id > message.id)),
+    );
+  const showStopControl = catActivityStatus === 'active' && isLatestFromCat;
+  const handleStopThisCat = useCallback(async () => {
+    const tid = message.threadId ?? currentThreadId;
+    if (!tid || !message.catId || stopPending) return;
+    setStopPending(true);
+    try {
+      await apiFetch(`/api/threads/${encodeURIComponent(tid)}/cancel/${encodeURIComponent(message.catId)}`, {
+        method: 'POST',
+      });
+    } finally {
+      setStopPending(false);
+    }
+  }, [message.threadId, message.catId, currentThreadId, stopPending]);
   const deliveryOnlyDegraded = message.metadata?.usage?.deliveryOnlyMode === 'degraded';
   const fullRuntimeMetadataBadge = message.metadata ? (
     <div className="w-fit rounded-[var(--slock-radius-pill)] border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-2 py-0.5">
@@ -761,6 +788,18 @@ export function ChatMessage({
             <span className="inline-block w-1.5 h-4 bg-current animate-pulse ml-0.5 rounded-full opacity-50" />
           )}
         </div>
+        {showStopControl && (
+          <button
+            type="button"
+            onClick={() => void handleStopThisCat()}
+            disabled={stopPending}
+            className="mt-1.5 flex w-fit items-center gap-1.5 border border-[var(--console-border-soft)] bg-[var(--console-card-soft-bg)] px-2 py-1 text-[11px] font-semibold text-cafe-muted transition-colors hover:border-conn-red-text hover:text-conn-red-text disabled:opacity-50"
+            title={`停止 ${catStyle?.label ?? message.catId} 的本次生成`}
+          >
+            <span className="inline-block h-2 w-2 bg-current" aria-hidden />
+            <span>{stopPending ? '停止中…' : '停止生成'}</span>
+          </button>
+        )}
         {taskEntry && (
           <MessageTaskBadge
             task={taskEntry.task}
