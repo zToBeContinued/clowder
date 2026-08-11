@@ -57,4 +57,20 @@ describe('MarkdownContent mention highlighting', () => {
     expect(html.match(/text-\[var\(--cafe-accent\)\]/g)).toHaveLength(3);
     expect(html).not.toContain('color:#');
   });
+
+  it('带点号的猫名完整高亮，不在点处截断（cursor-gpt-5.6-sol-max）', () => {
+    const html = render('返修完成后由 @cursor-gpt-5.6-sol-max 复核放行');
+    // 完整 handle 必须整体落在同一个高亮 span 内
+    expect(html).toContain('@cursor-gpt-5.6-sol-max</span>');
+    // 不得出现「高亮 @cursor-gpt-5 + 裸文本 .6-sol-max」的截断形态
+    expect(html).not.toContain('@cursor-gpt-5</span>');
+  });
+
+  it('句末的点仍是边界，不被吞进 mention（@opus. / @opus.中文）', () => {
+    const htmlEnd = render('交给 @opus. 明天继续');
+    expect(htmlEnd).toContain('@opus</span>');
+    expect(htmlEnd).not.toContain('@opus.</span>');
+    const htmlCjk = render('交给 @opus.然后收尾');
+    expect(htmlCjk).toContain('@opus</span>');
+  });
 });

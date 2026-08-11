@@ -21,7 +21,10 @@ import { apiFetch } from '@/utils/api-client';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 
 /* ── @mention highlighting ─────────────────────────────────── */
-const GENERIC_MENTION_RE = /@[^\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]+/g;
+// 名字内部的点是 handle 的一部分（如 @cursor-gpt-5.6-sol-max），句末的点仍作边界：
+// 点必须后跟 ASCII handle 字符才继续（与后端 a2a-mentions HANDLE_CONTINUATION_RE 对齐）。
+const GENERIC_MENTION_RE =
+  /@[^\s,.:;!?()[\]{}<>，。！？、：；（）【】《》「」『』〈〉]+(?:\.[a-zA-Z0-9_-]+)*/g;
 
 function highlightMentions(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
