@@ -117,6 +117,16 @@ export class CursorAgentService implements AgentService {
       // 独立段落并用 "---" 分隔渲染 → 展开后一词一行。仿 Claude parser 的
       // 做法：缓冲整块，块边界（completed/assistant/result 等非 delta 事件）再发。
       let thinkingBuffer = '';
+      // 重放守卫：cursor CLI 断线重连（type:retry/subtype:resuming）后会从
+      // checkpoint 重放已发送的 assistant 文本，且重放的 chunk 边界与原发不同
+      //（原始归档实证：同一句话原发是一整条事件、重放被拆成多个小片）。若不
+      // 拦截，消息中段会出现整块内容 ×2。窗口规则：resuming 后的增量若完整
+      // 存在于已发正文中则视为重放吞掉；遇到新内容、或吞掉量超过已发全文长度
+      //（重放不可能超过它）即退出窗口。
+      let emittedAssistantText = '';
+      let replayGuard = false;
+      let replaySwallowed = 0;
+      let replayBudget = 0;
 
       for await (const event of events) {
         // 原始事件归档（诊断 cursor 首段重发 / exit 1）；fire-and-forget，不改时序。
@@ -174,6 +184,17 @@ export class CursorAgentService implements AgentService {
           continue;
         }
 
+        // 断线重连事件：进入重放甄别窗口（放在 thinking flush 之前，重连不算
+        // 思考块边界——思考没有结束，只是传输断了）。
+        if (event.type === 'retry' || event.type === 'connection') {
+          if (event.subtype === 'resuming' && emittedAssistantText) {
+            replayGuard = true;
+            replaySwallowed = 0;
+            replayBudget = emittedAssistantText.length;
+          }
+          continue;
+        }
+
         const thinking = readThinkingDelta(event);
         if (thinking) {
           thinkingBuffer += thinking;
@@ -197,6 +218,21 @@ export class CursorAgentService implements AgentService {
           if (!text) continue;
           if (isAssistantDelta(event)) {
             sawAssistantDelta = true;
+            if (replayGuard) {
+              if (emittedAssistantText.includes(text) && replaySwallowed + text.length <= replayBudget) {
+                replaySwallowed += text.length;
+                continue;
+              }
+              // 出现新内容（或超出重放预算）→ 重放结束，恢复正常透传
+              replayGuard = false;
+              if (replaySwallowed > 0) {
+                log.info(
+                  { catId: this.catId, invocationId: options?.invocationId, swallowedChars: replaySwallowed },
+                  '[CursorAgent] 已吞掉断线重连后的重放文本',
+                );
+              }
+            }
+            emittedAssistantText += text;
             yield { type: 'text', catId: this.catId, content: text, metadata, timestamp: Date.now() };
           } else if (!sawAssistantDelta) {
             // 没有流式增量时(如未启用 partial)，最终快照兜底整段输出。

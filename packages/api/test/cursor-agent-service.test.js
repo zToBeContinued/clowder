@@ -73,6 +73,61 @@ test('thinking 逐词 delta 缓冲为整块（不再一词一行）', async () =
   assert.equal(payload.text, '让我想一想这个问题', 'delta 必须按序拼接为完整段落');
 });
 
+test('重放守卫：断线重连(resuming)后重放的已发文本被吞掉', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's-replay', model: 'm' };
+    yield asmDelta('测试通过，866 passed。');
+    yield asmDelta('我把窗口加宽。');
+    // 网络断开 → CLI 从 checkpoint 恢复并重放（chunk 边界与原发不同）
+    yield { type: 'connection', subtype: 'reconnecting', attempt: 1 };
+    yield { type: 'retry', subtype: 'resuming', checkpoint_turn_count: 83, attempt: 1 };
+    yield asmDelta('测试通过，');
+    yield asmDelta('866 passed。');
+    yield asmDelta('我把窗口加宽。');
+    // 重放结束，新内容开始
+    yield asmDelta('接下来做字段级校验。');
+    yield { type: 'result', subtype: 'success', is_error: false };
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+  const fullText = messages
+    .filter((m) => m.type === 'text')
+    .map((m) => m.content)
+    .join('');
+  assert.equal(
+    fullText,
+    '测试通过，866 passed。我把窗口加宽。接下来做字段级校验。',
+    '重放的片段必须被吞掉，新内容正常透传',
+  );
+});
+
+test('重放守卫：无 resuming 时同文正常输出（合法重复不受影响）', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's-legit', model: 'm' };
+    yield asmDelta('866 passed, exit 0。');
+    yield asmDelta('重跑一遍：');
+    yield asmDelta('866 passed, exit 0。');
+    yield { type: 'result', subtype: 'success', is_error: false };
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+  const fullText = messages
+    .filter((m) => m.type === 'text')
+    .map((m) => m.content)
+    .join('');
+  assert.equal(fullText, '866 passed, exit 0。重跑一遍：866 passed, exit 0。', '没有重连事件时不做任何去重');
+});
+
+function asmDelta(text) {
+  return {
+    type: 'assistant',
+    timestamp_ms: Date.now(),
+    message: { role: 'assistant', content: [{ type: 'text', text }] },
+  };
+}
+
 test('流中断时已缓冲的 thinking 不丢失（收尾 flush）', async () => {
   const service = new CursorAgentService({ model: 'cursor-test-model' });
   const spawnOverride = async function* spawnCliOverride() {
