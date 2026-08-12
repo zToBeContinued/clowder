@@ -100,6 +100,26 @@ describe('AgentStatusIndicator', () => {
     expect(html).toContain('⚠ deliveryOnly · missing_summary');
   });
 
+  it('shows current activity (latest tool call) next to the status label', () => {
+    const html = renderToStaticMarkup(
+      <AgentStatusIndicator
+        threadId="thread-1"
+        activeInvocations={{
+          'inv-1': { catId: 'gpt52', mode: 'execute', startedAt: Date.now() - 5000 },
+        }}
+        catStatuses={{ gpt52: 'streaming' }}
+        catInvocations={{
+          gpt52: {
+            currentActivity: { kind: 'tool', label: 'shell · pnpm --filter web test', at: Date.now() },
+          },
+        }}
+        getCatById={getCatById}
+      />,
+    );
+
+    expect(html).toContain('shell · pnpm --filter web test');
+  });
+
   it('ignores stale cat status when invocation slot is not present', () => {
     const html = renderToStaticMarkup(
       <AgentStatusIndicator

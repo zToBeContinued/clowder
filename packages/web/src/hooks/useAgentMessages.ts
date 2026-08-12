@@ -167,6 +167,33 @@ function safeJsonPreview(value: unknown, maxLength: number): string {
   }
 }
 
+/** 运行指示器的「正在做什么」一行摘要：工具名 + 最有辨识度的参数（命令/路径/查询）。 */
+function formatToolActivityLabel(toolName: string, toolInput: unknown): string {
+  let input = toolInput;
+  if (typeof input === 'string') {
+    try {
+      input = JSON.parse(input);
+    } catch {
+      // 非 JSON 字符串就原样当参数用
+    }
+  }
+  let key: string | undefined;
+  if (typeof input === 'string' && input.trim()) {
+    key = input.trim();
+  } else if (input && typeof input === 'object') {
+    const rec = input as Record<string, unknown>;
+    for (const field of ['command', 'cmd', 'path', 'file_path', 'filePath', 'file', 'pattern', 'query', 'url']) {
+      const v = rec[field];
+      if (typeof v === 'string' && v.trim()) {
+        key = v.trim();
+        break;
+      }
+    }
+  }
+  const base = key ? `${toolName} · ${key}` : toolName;
+  return truncate(base, 72);
+}
+
 function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const parsed = value as CatInvocationInfo['contextBudget'];
@@ -3404,6 +3431,10 @@ export function useAgentMessages() {
         markSawStream(msg.catId, msg.invocationId);
         const toolName = msg.toolName ?? 'unknown';
         const detail = msg.toolInput ? safeJsonPreview(msg.toolInput, 200) : undefined;
+        // 运行指示器「正在做什么」：每个工具调用即时可见（不然只有干巴巴的计时）
+        setCatInvocation(msg.catId, {
+          currentActivity: { kind: 'tool', label: formatToolActivityLabel(toolName, msg.toolInput), at: Date.now() },
+        });
         const isFileChange = toolName === 'file_change';
         if (isFileChange) {
           console.info('[agent_message] file_change tool_use received', {
@@ -4078,6 +4109,13 @@ export function useAgentMessages() {
             if (!shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
               setCatStatus(msg.catId, 'streaming');
               const count = typeof parsed.count === 'number' ? parsed.count : 1;
+              setCatInvocation(msg.catId, {
+                currentActivity: {
+                  kind: 'tool',
+                  label: `web_search${count > 1 ? ` x${count}` : ''}`,
+                  at: Date.now(),
+                },
+              });
               const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
                 ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
               });
@@ -4101,6 +4139,13 @@ export function useAgentMessages() {
             const effectiveInv = msg.invocationId ?? parsedInv;
             // Cloud P1#3 (PR#1352): suppress stale thinking for completed invocation.
             if (thinkingText && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
+              // thinking delta 高频，仅在活动类型切换时更新指示器，避免每个 delta 重渲染
+              const prevActivity = useChatStore.getState().catInvocations[msg.catId]?.currentActivity;
+              if (prevActivity?.kind !== 'thinking') {
+                setCatInvocation(msg.catId, {
+                  currentActivity: { kind: 'thinking', label: '深度思考中', at: Date.now() },
+                });
+              }
               const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
                 ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
               });

@@ -760,6 +760,13 @@ export function useSocket(callbacks: SocketCallbacks, threadId?: string) {
             },
           };
         });
+        // 新一次调用启动时清掉上一轮的「正在做什么」，避免指示器残留旧活动误导
+        if (data.phase === 'runtime_starting' && data.targetCats?.length) {
+          const { setCatInvocation } = useChatStore.getState();
+          for (const catId of data.targetCats) {
+            setCatInvocation(catId, { currentActivity: undefined });
+          }
+        }
       },
     );
 

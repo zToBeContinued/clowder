@@ -537,6 +537,12 @@ export interface CatInvocationInfo {
   sessionId?: string;
   invocationId?: string;
   phase?: InvocationPhase;
+  /** 运行指示器的「正在做什么」——最近一次工具调用/思考事件的一行摘要 */
+  currentActivity?: {
+    kind: 'tool' | 'thinking';
+    label: string;
+    at: number;
+  };
   toolPolicy?: 'minimal' | 'standard' | 'full';
   toolPolicySource?: 'agent-default' | 'user-override';
   contextBudget?: {

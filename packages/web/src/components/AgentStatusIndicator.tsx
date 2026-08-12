@@ -23,6 +23,7 @@ interface AgentStatusRow {
   status?: CatStatusType;
   phase?: InvocationPhase;
   contextBudget?: CatInvocationInfo['contextBudget'];
+  activity?: CatInvocationInfo['currentActivity'];
 }
 
 function formatElapsed(startedAt: number, now: number): string {
@@ -90,6 +91,7 @@ function buildRows({
       status: catStatuses[slot.catId],
       phase: slot.phase ?? catInvocations[slot.catId]?.phase,
       contextBudget: slot.contextBudget ?? catInvocations[slot.catId]?.contextBudget,
+      activity: catInvocations[slot.catId]?.currentActivity,
     });
   }
 
@@ -147,6 +149,15 @@ export function AgentStatusIndicator({
             <span className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ backgroundColor: row.color }} />
             <span className="font-medium text-[var(--cafe-text)]">{row.label}</span>
             <span className="text-[var(--cafe-text-muted)]">{statusLabel}</span>
+            {/* 「正在做什么」：最近一次工具调用/思考的摘要，光看计时不知道猫在干嘛 */}
+            {row.activity && (
+              <span
+                className="max-w-[22rem] truncate font-mono text-[11px] text-[var(--cafe-text-muted)]"
+                title={row.activity.label}
+              >
+                · {row.activity.label}
+              </span>
+            )}
             {deliveryOnlyWarning && (
               <span className="text-conn-amber-text [overflow-wrap:anywhere]">{deliveryOnlyWarning}</span>
             )}
