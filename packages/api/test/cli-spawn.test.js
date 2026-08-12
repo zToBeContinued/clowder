@@ -467,6 +467,27 @@ test('spawnCli yields __cliError for exit code 1 even with valid output (no soft
   assert.equal(results[1].exitCode, 1);
 });
 
+// 2026-08-13 现场：账号高级模型额度耗尽后，cursor-agent 以 code 1 裸退出，
+// 用户只看到谜语「CLI 异常退出 (code: 1)」，排障只能靠人工复现 stderr。
+test('spawnCli marks "Cannot use this model" stderr as model_unavailable with a readable hint', async () => {
+  const proc = createMockProcess({ exitOnKill: false });
+  const spawnFn = createMockSpawnFn(proc);
+
+  const promise = collect(spawnCli({ command: 'cursor-agent', args: [] }, { spawnFn }));
+
+  proc.stderr.write('Cannot use this model: claude-opus-5-thinking-max. Available models: auto, composer-2.5\n');
+  proc.stdout.end();
+  proc._emitter.emit('exit', 1, null);
+
+  const results = await promise;
+
+  assert.equal(results.length, 1);
+  assert.equal(isCliError(results[0]), true);
+  assert.equal(results[0].reasonCode, 'model_unavailable');
+  assert.ok(results[0].message.includes('模型'), '面向用户的消息必须说明是模型不可用');
+  assert.ok(!results[0].message.includes('Available models'), '不得泄漏原始 stderr');
+});
+
 test('spawnCli marks no rollout found stderr as missing_rollout reasonCode', async () => {
   const proc = createMockProcess({ exitOnKill: false });
   const spawnFn = createMockSpawnFn(proc);

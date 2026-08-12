@@ -23,7 +23,7 @@ const log = createModuleLogger('cli-spawn');
 
 const IS_WINDOWS = process.platform === 'win32';
 
-type CliErrorReasonCode = 'invalid_thinking_signature' | 'missing_rollout';
+type CliErrorReasonCode = 'invalid_thinking_signature' | 'missing_rollout' | 'model_unavailable';
 
 function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined {
   if (/Invalid [`'"]?signature[`'"]? in [`'"]?thinking[`'"]? block/i.test(stderr)) {
@@ -32,8 +32,18 @@ function classifyKnownCliStderr(stderr: string): CliErrorReasonCode | undefined 
   if (/no rollout found/i.test(stderr)) {
     return 'missing_rollout';
   }
+  // 账号权限/额度变化后 CLI 以 code 1 裸退出（2026-08-13 现场：claude/gpt
+  // 从可用列表消失，猫全部哑火，用户只看到「CLI 异常退出 (code: 1)」）。
+  if (/Cannot use this model/i.test(stderr)) {
+    return 'model_unavailable';
+  }
   return undefined;
 }
+
+/** 已知原因码的用户可读补充说明（不泄漏原始 stderr）。 */
+const REASON_CODE_HINTS: Partial<Record<CliErrorReasonCode, string>> = {
+  model_unavailable: '；账号当前无权使用所配模型（常见于额度用尽或套餐变化），请在 Hub 更换模型或检查账号',
+};
 
 /** Grace period between SIGTERM and SIGKILL */
 export const KILL_GRACE_MS = 3_000;
@@ -483,12 +493,13 @@ export async function* spawnCli(
       if (stderrBuffer.trim()) {
         log.error({ command: options.command, stderr: stderrBuffer.trim().slice(-1000) }, 'CLI stderr (debug only)');
       }
+      const reasonHint = reasonCode ? (REASON_CODE_HINTS[reasonCode] ?? '') : '';
       yield {
         __cliError: true,
         exitCode,
         signal: exitSignal,
         // Sanitized message — no raw stderr exposed to users
-        message: `CLI 异常退出 (code: ${exitCode ?? 'null'}, signal: ${exitSignal ?? 'none'})`,
+        message: `CLI 异常退出 (code: ${exitCode ?? 'null'}, signal: ${exitSignal ?? 'none'})${reasonHint}`,
         command: options.command,
         ...(reasonCode ? { reasonCode } : {}),
       };
