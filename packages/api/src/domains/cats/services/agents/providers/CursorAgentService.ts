@@ -18,6 +18,7 @@ import {
   readResultError,
   readResultUsage,
   readThinkingDelta,
+  readToolCall,
 } from './cursor-event-parser.js';
 
 const log = createModuleLogger('cursor-agent');
@@ -220,6 +221,32 @@ export class CursorAgentService implements AgentService {
             timestamp: Date.now(),
           };
           thinkingBuffer = '';
+        }
+
+        // 工具调用：转成标准 tool_use/tool_result，气泡工具卡片与运行指示器的
+        // 「正在做什么」都依赖它。此前 tool_call 事件被完全忽略——cursor 猫跑
+        // 半小时工具链，UI 上只剩 thinking 残留，看起来像挂死。
+        const toolCall = readToolCall(event);
+        if (toolCall) {
+          if (toolCall.phase === 'started') {
+            yield {
+              type: 'tool_use',
+              catId: this.catId,
+              toolName: toolCall.toolName,
+              ...(toolCall.args ? { toolInput: toolCall.args } : {}),
+              metadata,
+              timestamp: Date.now(),
+            };
+          } else if (toolCall.resultPreview) {
+            yield {
+              type: 'tool_result',
+              catId: this.catId,
+              content: toolCall.resultPreview,
+              metadata,
+              timestamp: Date.now(),
+            };
+          }
+          continue;
         }
 
         if (event.type === 'assistant') {

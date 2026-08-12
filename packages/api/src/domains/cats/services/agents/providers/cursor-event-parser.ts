@@ -99,3 +99,48 @@ export function readResultError(event: CursorStreamEvent): string | null {
   }
   return null;
 }
+
+export interface CursorToolCall {
+  phase: 'started' | 'completed';
+  toolName: string;
+  args?: Record<string, unknown>;
+  /** completed 时的结果预览（截断）；工具卡片与运行指示器用。 */
+  resultPreview?: string;
+}
+
+/**
+ * tool_call 事件解析。cursor 的工具调用形态：
+ *   {"type":"tool_call","subtype":"started","tool_call":{"readToolCall":{"args":{...}}}}
+ *   {"type":"tool_call","subtype":"completed","tool_call":{"readToolCall":{"args":{...},"result":{"success":{...}}}}}
+ * 工具名封装在 tool_call 容器的键名里（readToolCall/shellToolCall/writeToolCall…）。
+ * 此前该类型完全没有处理分支——cursor 猫的工具调用在气泡与运行指示器上全部
+ * 不可见，长任务看起来像挂死（只剩 thinking 残留显示）。
+ */
+export function readToolCall(event: CursorStreamEvent): CursorToolCall | null {
+  if (event.type !== 'tool_call') return null;
+  if (event.subtype !== 'started' && event.subtype !== 'completed') return null;
+  const container = (event as Record<string, unknown>).tool_call;
+  if (!container || typeof container !== 'object') return null;
+  const entryKey = Object.keys(container).find((key) => key.endsWith('ToolCall'));
+  const inner = entryKey ? (container as Record<string, Record<string, unknown>>)[entryKey] : undefined;
+  const toolName = entryKey ? entryKey.replace(/ToolCall$/, '') : 'tool';
+  const args =
+    inner && typeof inner.args === 'object' && inner.args !== null ? (inner.args as Record<string, unknown>) : undefined;
+
+  let resultPreview: string | undefined;
+  if (event.subtype === 'completed') {
+    const result = inner?.result;
+    if (result && typeof result === 'object') {
+      const kind = Object.keys(result)[0] ?? 'done';
+      const payload = (result as Record<string, unknown>)[kind];
+      const text =
+        typeof payload === 'string'
+          ? payload
+          : payload && typeof payload === 'object' && typeof (payload as { content?: unknown }).content === 'string'
+            ? ((payload as { content: string }).content as string)
+            : JSON.stringify(payload ?? '');
+      resultPreview = `[${toolName}] ${kind}: ${String(text).slice(0, 200)}`;
+    }
+  }
+  return { phase: event.subtype, toolName, ...(args ? { args } : {}), ...(resultPreview ? { resultPreview } : {}) };
+}

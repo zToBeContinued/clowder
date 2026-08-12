@@ -102,6 +102,69 @@ test('重放守卫：断线重连(resuming)后重放的已发文本被吞掉', a
   );
 });
 
+test('tool_call 事件转成 tool_use/tool_result（此前被完全忽略，UI 看不到猫在干嘛）', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's-tool', model: 'm' };
+    // 真实归档形态：工具名封装在 tool_call 容器的键名里
+    yield {
+      type: 'tool_call',
+      subtype: 'started',
+      call_id: 'toolu_1',
+      tool_call: { readToolCall: { args: { path: 'D:\\project\\quant\\BACKLOG.md', offset: 78 } } },
+    };
+    yield {
+      type: 'tool_call',
+      subtype: 'completed',
+      call_id: 'toolu_1',
+      tool_call: {
+        readToolCall: {
+          args: { path: 'D:\\project\\quant\\BACKLOG.md', offset: 78 },
+          result: { success: { content: '治理与排期候选……' } },
+        },
+      },
+    };
+    yield asmDelta('看完了。');
+    yield { type: 'result', subtype: 'success', is_error: false };
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+  const toolUse = messages.find((m) => m.type === 'tool_use');
+  assert.ok(toolUse, 'tool_call/started 必须产出 tool_use');
+  assert.equal(toolUse.toolName, 'read');
+  assert.equal(toolUse.toolInput?.path, 'D:\\project\\quant\\BACKLOG.md');
+  const toolResult = messages.find((m) => m.type === 'tool_result');
+  assert.ok(toolResult, 'tool_call/completed 必须产出 tool_result');
+  assert.ok(toolResult.content.includes('[read] success'), `结果预览应含工具名与结果类别: ${toolResult.content}`);
+  assert.equal(
+    messages.filter((m) => m.type === 'text').map((m) => m.content).join(''),
+    '看完了。',
+    '正文不受工具事件影响',
+  );
+});
+
+test('tool_call 事件同样作为 thinking 块边界（思考先落块再出工具卡）', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's-tool-think', model: 'm' };
+    yield { type: 'thinking', subtype: 'delta', text: '先查一下文件', timestamp_ms: 1 };
+    yield {
+      type: 'tool_call',
+      subtype: 'started',
+      call_id: 'toolu_2',
+      tool_call: { shellToolCall: { args: { command: 'git status' } } },
+    };
+    yield { type: 'result', subtype: 'success', is_error: false };
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+  const thinkingIdx = messages.findIndex((m) => m.type === 'system_info' && m.content?.includes('"thinking"'));
+  const toolIdx = messages.findIndex((m) => m.type === 'tool_use');
+  assert.ok(thinkingIdx >= 0 && toolIdx >= 0, '思考块与工具卡都要出现');
+  assert.ok(thinkingIdx < toolIdx, '思考块必须先于工具卡（tool_call 是块边界）');
+  assert.equal(messages[toolIdx].toolName, 'shell');
+});
+
 test('调用级汇总去重：带 model_call_id 的累计汇总不重复追加', async () => {
   const service = new CursorAgentService({ model: 'cursor-test-model' });
   const spawnOverride = async function* spawnCliOverride() {
