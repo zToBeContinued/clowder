@@ -163,8 +163,14 @@ export class InvocationQueue {
     const entries = await this.persistence.list();
     const threadIds = new Set<string>();
     let restored = 0;
+    // 无 expiresAt 的持久化条目按 createdAt + 2h 兜底判定过期——历史版本的
+    // 消费清理有漏（只删带 pendingMentionId 的），残留会在每次重启被复活重发
+    // 几小时前的旧棒。缺 createdAt 的一律清掉。
+    const FALLBACK_TTL_MS = 2 * 60 * 60 * 1000;
     for (const persisted of entries) {
-      if (persisted.expiresAt !== undefined && persisted.expiresAt <= now) {
+      const effectiveExpiry =
+        persisted.expiresAt ?? (persisted.createdAt ? persisted.createdAt + FALLBACK_TTL_MS : 0);
+      if (effectiveExpiry <= now) {
         await this.persistence.delete(persisted.id);
         continue;
       }
@@ -399,7 +405,9 @@ export class InvocationQueue {
     const q = this.queues.get(this.scopeKey(threadId, userId));
     if (!q || q.length === 0) return null;
     const removed = q.shift()!;
-    if (removed.pendingMentionId) void this.persistence?.delete(removed.id);
+    // 消费即清 durable（无条件）：只按 pendingMentionId 删会让无该字段的已消费
+    // 条目永久残留，且残留无 expiresAt，每次重启都被 restore 复活重发旧棒。
+    void this.persistence?.delete(removed.id);
     return removed;
   }
 
@@ -418,7 +426,7 @@ export class InvocationQueue {
     this.originalContents.delete(entryId);
 
     const removed = q.splice(idx, 1)[0] ?? null;
-    if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+    if (removed) void this.persistence?.delete(removed.id);
     return removed;
   }
 
@@ -434,7 +442,7 @@ export class InvocationQueue {
     const entry = q[idx];
     if (!entry) return null;
     const snapshot = { ...entry };
-    if (entry.pendingMentionId) await this.persistence?.delete(entry.id);
+    await this.persistence?.delete(entry.id);
     const currentIdx = q.findIndex((candidate) => candidate.id === entryId);
     if (currentIdx === -1) return snapshot;
     this.originalContents.delete(entryId);
@@ -462,7 +470,7 @@ export class InvocationQueue {
     if (!q) return [];
     for (const e of q) {
       this.originalContents.delete(e.id);
-      if (e.pendingMentionId) void this.persistence?.delete(e.id);
+      void this.persistence?.delete(e.id);
     }
     this.queues.delete(key);
     return q;
@@ -571,7 +579,7 @@ export class InvocationQueue {
     this.originalContents.delete(entryId);
 
     const removed = q.splice(idx, 1)[0] ?? null;
-    if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+    if (removed) void this.persistence?.delete(removed.id);
     return removed;
   }
 
@@ -626,7 +634,7 @@ export class InvocationQueue {
         this.originalContents.delete(entryId);
 
         const removed = q.splice(idx, 1)[0] ?? null;
-        if (removed?.pendingMentionId) void this.persistence?.delete(removed.id);
+        if (removed) void this.persistence?.delete(removed.id);
         return removed;
       }
     }

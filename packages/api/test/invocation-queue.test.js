@@ -158,6 +158,68 @@ describe('InvocationQueue', () => {
     assert.equal(restoredEntry.a2aWaitedForQueuedUserMessages, true);
   });
 
+  it('consuming a persisted entry WITHOUT pendingMentionId still clears the durable row (no ghost)', async () => {
+    const rows = new Map();
+    const persistence = {
+      async save(saved) {
+        rows.set(saved.id, structuredClone(saved));
+      },
+      async delete(id) {
+        rows.delete(id);
+      },
+      async list() {
+        return [...rows.values()].map((saved) => structuredClone(saved));
+      },
+    };
+    const q = new InvocationQueue(persistence);
+    // A2A 路径可能在无 pendingMentionId 时也 persistEntry（QueueProcessor 2771）
+    const result = q.enqueue(entry({ source: 'agent', sourceCategory: 'a2a', autoExecute: true }));
+    await q.persistEntry(result.entry);
+    assert.equal(rows.size, 1, 'durable 已写入');
+
+    // 正常消费路径：markProcessing → removeProcessedAcrossUsers
+    const marked = q.markProcessing('t1', 'u1', new Set());
+    assert.ok(marked);
+    q.removeProcessedAcrossUsers('t1', marked.id);
+    await new Promise((r) => setTimeout(r, 10)); // fire-and-forget delete 落地
+    assert.equal(rows.size, 0, '消费后 durable 必须清空——历史 bug：无 pendingMentionId 的条目永久残留并在每次重启复活');
+  });
+
+  it('restore drops legacy residue without expiresAt older than fallback TTL', async () => {
+    const stale = {
+      ...entry({ source: 'agent', autoExecute: true }),
+      id: 'stale-no-expiry',
+      messageId: 'msg-stale',
+      mergedMessageIds: [],
+      status: 'queued',
+      createdAt: Date.now() - 3 * 60 * 60 * 1000, // 3 小时前，无 expiresAt
+      priority: 'normal',
+    };
+    const fresh = {
+      ...entry({ source: 'agent', autoExecute: true }),
+      id: 'fresh-no-expiry',
+      messageId: 'msg-fresh',
+      mergedMessageIds: [],
+      status: 'queued',
+      createdAt: Date.now() - 10 * 60 * 1000, // 10 分钟前
+      priority: 'normal',
+    };
+    const deleted = [];
+    const restored = new InvocationQueue({
+      async save() {},
+      async delete(id) {
+        deleted.push(id);
+      },
+      async list() {
+        return [structuredClone(stale), structuredClone(fresh)];
+      },
+    });
+    const summary = await restored.restorePersistedEntries();
+    assert.equal(summary.restored, 1, '超过兜底时效的残留不得复活');
+    assert.deepEqual(deleted, ['stale-no-expiry']);
+    assert.equal(restored.list('t1', 'u1')[0].id, 'fresh-no-expiry');
+  });
+
   it('drops expired pending mentions during restore', async () => {
     const expired = {
       ...entry({ source: 'agent', autoExecute: true }),
