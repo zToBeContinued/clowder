@@ -542,29 +542,48 @@ function findAssistantDuplicate(messages: ChatMessage[], incoming: ChatMessage):
   // Callbacks WITH invocationId are fully handled by Phase 1 (hard match);
   // if Phase 1 didn't match, the invocationId is stale/unrelated and soft bridge
   // must not merge into an invocationless stream from a different invocation.
-  if (incoming.origin !== 'callback') return -1;
-  if (incomingInvId) return -1;
+  if (incoming.origin === 'callback' && !incomingInvId) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const existing = messages[i]!;
+      if (existing.type !== 'assistant' || existing.catId !== incoming.catId) continue;
 
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const existing = messages[i]!;
-    if (existing.type !== 'assistant' || existing.catId !== incoming.catId) continue;
+      // Skip non-stream messages — bridge/soft only targets stream placeholders.
+      // Cloud review P1: breaking on the first same-cat assistant (which may be
+      // a callback) prevents reaching an older stream placeholder.
+      if (existing.origin !== 'stream') continue;
 
-    // Skip non-stream messages — bridge/soft only targets stream placeholders.
-    // Cloud review P1: breaking on the first same-cat assistant (which may be
-    // a callback) prevents reaching an older stream placeholder.
-    if (existing.origin !== 'stream') continue;
+      const existingInvId = getBubbleInvocationId(existing);
+      if (
+        !existingInvId &&
+        Math.abs((incoming.timestamp ?? 0) - (existing.timestamp ?? 0)) < 8_000 &&
+        incoming.replyTo === existing.replyTo &&
+        (incoming.visibility ?? 'public') === (existing.visibility ?? 'public')
+      ) {
+        return i;
+      }
+      // Checked the most recent same-cat stream — stop scanning
+      break;
+    }
+  }
 
-    const existingInvId = getBubbleInvocationId(existing);
-    if (
-      !existingInvId &&
-      Math.abs((incoming.timestamp ?? 0) - (existing.timestamp ?? 0)) < 8_000 &&
-      incoming.replyTo === existing.replyTo &&
-      (incoming.visibility ?? 'public') === (existing.visibility ?? 'public')
-    ) {
+  // Phase 3: Content-level last resort — a finalized ghost bubble restored from
+  // a local snapshot (IDB) after a server restart can lose its
+  // stream.invocationId binding. When the server-authoritative copy of the SAME
+  // logical message is then re-delivered (different message id, origin
+  // 'stream'), it matches neither Phase 1 (no shared invocationId) nor Phase 2
+  // (callback-only) and would render as an identical duplicate bubble.
+  // Verbatim-equal (≥40 chars) same-cat messages within 30min do not occur
+  // legitimately (verified across all live threads), so exact-content match is
+  // safe as the final fallback.
+  const incomingContent = (incoming.content ?? '').trim();
+  if (incomingContent.length >= 40) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const existing = messages[i]!;
+      if (existing.type !== 'assistant' || existing.catId !== incoming.catId) continue;
+      if (Math.abs((incoming.timestamp ?? 0) - (existing.timestamp ?? 0)) > 30 * 60_000) continue;
+      if ((existing.content ?? '').trim() !== incomingContent) continue;
       return i;
     }
-    // Checked the most recent same-cat stream — stop scanning
-    break;
   }
 
   return -1;

@@ -102,6 +102,79 @@ describe('TD112: addMessage store-level dedup', () => {
     expect(msgs[0]!.origin).toBe('callback');
   });
 
+  it('phase 3: merges verbatim-identical ghost bubble after restart (lost invocationId binding)', () => {
+    const store = useChatStore.getState();
+    const now = Date.now();
+    const longContent =
+      '铲屎官催得对——放行流程本身无需经我，但 owner 收口后在等下一棒派工，派工是我的职责，这一步我该主动出现。';
+
+    // Ghost: finalized stream bubble restored from IDB snapshot after Ctrl+C —
+    // extra.stream.invocationId binding lost during snapshot round-trip.
+    store.addMessage(
+      makMsg('ghost-idb-1', {
+        catId: 'fable',
+        origin: 'stream',
+        content: longContent,
+        timestamp: now,
+      }),
+    );
+
+    // Server-authoritative copy re-delivered after restart: different id,
+    // origin 'stream' (not callback), WITH invocationId → Phase 1 finds no
+    // match, Phase 2 skips (not callback). Phase 3 must catch it by content.
+    store.addMessage(
+      makMsg('real-msg-1', {
+        catId: 'fable',
+        origin: 'stream',
+        content: longContent,
+        timestamp: now + 60_000,
+        extra: { stream: { invocationId: 'inv-real' } },
+      }),
+    );
+
+    const msgs = useChatStore.getState().messages;
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.content).toBe(longContent);
+  });
+
+  it('phase 3: does NOT merge short identical messages (<40 chars)', () => {
+    const store = useChatStore.getState();
+    const now = Date.now();
+
+    store.addMessage(makMsg('ack-1', { catId: 'opus', origin: 'stream', content: '收到，开始处理。', timestamp: now }));
+    store.addMessage(
+      makMsg('ack-2', { catId: 'opus', origin: 'stream', content: '收到，开始处理。', timestamp: now + 5000 }),
+    );
+
+    expect(useChatStore.getState().messages).toHaveLength(2);
+  });
+
+  it('phase 3: does NOT merge identical content outside the 30min window', () => {
+    const store = useChatStore.getState();
+    const now = Date.now();
+    const longContent = 'A'.repeat(60);
+
+    store.addMessage(makMsg('old-1', { catId: 'opus', origin: 'stream', content: longContent, timestamp: now }));
+    store.addMessage(
+      makMsg('new-1', { catId: 'opus', origin: 'stream', content: longContent, timestamp: now + 31 * 60_000 }),
+    );
+
+    expect(useChatStore.getState().messages).toHaveLength(2);
+  });
+
+  it('phase 3: does NOT merge identical content from different cats', () => {
+    const store = useChatStore.getState();
+    const now = Date.now();
+    const longContent = 'B'.repeat(60);
+
+    store.addMessage(makMsg('cat-a-1', { catId: 'fable', origin: 'stream', content: longContent, timestamp: now }));
+    store.addMessage(
+      makMsg('cat-b-1', { catId: 'opus', origin: 'stream', content: longContent, timestamp: now + 1000 }),
+    );
+
+    expect(useChatStore.getState().messages).toHaveLength(2);
+  });
+
   it('soft rule: does NOT merge if time gap > 8s', () => {
     const store = useChatStore.getState();
     const now = Date.now();
