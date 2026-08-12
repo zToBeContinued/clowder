@@ -117,16 +117,20 @@ export function ChatInputMenus({
       {showMentions && (
         <div
           ref={menuRef}
-          className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-[var(--console-border-soft)] overflow-hidden w-72 z-10 max-h-80 flex flex-col"
+          className="absolute bottom-full left-4 mb-2 bg-cafe-surface rounded-xl shadow-lg border border-[var(--console-border-soft)] overflow-hidden w-[26rem] max-w-[calc(100vw-3rem)] z-10 max-h-96 flex flex-col"
         >
           <div ref={scrollRef} className="overflow-y-auto flex-1">
             {catOptions.map((opt, i) => {
               const isWorking = isWorkingStatus(catStatuses[opt.id]);
+              // 名字与插入 handle 通常一致（@displayName ≈ @mentionPattern），
+              // 冗余的右列会把窄菜单里的名字和职责挤成 1-2 个字——只在确实
+              // 不同（如 variantLabel 场景）时以第二行小字显示 handle。
+              const handleDiffers = opt.insert.trim().toLowerCase() !== opt.label.trim().toLowerCase();
               return (
                 <button
                   key={opt.id}
                   ref={i === selectedIdx ? selectedRef : undefined}
-                  className={`w-full border-l-2 py-3 pr-4 pl-[14px] text-left flex items-center gap-3 transition-colors ${
+                  className={`w-full border-l-2 py-2.5 pr-4 pl-[14px] text-left flex items-start gap-3 transition-colors ${
                     i === selectedIdx
                       ? 'border-[var(--cafe-accent)] bg-[var(--console-active-bg)]'
                       : 'border-transparent hover:bg-[var(--console-hover-bg)]'
@@ -141,7 +145,7 @@ export function ChatInputMenus({
                   <img
                     src={opt.avatar}
                     alt={opt.label}
-                    className="w-7 h-7 rounded-full"
+                    className="mt-0.5 h-8 w-8 flex-shrink-0 rounded-lg"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = 'none';
                     }}
@@ -161,22 +165,29 @@ export function ChatInputMenus({
                       >
                         {opt.label}
                       </span>
+                      {isWorking && (
+                        <span className="flex-shrink-0 rounded-full bg-[#eab308]/15 px-1.5 py-px text-[10px] font-semibold text-[#9a7b00]">
+                          工作中
+                        </span>
+                      )}
                     </div>
+                    {handleDiffers && (
+                      <div
+                        className={`truncate font-mono text-[11px] ${
+                          i === selectedIdx ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
+                        }`}
+                      >
+                        {opt.insert.trim()}
+                      </div>
+                    )}
                     <div
-                      className={`truncate text-xs ${
+                      className={`mt-0.5 line-clamp-2 text-xs leading-relaxed ${
                         i === selectedIdx ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
                       }`}
                     >
                       {opt.desc}
                     </div>
                   </div>
-                  <span
-                    className={`ml-2 flex-shrink-0 text-right font-mono text-[11px] ${
-                      i === selectedIdx ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
-                    }`}
-                  >
-                    {opt.insert.trim()}
-                  </span>
                 </button>
               );
             })}

@@ -13,7 +13,7 @@ export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: Men
   return (
     <div
       data-testid="mention-picker"
-      className="absolute bottom-[calc(100%+8px)] left-0 z-20 flex max-h-72 w-72 flex-col overflow-hidden rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface shadow-lg"
+      className="absolute bottom-[calc(100%+8px)] left-0 z-20 flex max-h-80 w-[24rem] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-xl border border-[var(--console-border-soft)] bg-cafe-surface shadow-lg"
     >
       <div className="border-b border-[var(--console-border-soft)] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-cafe-muted">
         Agents
@@ -23,7 +23,7 @@ export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: Men
           <button
             key={option.id}
             type="button"
-            className={`flex w-full items-center gap-3 border-l-2 py-2 pr-3 pl-[10px] text-left transition-colors ${
+            className={`flex w-full items-start gap-3 border-l-2 py-2 pr-3 pl-[10px] text-left transition-colors ${
               idx === selectedIdx
                 ? 'border-[var(--cafe-accent)] bg-[var(--console-active-bg)]'
                 : 'border-transparent hover:bg-[var(--console-hover-bg)]'
@@ -38,7 +38,7 @@ export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: Men
             <img
               src={option.avatar}
               alt={option.label}
-              className="h-7 w-7 rounded-md"
+              className="mt-0.5 h-8 w-8 flex-shrink-0 rounded-md"
               onError={(event) => {
                 (event.currentTarget as HTMLImageElement).style.display = 'none';
               }}
@@ -51,12 +51,13 @@ export function MentionPicker({ options, selectedIdx, onSelectIdx, onPick }: Men
               >
                 {option.label}
               </span>
+              {/* 职责/擅长（roleDescription）是选人依据，两行截断保证可读 */}
               <span
-                className={`block truncate text-xs leading-[1.45] ${
+                className={`mt-0.5 line-clamp-2 block text-xs leading-relaxed ${
                   idx === selectedIdx ? 'text-[var(--console-active-muted)]' : 'text-cafe-muted'
                 }`}
               >
-                {option.id}
+                {option.desc || option.id}
               </span>
             </span>
           </button>
