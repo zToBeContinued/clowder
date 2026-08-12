@@ -336,7 +336,8 @@ const PROGRESS_VISIBILITY_SECTION = `## 即时开工回执与长任务心跳
 - 行动任务认领成功后、第一次耗时工具调用前，必须调用 \`cat_cafe_post_progress\`，用 \`kind='ack'\` 发一条真实、自然、任务专属的 Agent 消息：说明理解了什么和准备先做哪 2–3 步。工具不可用但有 shell 时，改用 \`$CLI message progress\`。
 - ack 每个 invocation 只发一次，\`clientMessageId\` 使用 \`ack:<invocationId>:<catId>\`；禁止固定“已接球”模板、禁止 system_info、禁止在回执里 @ 其他 Agent。
 - 长任务仅在阶段确实变化且距上次用户可见更新约 45–60 秒时，用 \`kind='heartbeat'\` 发新事实；相同阶段不得重复刷屏。
-- progress 消息不是最终交付，也不能替代最终回复；最终结果仍走正常输出，并给交付物、验证证据和下一步。`;
+- progress 消息不是最终交付，也不能替代最终回复；最终结果仍走正常输出，并给交付物、验证证据和下一步。
+- 值守/定时复查/等人回复类诉求：禁止用 sleep/Start-Sleep/轮询循环在回合内干等——静默看门狗约 3 分钟就会判死并终止整个回合，消息也无法收尾。正确做法：本回合给出结论并立即收口，同时用 \`schedule-tasks\` skill 注册一次性或周期唤醒（到点平台会重新拉起你继续检查）。`;
 
 const DISCUSSION_EXECUTION_GATE_SECTION = `## 讨论 / 执行门禁（先判阶段）
 - 先判定用户是在讨论还是明确要求行动，再应用行动纪律。

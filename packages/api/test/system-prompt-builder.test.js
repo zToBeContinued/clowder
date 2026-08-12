@@ -183,6 +183,22 @@ describe('SystemPromptBuilder', () => {
     assert.ok(prompt.includes('不是最终交付'));
   });
 
+  // 2026-08-13 现场：铲屎官让猫「值守」，猫在回合内 Start-Sleep 900 干等，
+  // 静默看门狗 ~3 分钟判死回合、消息无法收尾，铲屎官只能手动停止。
+  test('forbids in-turn sleep watch loops and points to scheduled wake-ups', async () => {
+    const build = await getBuilder();
+    const prompt = build({
+      catId: 'codex',
+      mode: 'independent',
+      teammates: [],
+      mcpAvailable: true,
+    });
+
+    assert.ok(prompt.includes('值守'), '值守规则必须注入');
+    assert.ok(prompt.includes('禁止用 sleep'), '必须明确禁止回合内 sleep 干等');
+    assert.ok(prompt.includes('schedule-tasks'), '必须指向定时唤醒的正确路径');
+  });
+
   test('omits MCP tools when mcpAvailable is false', async () => {
     const build = await getBuilder();
     const prompt = build({
