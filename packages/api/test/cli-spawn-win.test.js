@@ -4,9 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-const { resolveCmdShimScript, resolveWindowsShimSpawn, escapeCmdArg, extractBareName, parseShimFile } = await import(
-  '../dist/utils/cli-spawn-win.js'
-);
+const {
+  resolveCmdShimScript,
+  resolveWindowsShimSpawn,
+  resolveVersionedNodeEntry,
+  escapeCmdArg,
+  extractBareName,
+  parseShimFile,
+} = await import('../dist/utils/cli-spawn-win.js');
 
 test(
   'resolveCmdShimScript supports %dp0 shims and keeps scanning where results until one resolves',
@@ -657,6 +662,94 @@ test(
     }
   },
 );
+
+// === 2026-08-13「unknown option '-Seconds'」事故回归 ===
+// cursor-agent 经 .cmd → powershell -File .ps1 → node 三层包装启动，PowerShell 5.1
+// 向原生命令转发含内嵌引号/换行的参数时有损：对话历史里的
+// `Start-Sleep -Seconds 900; Write-Output "[fable-…"` 把派工 prompt 拆碎成独立
+// token，cursor-agent 报 unknown option '-Seconds' 秒退。凡 .ps1 shim 且能解析出
+// versions\<最新>\{node.exe,index.js} 布局的，必须绕开 powershell 直接 argv 启动。
+
+function makeVersionedShimFixture(tempRoot) {
+  const ps1 = join(tempRoot, 'cursor-agent.ps1');
+  writeFileSync(ps1, '# vendor shim\n', 'utf8');
+  const mkVersion = (name, withFiles = true) => {
+    const dir = join(tempRoot, 'versions', name);
+    mkdirSync(dir, { recursive: true });
+    if (withFiles) {
+      writeFileSync(join(dir, 'node.exe'), '', 'utf8');
+      writeFileSync(join(dir, 'index.js'), '', 'utf8');
+    }
+    return dir;
+  };
+  return { ps1, mkVersion };
+}
+
+test('resolveVersionedNodeEntry picks the newest valid version dir with node.exe+index.js', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-versioned-'));
+  try {
+    const { ps1, mkVersion } = makeVersionedShimFixture(tempRoot);
+    mkVersion('2026.07.30-abc123');
+    const expected = mkVersion('2026.08.11-e8db854');
+    mkVersion('2026.08.12-00-00-00-ffff11', false); // 最新但缺 node.exe/index.js → 跳过
+    mkVersion('not-a-version'); // 非版本目录 → 忽略
+
+    const entry = resolveVersionedNodeEntry(ps1);
+    assert.ok(entry, 'should resolve a versioned node entry');
+    assert.equal(entry.command, join(expected, 'node.exe'));
+    assert.deepEqual(entry.args, [join(expected, 'index.js')]);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolveVersionedNodeEntry returns null without a versions layout', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-noversions-'));
+  try {
+    const ps1 = join(tempRoot, 'plain.ps1');
+    writeFileSync(ps1, '# shim\n', 'utf8');
+    assert.equal(resolveVersionedNodeEntry(ps1), null);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolveWindowsShimSpawn bypasses powershell for versioned .ps1 shims (argv-safe)', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-ps1-bypass-'));
+  try {
+    const { ps1, mkVersion } = makeVersionedShimFixture(tempRoot);
+    const versionDir = mkVersion('2026.08.11-e8db854');
+
+    const hostilePrompt = '## Dispatch Mission Context\nStart-Sleep -Seconds 900; Write-Output "[fable-check]"';
+    const spawn = resolveWindowsShimSpawn('cursor-agent', ['--print', hostilePrompt], ps1);
+
+    assert.ok(spawn, 'should produce a spawn plan');
+    assert.equal(spawn.command, join(versionDir, 'node.exe'), '必须直启捆绑 node，而不是 powershell.exe');
+    assert.deepEqual(
+      spawn.args,
+      [join(versionDir, 'index.js'), '--print', hostilePrompt],
+      'argv 原样透传，不经 shell 再解析',
+    );
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('resolveWindowsShimSpawn keeps powershell fallback for non-versioned .ps1 shims', () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-ps1-fallback-'));
+  try {
+    const ps1 = join(tempRoot, 'plain.ps1');
+    writeFileSync(ps1, '# shim\n', 'utf8');
+
+    const spawn = resolveWindowsShimSpawn('plain', ['--flag'], ps1);
+
+    assert.ok(spawn);
+    assert.equal(spawn.command, 'powershell.exe');
+    assert.deepEqual(spawn.args, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, '--flag']);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
 
 test('resolveCmdShimScript with full .exe path does NOT fall back to APPDATA known paths', () => {
   const tempRoot = mkdtempSync(join(tmpdir(), 'cli-spawn-win-exe-no-appdata-'));

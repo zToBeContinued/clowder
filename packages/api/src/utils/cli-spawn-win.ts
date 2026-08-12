@@ -7,7 +7,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, win32 } from 'node:path';
 
 /**
@@ -198,6 +198,46 @@ export function resolveCmdShimScript(command: string): string | null {
   return null;
 }
 
+/** 版本目录名（cursor-agent 布局）：YYYY.MM.DD[-HH-MM-SS]-commithash */
+const VERSIONED_DIR_RE = /^(\d{4})\.(\d{1,2})\.(\d{1,2})(-\d{2}-\d{2}-\d{2})?-[a-f0-9]+$/;
+
+/**
+ * 解析 .ps1 shim 同目录下的版本化 node 入口：
+ * `<shim 目录>\versions\<最新版本>\{node.exe,index.js}`（cursor-agent 布局，
+ * 与其 cursor-agent.ps1 的选择规则一致：按日期取最新）。
+ *
+ * 为什么必须绕开 powershell：PowerShell 5.1 用 -File 转发参数给原生命令时，
+ * 对内嵌双引号/换行的参数是有损的——2026-08-13 事故中，派工 prompt 携带的
+ * 对话历史含 `Start-Sleep -Seconds 900; Write-Output "[fable-…"`，经 .ps1 的
+ * `& node index.js $args` 一跳后被重新分词，cursor-agent 报
+ * `unknown option '-Seconds'` 秒退。直启捆绑 node + index.js 走纯 argv，
+ * 内容不再经过任何 shell 二次解析。
+ */
+export function resolveVersionedNodeEntry(shimScriptPath: string): WindowsShimSpawn | null {
+  const versionsDir = join(dirname(shimScriptPath), 'versions');
+  let names: string[];
+  try {
+    names = readdirSync(versionsDir);
+  } catch {
+    return null;
+  }
+  const scored: Array<{ name: string; score: number }> = [];
+  for (const name of names) {
+    const match = name.match(VERSIONED_DIR_RE);
+    if (!match) continue;
+    scored.push({ name, score: Number(match[1]) * 10_000 + Number(match[2]) * 100 + Number(match[3]) });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  for (const { name } of scored) {
+    const nodeExe = join(versionsDir, name, 'node.exe');
+    const indexJs = join(versionsDir, name, 'index.js');
+    if (existsSync(nodeExe) && existsSync(indexJs)) {
+      return { command: nodeExe, args: [indexJs] };
+    }
+  }
+  return null;
+}
+
 export function resolveWindowsShimSpawn(
   command: string,
   args: readonly string[],
@@ -212,6 +252,14 @@ export function resolveWindowsShimSpawn(
     };
   }
   if (/\.ps1$/i.test(shimScript)) {
+    // 优先绕开 powershell（有损转发，见 resolveVersionedNodeEntry 注释）
+    const versioned = resolveVersionedNodeEntry(shimScript);
+    if (versioned) {
+      return {
+        command: versioned.command,
+        args: [...versioned.args, ...args],
+      };
+    }
     return {
       command: 'powershell.exe',
       args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', shimScript, ...args],
