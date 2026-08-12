@@ -20,12 +20,24 @@ describe('chunk-load-recovery', () => {
     expect(isRecoverableChunkLoadError(new TypeError('ordinary request failed'))).toBe(false);
   });
 
+  it('recognizes resource-tag load failures via event.target src/href (script/link 404)', () => {
+    // 资源加载失败的 ErrorEvent：error/message 均为空，线索只在 target 上
+    const scriptFailure = { type: 'error', target: { src: 'http://localhost:3003/_next/static/chunks/settings-abc123.js' } };
+    const cssFailure = { type: 'error', target: { href: 'http://localhost:3003/_next/static/css/55a94185.css' } };
+    expect(isRecoverableChunkLoadError(scriptFailure)).toBe(true);
+    expect(isRecoverableChunkLoadError(cssFailure)).toBe(true);
+    // 非 Next 静态资源（比如头像图片 404）不触发重载
+    expect(isRecoverableChunkLoadError({ type: 'error', target: { src: 'http://localhost:3003/avatars/cat.png' } })).toBe(
+      false,
+    );
+  });
+
   it('only allows one automatic reload during the cooldown window', () => {
     const storage = memoryStorage();
 
     expect(shouldAttemptChunkReload(storage, 1000)).toBe(true);
     expect(shouldAttemptChunkReload(storage, 2000)).toBe(false);
-    expect(shouldAttemptChunkReload(storage, 130_000)).toBe(true);
+    expect(shouldAttemptChunkReload(storage, 40_000)).toBe(true);
   });
 
   it('clears service workers and caches before reload', async () => {

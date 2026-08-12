@@ -1,8 +1,14 @@
 const CHUNK_RELOAD_SESSION_KEY = 'clowder:chunk-load-reload-at';
-const CHUNK_RELOAD_COOLDOWN_MS = 2 * 60 * 1000;
+// 冷却窗口只是防重载循环；服务重启后旧壳的多次导航失败应该都能自愈，
+// 2 分钟太长（第一次重载若被 SW 缓存拖住，用户会在窗口内一直看空白页）。
+const CHUNK_RELOAD_COOLDOWN_MS = 30 * 1000;
 
 const CHUNK_ERROR_RE =
   /ChunkLoadError|Loading chunk \d+ failed|failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed/i;
+
+// 资源标签（script/link）加载失败时 ErrorEvent 没有 error/message，唯一线索是
+// target 的 src/href——指向 Next 静态资源即视为「旧壳加载新构建失败」。
+const NEXT_STATIC_ASSET_RE = /\/_next\/static\//;
 
 function collectErrorText(reason: unknown): string {
   if (!reason) return '';
@@ -19,7 +25,8 @@ function collectErrorText(reason: unknown): string {
 }
 
 export function isRecoverableChunkLoadError(reason: unknown): boolean {
-  return CHUNK_ERROR_RE.test(collectErrorText(reason));
+  const text = collectErrorText(reason);
+  return CHUNK_ERROR_RE.test(text) || NEXT_STATIC_ASSET_RE.test(text);
 }
 
 export function shouldAttemptChunkReload(storage: Pick<Storage, 'getItem' | 'setItem'>, now = Date.now()): boolean {
