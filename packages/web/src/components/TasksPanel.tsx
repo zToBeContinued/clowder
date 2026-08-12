@@ -174,7 +174,7 @@ interface TaskCardViewProps {
   saving: boolean;
   onToggleEvidence: (task: TaskItem) => void;
   onDraftChange: (taskId: string, key: keyof Omit<TaskEvidence, 'updatedAt'>, value: string) => void;
-  onSaveEvidence: (taskId: string) => void;
+  onSaveEvidence: (taskId: string) => Promise<boolean>;
   onCycleStatus: (task: TaskItem) => void;
   onOpenThread?: (task: TaskItem) => void;
   saveError: string | null;
@@ -192,9 +192,18 @@ function TaskCardView({
   onOpenThread,
   saveError,
 }: TaskCardViewProps) {
+  // 展开区分「查看态 / 编辑态」：默认阅读视图（有什么证据展示什么），
+  // 点「✎ 填写」才出表单——窄列里常驻 5 个空 textarea 视觉爆炸且无信息量。
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!expanded) setEditing(false);
+  }, [expanded]);
+
   const evidence = task.evidence;
   const evidenceCount = countEvidence(evidence);
   const meta = TASK_STATUS_META[task.status] ?? TASK_STATUS_META.todo;
+  const filledFields = EVIDENCE_FIELDS.filter((field) => Boolean(evidence?.[field.key]?.trim()));
+  const emptyFields = EVIDENCE_FIELDS.filter((field) => !evidence?.[field.key]?.trim());
 
   return (
     <article
@@ -230,7 +239,10 @@ function TaskCardView({
         </button>
       </div>
 
-      {task.why && <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--task-muted)]">{task.why}</p>}
+      {/* 展开后详情区会显示完整 WHY，这里的截断版收起，避免同屏重复两遍 */}
+      {task.why && !expanded && (
+        <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[var(--task-muted)]">{task.why}</p>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t-2 border-dashed border-[var(--task-ink)]/20 pt-2 text-[11px] font-semibold text-[var(--task-muted)]">
         <span>Owner: {getOwnerLabel(task)}</span>
@@ -292,43 +304,94 @@ function TaskCardView({
               <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--task-ink)]">{task.why}</p>
             </div>
           )}
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-black text-[var(--task-ink)]">交付证据</div>
-              <div className="mt-0.5 text-[11px] font-medium text-[var(--task-muted)]">记录测试、构建、截图、review 和 lesson。</div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-xs font-black text-[var(--task-ink)]">交付证据 {evidenceCount}/5</div>
+            <div className="flex items-center gap-2">
+              {evidence?.updatedAt && (
+                <span className="text-[10px] text-[var(--task-muted)]">更新 {formatTaskTime(evidence.updatedAt)}</span>
+              )}
+              <button
+                type="button"
+                className="rounded-full border-2 border-[var(--task-ink)] bg-[var(--task-card)] px-2.5 py-0.5 text-[10px] font-black text-[var(--task-ink)] shadow-[2px_2px_0_#111] transition hover:-translate-y-0.5"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setEditing((current) => !current);
+                }}
+              >
+                {editing ? '取消' : '✎ 填写'}
+              </button>
             </div>
-            {evidence?.updatedAt && <span className="shrink-0 text-[10px] text-[var(--task-muted)]">更新 {formatTaskTime(evidence.updatedAt)}</span>}
           </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
-            {EVIDENCE_FIELDS.map((field) => (
-              <label key={field.key} className="block">
-                <span className="text-[11px] font-black uppercase tracking-[0.08em] text-[var(--task-muted)]">{field.label}</span>
-                <textarea
-                  className="mt-1 min-h-20 w-full resize-y rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-card)] px-3 py-2 text-xs leading-[1.5] text-[var(--task-ink)] outline-none transition placeholder:text-[var(--task-border-muted)] focus:bg-[var(--task-input-focus)]"
-                  value={draft[field.key] ?? ''}
-                  placeholder={field.placeholder}
-                  onChange={(event) => onDraftChange(task.id, field.key, event.target.value)}
-                />
-              </label>
-            ))}
-          </div>
+          {!editing ? (
+            <div className="mt-2 flex flex-col gap-2">
+              {filledFields.length === 0 && (
+                <p className="rounded-lg border border-dashed border-[var(--task-border-muted)] bg-[var(--task-card)] px-3 py-2 text-[11px] font-semibold leading-relaxed text-[var(--task-subtle)]">
+                  暂无交付证据——点「✎ 填写」记录测试 / Build / 截图 / Review / Lesson。
+                </p>
+              )}
+              {filledFields.map((field) => (
+                <div key={field.key} className="rounded-lg border border-[var(--task-ink)]/25 bg-[var(--task-card)] px-3 py-2">
+                  <div className="text-[10px] font-black uppercase tracking-[0.08em] text-[var(--task-subtle)]">
+                    {field.label}
+                  </div>
+                  <p className="mt-0.5 whitespace-pre-wrap break-words text-xs leading-relaxed text-[var(--task-ink)]">
+                    {evidence?.[field.key]?.trim()}
+                  </p>
+                </div>
+              ))}
+              {filledFields.length > 0 && emptyFields.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold text-[var(--task-subtle)]">
+                  待补：
+                  {emptyFields.map((field) => (
+                    <span
+                      key={field.key}
+                      className="rounded-full border border-[var(--task-border-soft)] bg-[var(--task-card)] px-2 py-0.5"
+                    >
+                      {field.label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="mt-2 flex flex-col gap-2.5">
+                {EVIDENCE_FIELDS.map((field) => (
+                  <label key={field.key} className="block">
+                    <span className="text-[10px] font-black uppercase tracking-[0.08em] text-[var(--task-muted)]">
+                      {field.label}
+                    </span>
+                    <textarea
+                      className="mt-1 min-h-14 w-full resize-y rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-card)] px-2.5 py-1.5 text-xs leading-[1.5] text-[var(--task-ink)] outline-none transition placeholder:text-[var(--task-border-muted)] focus:bg-[var(--task-input-focus)]"
+                      value={draft[field.key] ?? ''}
+                      placeholder={field.placeholder}
+                      onChange={(event) => onDraftChange(task.id, field.key, event.target.value)}
+                    />
+                  </label>
+                ))}
+              </div>
 
-          {saveError && <div className="mt-3 text-xs font-semibold text-[var(--task-danger)]">{saveError}</div>}
+              {saveError && <div className="mt-2 text-xs font-semibold text-[var(--task-danger)]">{saveError}</div>}
 
-          <div className="mt-3 flex justify-end">
-            <button
-              type="button"
-              className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-3 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_#111] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={saving}
-              onClick={(event) => {
-                event.stopPropagation();
-                onSaveEvidence(task.id);
-              }}
-            >
-              {saving ? '保存中...' : '保存证据'}
-            </button>
-          </div>
+              <div className="mt-2.5 flex justify-end">
+                <button
+                  type="button"
+                  className="rounded-lg border-2 border-[var(--task-ink)] bg-[var(--task-accent)] px-3 py-1.5 text-xs font-black text-[var(--task-on-accent)] shadow-[3px_3px_0_#111] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={saving}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onSaveEvidence(task.id).then((ok) => {
+                      if (ok) setEditing(false);
+                    });
+                  }}
+                >
+                  {saving ? '保存中...' : '保存证据'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
     </article>
@@ -424,7 +487,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
     }));
   }
 
-  async function saveEvidence(taskId: string) {
+  async function saveEvidence(taskId: string): Promise<boolean> {
     const evidence = evidenceDrafts[taskId] ?? {};
     setSavingTaskId(taskId);
     setSaveError(null);
@@ -439,8 +502,10 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
       const updated = (await res.json()) as TaskItem;
       setTasks((current) => current.map((task) => (task.id === updated.id ? updated : task)));
       setEvidenceDrafts((current) => ({ ...current, [updated.id]: updated.evidence ?? {} }));
+      return true;
     } catch {
       setSaveError('交付证据保存失败，请稍后重试');
+      return false;
     } finally {
       setSavingTaskId(null);
     }
@@ -466,7 +531,7 @@ export function TasksPanel({ threadId, onOpenTaskThread }: TasksPanelProps) {
   const cardHandlers = {
     onToggleEvidence: toggleEvidence,
     onDraftChange: updateEvidenceDraft,
-    onSaveEvidence: (taskId: string) => void saveEvidence(taskId),
+    onSaveEvidence: (taskId: string) => saveEvidence(taskId),
     onCycleStatus: (task: TaskItem) => void cycleTaskStatus(task),
     onOpenThread: onOpenTaskThread,
   };
