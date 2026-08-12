@@ -17,6 +17,7 @@ import { resolveCliTimeoutMs } from './cli-timeout.js';
 import type { ChildProcessLike, CliSpawnOptions, SpawnFn } from './cli-types.js';
 import { isParseError, parseNDJSON } from './ndjson-parser.js';
 import { ProcessLivenessProbe } from './ProcessLivenessProbe.js';
+import { killProcessTree, killProcessTreeSync } from './process-tree-kill.js';
 
 const log = createModuleLogger('cli-spawn');
 
@@ -61,6 +62,13 @@ export function archiveRawEvent(invocationId: string | undefined, event: unknown
 export interface CliSpawnerDeps {
   /** Inject a custom spawn function (for testing) */
   spawnFn?: SpawnFn;
+  /**
+   * Inject a tree-kill function (for testing). Production default on Windows
+   * is taskkill-based killProcessTree; POSIX keeps plain signals.
+   * 注意：注入 spawnFn（假子进程/假 pid）而未注入 treeKillFn 时，树击杀自动
+   * 关闭——否则单测会对无辜的真实 PID 执行 taskkill。
+   */
+  treeKillFn?: (pid: number) => Promise<boolean>;
 }
 
 /** Env vars to strip from child processes to prevent E2BIG (overly large values). */
@@ -201,9 +209,29 @@ export async function* spawnCli(
   let processAliveAtTimeout = false;
   let escalationTimer: ReturnType<typeof setTimeout> | undefined;
 
+  // 2026-08-12 quant 幽灵写手事故：Windows 上 CLI 经 .ps1/.cmd/git-bash 包装
+  // 进程启动，child.kill() 只杀包装层，真 CLI 孙进程沦为孤儿继续写工作树，
+  // 槽位释放后同猫被二次拉起 → 双进程同任务。Windows 生产路径必须树击杀。
+  // 注入了假 spawnFn（单测）时禁用默认树击杀，避免 taskkill 真实误伤。
+  const treeKillFn = deps?.treeKillFn ?? (IS_WINDOWS && !deps?.spawnFn ? killProcessTree : undefined);
+  let treeKillPromise: Promise<void> | undefined;
+
   function killChild(): void {
     if (killed || childExited) return;
     killed = true;
+    if (treeKillFn && child.pid !== undefined) {
+      // 必须先树击杀再考虑直接击杀：先杀包装进程会让 taskkill 无法从死掉的
+      // 父进程枚举子树，孙进程照样漏网。
+      const pid = child.pid;
+      treeKillPromise = treeKillFn(pid)
+        .then((ok) => {
+          if (!ok && !childExited) child.kill('SIGKILL');
+        })
+        .catch(() => {
+          if (!childExited) child.kill('SIGKILL');
+        });
+      return;
+    }
     child.kill('SIGTERM');
     escalationTimer = setTimeout(() => {
       child.kill('SIGKILL');
@@ -259,6 +287,11 @@ export async function* spawnCli(
   // Zombie prevention (P1: guard with childExited to prevent PID reuse kills)
   const exitHandler = (): void => {
     if (!childExited && child.pid !== undefined) {
+      // Windows 生产路径同样必须树击杀：API 退出时只杀包装层一样会留孤儿写手。
+      // exit handler 里只能同步执行，用 spawnSync 版本。
+      if (IS_WINDOWS && !deps?.spawnFn && !deps?.treeKillFn) {
+        if (killProcessTreeSync(child.pid)) return;
+      }
       try {
         process.kill(child.pid, 'SIGKILL');
       } catch {
@@ -493,6 +526,16 @@ export async function* spawnCli(
     // F152: Unregister probe from OTel gauge
     if (options.invocationId) unregisterLivenessProbe(options.invocationId);
     killChild();
+    // 等树击杀落地再让 generator 结束：上游在 generator 结束后立刻释放
+    // (thread, cat) 槽位并可能拉起替补进程——树没死透就放行，等于把
+    // 「旧写手还活着 + 新进程已启动」的双写窗口重新打开。
+    if (treeKillPromise) {
+      try {
+        await treeKillPromise;
+      } catch {
+        // 树击杀永不 reject；防御性兜底，不阻塞收尾
+      }
+    }
 
     // F153 Phase B: End CLI session span with appropriate status
     if (cliSpan) {

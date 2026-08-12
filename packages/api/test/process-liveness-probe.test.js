@@ -200,6 +200,78 @@ test('classifies idle child process as idle-silent (no false busy)', async () =>
   }
 });
 
+// --- 2026-08-12 quant 事故回归：CPU 采样必须覆盖全部后代，而不是只看直接子进程 ---
+// Windows 上 CLI 藏在 .ps1/.cmd 包装进程后面（API → powershell → cursor-agent →
+// 工具 shell → pytest）：只采样「自己+直接子进程」会把忙碌会话误判 idle-silent，
+// 触发假超时击杀。
+
+const { sumProcessTreeCpu } = await import('../dist/utils/ProcessLivenessProbe.js');
+
+test('sumProcessTreeCpu counts transitive descendants (wrapper → CLI → shell → tool)', () => {
+  const rows = [
+    { pid: 100, ppid: 1, cpuMs: 50 }, // 包装进程（powershell）几乎不动
+    { pid: 200, ppid: 100, cpuMs: 120 }, // 真 CLI，闲等工具结果
+    { pid: 300, ppid: 200, cpuMs: 30 }, // 工具 shell
+    { pid: 400, ppid: 300, cpuMs: 90_000 }, // pytest 在烧 CPU
+    { pid: 999, ppid: 1, cpuMs: 777_777 }, // 无关进程，不得计入
+  ];
+  assert.equal(sumProcessTreeCpu(rows, 100), 50 + 120 + 30 + 90_000);
+});
+
+test('sumProcessTreeCpu returns null when root pid is missing (dead/fallback signal)', () => {
+  const rows = [{ pid: 200, ppid: 100, cpuMs: 120 }];
+  assert.equal(sumProcessTreeCpu(rows, 100), null);
+});
+
+test('sumProcessTreeCpu tolerates ppid cycles from PID reuse', () => {
+  const rows = [
+    { pid: 100, ppid: 200, cpuMs: 10 },
+    { pid: 200, ppid: 100, cpuMs: 20 },
+  ];
+  assert.equal(sumProcessTreeCpu(rows, 100), 30);
+});
+
+test('classifies as busy-silent when only the GRANDCHILD has growing CPU', async () => {
+  const { spawn } = await import('node:child_process');
+  // 三层：parent 闲 → child 闲 → grandchild 烧 CPU（对应 powershell → CLI → 工具）。
+  // busy 循环有 40s 时间上限，Windows 上硬杀不跑 SIGTERM handler 也能自清理。
+  const parent = spawn(
+    'node',
+    [
+      '-e',
+      `const { spawn } = require('child_process');
+     const mid = spawn('node', ['-e', \`const { spawn } = require('child_process');
+       const c = spawn('node', ['-e', 'const t=Date.now();while(Date.now()-t<40000){}'], { stdio: 'ignore' });
+       c.on('exit', () => process.exit(0));
+       setInterval(() => {}, 60000);\`], { stdio: 'ignore' });
+     mid.on('exit', () => process.exit(0));
+     setInterval(() => {}, 60000);`,
+    ],
+    { stdio: 'ignore' },
+  );
+
+  let probe = null;
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+
+    probe = new ProcessLivenessProbe(parent.pid, { sampleIntervalMs: 100 });
+    probe.start();
+
+    const reachedBusySilent = await waitForState(probe, 'busy-silent', { timeoutMs: busyWaitTimeoutMs });
+    const state = probe.getState();
+    assert.ok(reachedBusySilent, `grandchild CPU must count towards liveness, got ${state}`);
+  } finally {
+    probe?.stop();
+    // 直接杀 parent 会留下孤儿孙进程（正是本次修的 bug）——测试里逐层清理
+    if (process.platform === 'win32') {
+      const { spawnSync } = await import('node:child_process');
+      spawnSync('taskkill', ['/pid', String(parent.pid), '/T', '/F'], { windowsHide: true });
+    } else {
+      parent.kill('SIGTERM');
+    }
+  }
+});
+
 test('on Windows, silence warnings still fire correctly', async () => {
   if (process.platform !== 'win32') {
     return;

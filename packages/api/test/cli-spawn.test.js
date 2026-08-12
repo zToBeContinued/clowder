@@ -1157,13 +1157,88 @@ test('Group A: lingering process is killed after grace period expires', async ()
   );
 });
 
+// === 2026-08-12 quant「幽灵写手」回归：超时/取消必须树击杀 ===
+// Windows 上 CLI 经 .ps1/.cmd 包装进程启动，child.kill() 只杀包装层，
+// 真 CLI 孙进程沦为孤儿写手；槽位释放后同猫被二次拉起 → 双进程同任务。
+
+test('zombie fix: timeout kill goes through tree-kill with the child pid', async () => {
+  const proc = createMockProcess({ exitOnKill: false, pid: 7777 });
+  const spawnFn = createMockSpawnFn(proc);
+  const treeKillFn = mock.fn(async (pid) => {
+    assert.equal(pid, 7777);
+    // 模拟 taskkill /T：整棵树（含包装进程）死亡
+    process.nextTick(() => {
+      if (!proc.stdout.destroyed) proc.stdout.end();
+      proc._emitter.emit('exit', null, 'SIGKILL');
+    });
+    return true;
+  });
+
+  const promise = collect(spawnCli({ command: 'cursor-agent', args: [], timeoutMs: 50 }, { spawnFn, treeKillFn }));
+
+  await new Promise((r) => setTimeout(r, 100));
+  const results = await promise;
+
+  assert.equal(treeKillFn.mock.callCount(), 1, 'timeout must tree-kill');
+  assert.ok(
+    results.some((r) => isCliTimeout(r)),
+    'should still yield __cliTimeout',
+  );
+  assert.equal(proc.kill.mock.callCount(), 0, 'tree-kill succeeded — no direct child.kill needed');
+});
+
+test('zombie fix: tree-kill failure falls back to SIGKILL on the direct child', async () => {
+  const proc = createMockProcess({ exitOnKill: true, pid: 8888 });
+  const spawnFn = createMockSpawnFn(proc);
+  const treeKillFn = mock.fn(async () => false);
+
+  const promise = collect(spawnCli({ command: 'cursor-agent', args: [], timeoutMs: 50 }, { spawnFn, treeKillFn }));
+
+  await new Promise((r) => setTimeout(r, 100));
+  if (!proc.stdout.writableEnded) proc.stdout.end();
+  await promise;
+
+  assert.equal(treeKillFn.mock.callCount(), 1);
+  assert.ok(proc.kill.mock.callCount() >= 1, 'must fall back to direct kill');
+  assert.equal(proc.kill.mock.calls[0].arguments[0], 'SIGKILL');
+});
+
+test('zombie fix: user cancel (abort) also goes through tree-kill', async () => {
+  const proc = createMockProcess({ exitOnKill: false, pid: 6666 });
+  const spawnFn = createMockSpawnFn(proc);
+  const controller = new AbortController();
+  const treeKillFn = mock.fn(async () => {
+    process.nextTick(() => {
+      if (!proc.stdout.destroyed) proc.stdout.end();
+      proc._emitter.emit('exit', null, 'SIGKILL');
+    });
+    return true;
+  });
+
+  const promise = collect(
+    spawnCli({ command: 'cursor-agent', args: [], signal: controller.signal }, { spawnFn, treeKillFn }),
+  );
+
+  proc.stdout.write('{"type":"first"}\n');
+  controller.abort();
+  await new Promise((r) => setTimeout(r, 50));
+
+  const results = await promise;
+
+  assert.equal(treeKillFn.mock.callCount(), 1, 'cancel must also tree-kill (孤儿写手同样来自取消路径)');
+  assert.equal(treeKillFn.mock.calls[0].arguments[0], 6666);
+  assert.ok(results.length >= 1);
+});
+
 // === Issue #774: stallAutoKill — fast-fail on idle-silent stall ===
 
 test('#774: stallAutoKill kills process on suspected_stall + idle-silent instead of waiting for full timeout', async () => {
   // Use a genuinely idle process PID so probe sees flat CPU (idle-silent),
   // even when the test runner itself is busy under concurrent test execution.
-  const { execFileSync } = await import('node:child_process');
-  const sleeper = (await import('node:child_process')).spawn('sleep', ['60']);
+  // node -e sleep instead of `sleep`: Windows has no sleep binary.
+  const sleeper = (await import('node:child_process')).spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+    stdio: 'ignore',
+  });
   const sleeperPid = sleeper.pid;
 
   try {
@@ -1297,6 +1372,13 @@ test('#774: stallAutoKill does NOT fire when stderr keeps probe alive', async ()
 });
 
 test('#774 R2: deferred stall-kill is cancelled when NDJSON recovery arrives before next probe timer', async () => {
+  if (process.platform === 'win32') {
+    // 本用例时间线按 Unix ps 毫秒级采样校准（警告在 T≈200 被消费、恢复 T=250
+    // 赶上下一窗口）。Windows CIM 首采 >100ms，探针走「采样在途→同步补发警告」
+    // 分支，警告提前一个 race 窗口被消费，T=250 的恢复必然迟到——语义本身
+    // 与平台无关，由 Linux CI 覆盖。
+    return;
+  }
   // The deferred pattern: stall warning drained → pendingStallKill=true → race.
   // If NDJSON wins the race → pendingStallKill=false (kill cancelled).
   // If probe timer wins → kill fires.
@@ -1310,7 +1392,10 @@ test('#774 R2: deferred stall-kill is cancelled when NDJSON recovery arrives bef
   //   T=200:  race timer wins → drains stall → pendingStallKill=true → race (100ms timer)
   //   T=250:  recovery NDJSON arrives → NDJSON wins race → pendingStallKill=false
   //   T=300+: session completes normally
-  const sleeper = (await import('node:child_process')).spawn('sleep', ['60']);
+  // node -e sleep instead of `sleep`: Windows has no sleep binary.
+  const sleeper = (await import('node:child_process')).spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], {
+    stdio: 'ignore',
+  });
   try {
     const proc = createMockProcess({ pid: sleeper.pid });
     const spawnFn = createMockSpawnFn(proc);

@@ -36,6 +36,46 @@ const DEFAULT_CONFIG: ProbeConfig = {
   boundedExtensionFactor: 2.0,
 };
 
+export interface ProcessCpuRow {
+  pid: number;
+  ppid: number;
+  cpuMs: number;
+}
+
+/**
+ * Sum CPU over rootPid + ALL transitive descendants.
+ *
+ * 2026-08-12 quant 假超时事故：CLI 跑长工具时忙的是深层后代（API → powershell
+ * 包装 → cursor-agent → 工具 shell → pytest），此前只统计「自己+直接子进程」，
+ * 包装模式下正好把烧 CPU 的那层排除在外 → busy 会话被误判 idle-silent →
+ * 180s 假超时击杀。返回 null 表示 rootPid 不在进程表里（Unix 视为已死）。
+ */
+export function sumProcessTreeCpu(rows: readonly ProcessCpuRow[], rootPid: number): number | null {
+  const childrenByPpid = new Map<number, ProcessCpuRow[]>();
+  let rootRow: ProcessCpuRow | undefined;
+  for (const row of rows) {
+    if (row.pid === rootPid) rootRow = row;
+    const bucket = childrenByPpid.get(row.ppid);
+    if (bucket) bucket.push(row);
+    else childrenByPpid.set(row.ppid, [row]);
+  }
+  if (!rootRow) return null;
+  let total = 0;
+  const visited = new Set<number>();
+  const queue: ProcessCpuRow[] = [rootRow];
+  for (;;) {
+    const current = queue.pop();
+    if (!current) break;
+    if (visited.has(current.pid)) continue; // PID 复用可能造出 ppid 环
+    visited.add(current.pid);
+    total += current.cpuMs;
+    for (const childRow of childrenByPpid.get(current.pid) ?? []) {
+      queue.push(childRow);
+    }
+  }
+  return total;
+}
+
 /** Parse ps cputime format (mm:ss.SS or h:mm:ss) to milliseconds */
 export function parseCpuTime(raw: string): number {
   const trimmed = raw.trim();
@@ -165,10 +205,11 @@ export class ProcessLivenessProbe {
       return;
     }
 
-    // Single ps call to get CPU for process tree (main + direct children).
-    // When the CLI runs a tool call (e.g. pnpm test), the test subprocess is busy
-    // but the main CLI process is idle-waiting. Without checking children, the probe
-    // would misclassify as idle-silent and trigger stallAutoKill (false positive).
+    // Single ps call to get CPU for the WHOLE process tree (transitive).
+    // When the CLI runs a tool call (e.g. pnpm test), the busy process is a
+    // deep descendant (CLI → tool shell → test runner) while the CLI itself
+    // idle-waits. Direct-children-only sampling misclassified those sessions
+    // as idle-silent and triggered stallAutoKill (false positive).
     // Uses one `ps -A` instead of nested ps→pgrep→ps to avoid pgrep callback delays.
     execFile('ps', ['-A', '-o', 'pid=,ppid=,cputime='], (err, stdout) => {
       if (err) {
@@ -176,31 +217,31 @@ export class ProcessLivenessProbe {
         this.sampling = false;
         return;
       }
-      let mainCpu = -1;
-      let childCpuTotal = 0;
+      const rows: ProcessCpuRow[] = [];
       for (const line of stdout.split('\n')) {
         const parts = line.trim().split(/\s+/);
         if (parts.length < 3) continue;
         const pid = Number(parts[0]);
         const ppid = Number(parts[1]);
-        const cpu = parseCpuTime(parts[2]);
-        if (pid === this.pid) mainCpu = cpu;
-        else if (ppid === this.pid) childCpuTotal += cpu;
+        if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
+        rows.push({ pid, ppid, cpuMs: parseCpuTime(parts[2]) });
       }
-      if (mainCpu < 0) {
+      const totalCpu = sumProcessTreeCpu(rows, this.pid);
+      if (totalCpu === null) {
         this.pidAlive = false;
         this.sampling = false;
         return;
       }
-      this.updateCpuSample(mainCpu + childCpuTotal);
+      this.updateCpuSample(totalCpu);
     });
   }
 
   /**
    * Windows CPU sampling — PowerShell CIM query over Win32_Process.
-   * Mirrors the Unix ps semantics: sum CPU time of the main process + direct
-   * children (a CLI running a tool call is idle itself while the child burns
-   * CPU), emit "pid ppid cpuMs" lines, compare against the previous sample.
+   * Fetches the full pid/ppid/cpu table and sums the WHOLE descendant tree:
+   * Windows 上 CLI 藏在 .ps1/.cmd 包装进程后面（probe 盯的是包装层 pid），
+   * 烧 CPU 的是 cursor-agent → 工具 shell → pytest 这些深层后代——只看直接
+   * 子进程会把忙碌会话误判 idle-silent（2026-08-12 quant 假超时事故）。
    * UserModeTime/KernelModeTime are in 100ns units → /10000 = ms.
    *
    * On ANY failure (PowerShell missing, WMI hiccup, timeout) fall back to the
@@ -210,7 +251,7 @@ export class ProcessLivenessProbe {
    */
   private sampleWindowsCpu(): void {
     const script =
-      `Get-CimInstance Win32_Process -Filter 'ProcessId=${this.pid} OR ParentProcessId=${this.pid}' | ` +
+      `Get-CimInstance Win32_Process | ` +
       `ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, [math]::Round(($_.UserModeTime + $_.KernelModeTime) / 10000) }`;
     execFile(
       'powershell.exe',
@@ -223,8 +264,7 @@ export class ProcessLivenessProbe {
           this.sampling = false;
           return;
         }
-        let mainCpu = -1;
-        let childCpuTotal = 0;
+        const rows: ProcessCpuRow[] = [];
         for (const line of stdout.split('\n')) {
           const parts = line.trim().split(/\s+/);
           if (parts.length < 3) continue;
@@ -232,16 +272,16 @@ export class ProcessLivenessProbe {
           const ppid = Number(parts[1]);
           const cpu = Number(parts[2]);
           if (!Number.isFinite(pid) || !Number.isFinite(ppid) || !Number.isFinite(cpu)) continue;
-          if (pid === this.pid) mainCpu = cpu;
-          else if (ppid === this.pid) childCpuTotal += cpu;
+          rows.push({ pid, ppid, cpuMs: cpu });
         }
-        if (mainCpu < 0) {
+        const totalCpu = sumProcessTreeCpu(rows, this.pid);
+        if (totalCpu === null) {
           this.cpuGrowing = false;
           this.emitSilenceWarnings();
           this.sampling = false;
           return;
         }
-        this.updateCpuSample(mainCpu + childCpuTotal);
+        this.updateCpuSample(totalCpu);
       },
     );
   }
