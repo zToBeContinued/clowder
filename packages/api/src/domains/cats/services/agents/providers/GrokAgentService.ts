@@ -6,6 +6,7 @@ import { getCatModel } from '../../../../../config/cat-models.js';
 import { formatCliExitError } from '../../../../../utils/cli-format.js';
 import { formatCliNotFoundError, resolveCliCommand } from '../../../../../utils/cli-resolve.js';
 import {
+  archiveRawEvent,
   buildChildEnv,
   isCliError,
   isCliTimeout,
@@ -290,6 +291,9 @@ export class GrokAgentService implements AgentService {
         ? options.spawnCliOverride(cliOptions)
         : spawnCli(cliOptions, this.spawnFn ? { spawnFn: this.spawnFn } : undefined);
       for await (const rawEvent of events) {
+        // 原始事件归档：grok 是目前唯一零归档的 CLI provider——一旦启用出问题
+        // （如工具事件形态未知、transformGrokEvent 落 unknown 被丢）无从取证。
+        archiveRawEvent(options?.invocationId, rawEvent);
         if (isCliTimeout(rawEvent)) {
           yield {
             type: 'error',

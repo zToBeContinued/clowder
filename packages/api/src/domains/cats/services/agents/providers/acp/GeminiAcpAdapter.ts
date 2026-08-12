@@ -14,6 +14,7 @@
 
 import type { CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { archiveRawEvent } from '../../../../../../utils/cli-spawn.js';
 import { createPromptDigest } from '../../../context/prompt-digest.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { type AcpCapacitySignal, AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
@@ -196,6 +197,8 @@ export class GeminiAcpAdapter implements AgentService {
       eventCount = 0;
       const thinkingCoalescer = new AcpThinkingCoalescer(this.catId);
       for await (const event of client.promptStream(sessionId, effectivePrompt)) {
+        // 原始事件归档（诊断 ACP 事件形态问题；fire-and-forget，不改时序）
+        archiveRawEvent(options?.invocationId, event);
         // F149: Capacity signal injected by AcpClient.promptStream from stderr.
         // Breaks through zero-event stalls where the old listener-only path couldn't.
         if (event.update?.sessionUpdate === 'provider_capacity_signal') {

@@ -1,5 +1,6 @@
 import type { CatId } from '@cat-cafe/shared';
 import { createModuleLogger } from '../../../../../../infrastructure/logger.js';
+import { archiveRawEvent } from '../../../../../../utils/cli-spawn.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../../types.js';
 import { isContextWindowOverflowError, TRANSIENT_PROVIDER_ERROR_CODE } from '../../invocation/invoke-helpers.js';
 import { AcpProtocolError, AcpTimeoutError } from './AcpClient.js';
@@ -132,6 +133,8 @@ export class KiroAcpAdapter implements AgentService {
       const effectivePrompt = options?.systemPrompt ? `${options.systemPrompt}\n\n${prompt}` : prompt;
       const thinkingCoalescer = new AcpThinkingCoalescer(this.catId);
       for await (const event of client.promptStream(sessionId, effectivePrompt, { signal: options?.signal })) {
+        // 原始事件归档（诊断 ACP 事件形态问题；fire-and-forget，不改时序）
+        archiveRawEvent(options?.invocationId, event);
         const synthetic = this.transformSyntheticEvent(event, metadata);
         if (synthetic) {
           yield synthetic;
