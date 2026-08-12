@@ -127,6 +127,15 @@ export class CursorAgentService implements AgentService {
       let replayGuard = false;
       let replaySwallowed = 0;
       let replayBudget = 0;
+      // 调用级汇总去重：cursor-agent 2026.08+ 在每个 model call 结束时会把该
+      // call 的**累计全文**作为一条带 model_call_id 的 assistant 事件重发一遍
+      //（同样带 timestamp_ms，会被当成增量追加 → 整段重复；原始归档实证：
+      // 无 ID 增量「两处落库完成，提交。」之后 4.7s 再来一条同文带 ID 事件，
+      // 而 CLI 自己的 result 里只有一次）。规则：该 call 已有无 ID 增量流出
+      // 时跳过汇总（含同 callId 的分片）；纯汇总模式（整个 call 没有任何
+      // 增量）才作为文本输出，不丢内容。
+      let sawDeltaInCurrentCall = false;
+      let skippedSummaryCallId: string | undefined;
 
       for await (const event of events) {
         // 原始事件归档（诊断 cursor 首段重发 / exit 1）；fire-and-forget，不改时序。
@@ -217,6 +226,19 @@ export class CursorAgentService implements AgentService {
           const text = readAssistantText(event);
           if (!text) continue;
           if (isAssistantDelta(event)) {
+            const callId = typeof event.model_call_id === 'string' && event.model_call_id ? event.model_call_id : null;
+            if (callId) {
+              if (sawDeltaInCurrentCall || skippedSummaryCallId === callId) {
+                // 调用级累计汇总（或其分片）：内容已以无 ID 增量流出，跳过防整段重复
+                skippedSummaryCallId = callId;
+                sawDeltaInCurrentCall = false;
+                continue;
+              }
+              // 纯汇总模式：本 call 没有任何增量，汇总即唯一内容 → 正常输出
+            } else {
+              sawDeltaInCurrentCall = true;
+              skippedSummaryCallId = undefined;
+            }
             sawAssistantDelta = true;
             if (replayGuard) {
               if (emittedAssistantText.includes(text) && replaySwallowed + text.length <= replayBudget) {

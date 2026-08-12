@@ -102,6 +102,50 @@ test('重放守卫：断线重连(resuming)后重放的已发文本被吞掉', a
   );
 });
 
+test('调用级汇总去重：带 model_call_id 的累计汇总不重复追加', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's-summary', model: 'm' };
+    // call 1：流式增量 + 结束时的累计汇总（cursor-agent 2026.08+ 行为）
+    yield asmDelta('收到三件事：备忘录落文档。');
+    yield asmDelta('先看落点格式，然后写入。');
+    yield { ...asmDelta('收到三件事：备忘录落文档。先看落点格式，然后写入。'), model_call_id: 'call-1' };
+    // 工具调用后 call 2：同样 delta + 汇总
+    yield { type: 'tool_call', subtype: 'started' };
+    yield asmDelta('两处落库完成，提交。');
+    yield { ...asmDelta('两处落库完成，提交。'), model_call_id: 'call-2' };
+    yield { type: 'result', subtype: 'success', is_error: false };
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+  const fullText = messages
+    .filter((m) => m.type === 'text')
+    .map((m) => m.content)
+    .join('');
+  assert.equal(
+    fullText,
+    '收到三件事：备忘录落文档。先看落点格式，然后写入。两处落库完成，提交。',
+    '每个 call 的汇总必须被跳过，只保留增量流',
+  );
+});
+
+test('调用级汇总去重：纯汇总模式（无增量）时汇总作为唯一内容输出', async () => {
+  const service = new CursorAgentService({ model: 'cursor-test-model' });
+  const spawnOverride = async function* spawnCliOverride() {
+    yield { type: 'system', subtype: 'init', session_id: 's-summary-only', model: 'm' };
+    // 整个 call 没有任何无 ID 增量，只有带 ID 的汇总——不能丢内容
+    yield { ...asmDelta('只有汇总没有增量的回复。'), model_call_id: 'call-x' };
+    yield { type: 'result', subtype: 'success', is_error: false };
+  };
+
+  const messages = await collect(service.invoke('q', { spawnCliOverride: spawnOverride }));
+  const fullText = messages
+    .filter((m) => m.type === 'text')
+    .map((m) => m.content)
+    .join('');
+  assert.equal(fullText, '只有汇总没有增量的回复。', '纯汇总模式必须输出内容');
+});
+
 test('重放守卫：无 resuming 时同文正常输出（合法重复不受影响）', async () => {
   const service = new CursorAgentService({ model: 'cursor-test-model' });
   const spawnOverride = async function* spawnCliOverride() {

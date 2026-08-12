@@ -23,6 +23,9 @@ export interface CursorStreamEvent {
   text?: string;
   session_id?: string;
   timestamp_ms?: number;
+  /** cursor-agent 2026.08+ 的「调用级累计汇总」事件携带此 ID——内容是该
+   *  model call 已通过无 ID 增量流出过的全文重发，直接追加会整段重复。 */
+  model_call_id?: string;
   model?: string;
   is_error?: boolean;
   result?: string;
