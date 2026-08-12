@@ -69,6 +69,8 @@ export interface CliSpawnerDeps {
    * 关闭——否则单测会对无辜的真实 PID 执行 taskkill。
    */
   treeKillFn?: (pid: number) => Promise<boolean>;
+  /** Inject a liveness-probe factory (for deterministic timing tests). */
+  probeFactory?: (pid: number, config: NonNullable<CliSpawnOptions['livenessProbe']>) => ProcessLivenessProbe;
 }
 
 /** Env vars to strip from child processes to prevent E2BIG (overly large values). */
@@ -244,17 +246,22 @@ export async function* spawnCli(
 
   // Timeout: reset on any output, timeoutMs=0 disables
   let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  const startedAt = Date.now(); // F118: for hard cap calculation
   let probe: ProcessLivenessProbe | undefined; // F118: declared early for closure access
-  const resetTimeout = (): void => {
+  // 硬帽按「连续静默时长」而非「会话总时长」计算。旧算法用 startedAt：会话
+  // 年龄一过 factor×timeout（默认 6 分钟），busy-silent 的延长一律被拒——
+  // quant 事故 22:26:41 的击杀正是会话 371s > 360s 帽、延长被拒（当时 pytest
+  // 还在烧 CPU）。改为静默起点计时后，长会话与新会话同权：连续静默最多
+  // factor×timeout，期间只要 CPU 在长就延长。
+  let silenceStartedAt = Date.now();
+  const armTimeout = (): void => {
     if (timeoutMs === 0) return; // Disabled
     if (timeoutTimer) clearTimeout(timeoutTimer);
     timeoutTimer = setTimeout(() => {
       // F118: If busy-silent (CPU growing), extend timeout unless hard cap exceeded
       if (probe?.shouldExtendTimeout()) {
-        const elapsed = Date.now() - startedAt;
-        if (!probe.isHardCapExceeded(elapsed, timeoutMs)) {
-          resetTimeout(); // extend once more
+        const silenceMs = Date.now() - silenceStartedAt;
+        if (!probe.isHardCapExceeded(silenceMs, timeoutMs)) {
+          armTimeout(); // extend once more — 不前移 silenceStartedAt
           return;
         }
       }
@@ -264,7 +271,12 @@ export async function* spawnCli(
     }, timeoutMs);
     timeoutTimer.unref();
   };
-  if (timeoutMs > 0) resetTimeout(); // Start initial timeout only if enabled
+  const resetTimeout = (): void => {
+    if (timeoutMs === 0) return; // Disabled
+    silenceStartedAt = Date.now();
+    armTimeout();
+  };
+  if (timeoutMs > 0) armTimeout(); // Start initial timeout only if enabled
 
   // Attach stderr handler now that resetTimeout is defined
   // Reset timeout on stderr activity — CLI is alive (working on tools, thinking, etc.)
@@ -308,7 +320,9 @@ export async function* spawnCli(
 
   // F118 Phase B: Initialize liveness probe
   if (options.livenessProbe && child.pid !== undefined) {
-    probe = new ProcessLivenessProbe(child.pid, options.livenessProbe);
+    probe = deps?.probeFactory
+      ? deps.probeFactory(child.pid, options.livenessProbe)
+      : new ProcessLivenessProbe(child.pid, options.livenessProbe);
     probe.start();
     // F152: Register probe for OTel agentLiveness gauge
     if (options.invocationId) {

@@ -1230,6 +1230,59 @@ test('zombie fix: user cancel (abort) also goes through tree-kill', async () => 
   assert.ok(results.length >= 1);
 });
 
+// === 假超时残余修复：硬帽必须按「连续静默时长」而非「会话总时长」计算 ===
+// quant 事故 22:26:41 的击杀：会话年龄 371s > 2×180s 旧硬帽，busy-silent 的
+// 延长被拒——老会话里任何 >timeout 的静默长工具（296s pytest）都会被误杀。
+
+test('busy-silent extension works late in a session (hard cap = continuous silence, not session age)', async () => {
+  const proc = createMockProcess({ pid: process.pid });
+  const spawnFn = createMockSpawnFn(proc);
+  // 确定性 stub：始终 busy-silent，硬帽 2×timeout（与默认 boundedExtensionFactor 一致）
+  const stubProbe = {
+    config: { sampleIntervalMs: 60_000, softWarningMs: 120_000, stallWarningMs: 300_000, boundedExtensionFactor: 2 },
+    start() {},
+    stop() {},
+    notifyActivity() {},
+    drainWarnings() {
+      return [];
+    },
+    async flushPendingWarnings() {},
+    getState() {
+      return 'busy-silent';
+    },
+    shouldExtendTimeout() {
+      return true;
+    },
+    isHardCapExceeded(elapsedMs, timeoutMs) {
+      return elapsedMs >= 2 * timeoutMs;
+    },
+  };
+
+  const promise = collect(
+    spawnCli(
+      { command: 'cursor-agent', args: [], timeoutMs: 150, livenessProbe: { sampleIntervalMs: 60_000 } },
+      { spawnFn, probeFactory: () => stubProbe },
+    ),
+  );
+
+  // 把会话「养老」过 2×timeout=300ms：持续输出把会话总时长推到 ~480ms
+  for (let i = 0; i < 8; i++) {
+    if (!proc.stdout.writableEnded) proc.stdout.write(`${JSON.stringify({ type: 'msg', i })}\n`);
+    await new Promise((r) => setTimeout(r, 60));
+  }
+
+  // 静默的 busy 长工具：计时器到期时连续静默 150ms < 硬帽 300ms → 必须延长而非击杀
+  await new Promise((r) => setTimeout(r, 220));
+  if (!proc.stdout.writableEnded) proc.stdout.write(`${JSON.stringify({ type: 'tool_result' })}\n`);
+  await new Promise((r) => setTimeout(r, 30));
+  if (!proc.stdout.writableEnded) proc.stdout.end();
+  proc._emitter.emit('exit', 0, null);
+
+  const results = await promise;
+  const timeout = results.find((r) => isCliTimeout(r));
+  assert.equal(timeout, undefined, '老会话里 busy-silent 的长工具不应被假超时击杀');
+});
+
 // === Issue #774: stallAutoKill — fast-fail on idle-silent stall ===
 
 test('#774: stallAutoKill kills process on suspected_stall + idle-silent instead of waiting for full timeout', async () => {
