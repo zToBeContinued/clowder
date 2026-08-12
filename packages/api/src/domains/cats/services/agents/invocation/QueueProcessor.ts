@@ -116,6 +116,13 @@ interface TrackerLike {
   has(threadId: string, catId?: string): boolean;
   /** Active invocation count for a cat across ALL threads (per-cat global soft cap). */
   countActiveForCat?(catId: string): number;
+  /** Threads where this cat is currently running (same-project mutex). */
+  activeThreadsForCat?(catId: string): string[];
+}
+
+/** 同猫同项目互斥用：只需要按 threadId 拿 projectPath。 */
+export interface ThreadProjectLookupLike {
+  get(threadId: string): Promise<{ projectPath?: string } | null>;
 }
 
 export interface InvocationRecordStoreLike {
@@ -529,6 +536,8 @@ export interface QueueProcessorDeps {
   catSupervisor?: CatSupervisorLike;
   /** Task event ledger — used to attach A2A handoff/artifact events to source tasks. */
   taskStore?: Pick<ITaskStore, 'listByThread' | 'update'> & Partial<Pick<ITaskStore, 'listByKind'>>;
+  /** 同猫同项目互斥：threadId → projectPath 查询（缺省时互斥检查关闭）。 */
+  threadProjectLookup?: ThreadProjectLookupLike;
   /** Test seam for project scaffold files; production defaults to monorepo root. */
   projectRoot?: string;
   /** Test seam for git artifact tracking; production defaults to `git diff --numstat HEAD --`. */
@@ -1556,7 +1565,9 @@ export class QueueProcessor {
     if (this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
       return { started: false, entry, blocked: true };
     }
-    return this.startAutoExecuteEntry(entry) ? { started: true, entry } : { started: false, entry, blocked: true };
+    return (await this.startAutoExecuteEntry(entry))
+      ? { started: true, entry }
+      : { started: false, entry, blocked: true };
   }
 
   /**
@@ -1719,13 +1730,13 @@ export class QueueProcessor {
       if (entry.a2aWaitedForQueuedUserMessages === true && this.deps.queue.hasOutstandingNonAgentForThread(threadId)) {
         continue;
       }
-      this.startAutoExecuteEntry(entry);
+      await this.startAutoExecuteEntry(entry);
       // Continue scanning — start all entries with free cat slots (parallel dispatch)
     }
     if (redirectedConflict) await this.tryAutoExecute(threadId);
   }
 
-  private startAutoExecuteEntry(entry: QueueEntry): boolean {
+  private async startAutoExecuteEntry(entry: QueueEntry): Promise<boolean> {
     const entryCat = entry.targetCats[0] ?? 'unknown';
     const sk = QueueProcessor.slotKey(entry.threadId, entryCat);
     if (this.processingSlots.has(sk) || this.deps.invocationTracker.has(entry.threadId, entryCat)) return false;
@@ -1733,7 +1744,14 @@ export class QueueProcessor {
     // running in enough other threads; drainCatWaiters re-kicks us on release.
     if (this.isCatGloballySaturated(entryCat)) return false;
     if (!this.deps.queue.markProcessingById(entry.threadId, entry.id)) return false;
+    // 先同步落锤抢占 slot（per-slot mutex 依赖「检查→落锤」原子，await 不能
+    // 插在中间），再做异步的同猫同项目互斥检查，不通过则回滚。
     this.processingSlots.set(sk, Date.now());
+    if (await this.isCatBusyOnSameProject(entryCat, entry.threadId)) {
+      this.processingSlots.delete(sk);
+      this.deps.queue.rollbackProcessing(entry.threadId, entry.id);
+      return false;
+    }
     void this.executeEntry(entry).then(
       (status) => {
         this.processingSlots.delete(sk);
@@ -1784,6 +1802,40 @@ export class QueueProcessor {
     const active = this.deps.invocationTracker.countActiveForCat?.(catId);
     if (active === undefined) return false;
     return active >= limit;
+  }
+
+  /**
+   * 同猫同项目互斥：这只猫是否正在**其它 thread** 里跑同一个 projectPath。
+   *
+   * 根因案例（quant 2026-08-12）：opus 在主频道与另一 thread 同时被派工，两个
+   * CLI 实例写同一个工作树，owner 回归文件在 40 秒内被两套设计交替覆写，猫
+   * 自己报告「该文件两次被写入，非我所为」。并发槽是 (thread, cat) 维度，但
+   * 文件冲突是 projectPath 维度——同猫同目录必须串行（跨项目仍可并行）。
+   * 完成后 drainCatWaiters 会重新踢排队的等待者。CAT_CAFE_PER_CAT_PROJECT_MUTEX=0
+   * 可关闭。
+   */
+  private async isCatBusyOnSameProject(catId: string, threadId: string): Promise<boolean> {
+    if (process.env.CAT_CAFE_PER_CAT_PROJECT_MUTEX === '0') return false;
+    const lookup = this.deps.threadProjectLookup;
+    const otherThreads = this.deps.invocationTracker.activeThreadsForCat?.(catId)?.filter((t) => t !== threadId);
+    if (!lookup || !otherThreads?.length) return false;
+    try {
+      const current = (await lookup.get(threadId))?.projectPath;
+      if (!current) return false;
+      for (const other of otherThreads) {
+        const otherPath = (await lookup.get(other))?.projectPath;
+        if (otherPath && otherPath === current) {
+          this.deps.log.info(
+            { catId, threadId, busyThreadId: other, projectPath: current },
+            '[QueueProcessor] 同猫同项目互斥：该猫正在其它 thread 写同一工作树，本棒保持排队',
+          );
+          return true;
+        }
+      }
+      return false;
+    } catch {
+      return false; // 查询失败按放行处理，退化为原有软上限行为
+    }
   }
 
   /** After a cat finishes anywhere, re-kick other threads whose queued entries
@@ -1920,7 +1972,15 @@ export class QueueProcessor {
         continue;
       }
 
+      // 先同步落锤抢占 slot（per-slot mutex 依赖「检查→落锤」原子，await 不能
+      // 插在中间），再做异步的同猫同项目互斥检查，不通过则回滚。
       this.processingSlots.set(entrySk, Date.now());
+      if (await this.isCatBusyOnSameProject(entryCat, threadId)) {
+        this.processingSlots.delete(entrySk);
+        this.deps.queue.rollbackProcessing(threadId, entry.id);
+        busyCats.add(entryCat);
+        continue;
+      }
       void this.executeEntry(entry).then(
         (status) => {
           this.processingSlots.delete(entrySk);
@@ -1982,10 +2042,18 @@ export class QueueProcessor {
         busyCats.add(entryCat);
         continue;
       }
+      // 先同步落锤抢占 slot（per-slot mutex 依赖「检查→落锤」原子，await 不能
+      // 插在中间），再做异步的同猫同项目互斥检查，不通过则回滚。
+      this.processingSlots.set(sk, Date.now());
+      if (await this.isCatBusyOnSameProject(entryCat, threadId)) {
+        this.processingSlots.delete(sk);
+        this.deps.queue.rollbackProcessing(threadId, entry.id);
+        busyCats.add(entryCat);
+        continue;
+      }
       break;
     }
 
-    this.processingSlots.set(sk, Date.now());
     const settledEntry = entry;
     // Fire-and-forget execution — chain onInvocationComplete AFTER mutex release
     void this.executeEntry(entry).then(

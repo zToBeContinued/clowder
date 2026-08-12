@@ -100,6 +100,23 @@ export class InvocationTracker {
   }
 
   /**
+   * Threads where this cat currently has an active invocation.
+   * 同猫同项目互斥用：跨 thread 找到该猫正在跑的位置，再按 projectPath 判定
+   * 是否指向同一个工作树（两个实例并发写同一目录会互相覆盖文件）。
+   * threadId 从 slotKey（`${threadId}:${catId}`）解出——两者都不含冒号。
+   */
+  activeThreadsForCat(catId: string): string[] {
+    const threads = new Set<string>();
+    for (const [key, inv] of [...this.active]) {
+      if (inv.catId !== catId) continue;
+      if (this.isExpired(key, inv)) continue;
+      const sep = key.lastIndexOf(':');
+      if (sep > 0) threads.add(key.slice(0, sep));
+    }
+    return [...threads];
+  }
+
+  /**
    * F122 Phase A.1: Non-preemptive thread-level start.
    * Atomically checks if ANY slot in the thread is active (or deleting),
    * then registers the new slot — all in one synchronous operation.

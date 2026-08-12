@@ -1526,6 +1526,8 @@ async function main(): Promise<void> {
     log: app.log,
     catSupervisor,
     sessionContinuationCoordinator,
+    // 同猫同项目互斥：同一只猫在两个 thread 同时写同一个 projectPath 会互相覆盖工作树
+    threadProjectLookup: { get: async (threadId: string) => await threadStore.get(threadId) },
   });
   const restoredQueue = await invocationQueue.restorePersistedEntries();
   if (restoredQueue.restored > 0) {

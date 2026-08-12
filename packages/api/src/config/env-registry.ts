@@ -770,6 +770,15 @@ export const ENV_VARS: EnvDefinition[] = [
     runtimeEditable: true,
   },
   {
+    name: 'CAT_CAFE_PER_CAT_PROJECT_MUTEX',
+    defaultValue: '1',
+    description:
+      '同猫同项目互斥（默认开启；设 0 关闭）。同一只猫在两个 thread 同时跑同一个 projectPath 时，后到的一棒保持排队，等前一棒完成后自动接续——两个 CLI 实例并发写同一个工作树会互相覆盖文件（实证：owner 回归文件 40 秒内被两套设计交替改写）。跨项目仍可并行；不同猫在同一项目也不受限（由协作协议约束写权）。',
+    category: 'governance',
+    sensitive: false,
+    runtimeEditable: true,
+  },
+  {
     name: 'CAT_CAFE_CLI_STALL_KILL_MS',
     defaultValue: '180000',
     description:
