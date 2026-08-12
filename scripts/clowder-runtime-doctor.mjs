@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cwdOfPid, listenerPid } from './lib/port-utils.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
@@ -37,33 +37,10 @@ function add(ok, label, detail = '') {
   results.push({ ok, label, detail });
 }
 
-function run(cmd, args) {
-  try {
-    return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch {
-    return '';
-  }
-}
-
-function listenerPid(port) {
-  const out = run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t']);
-  return out.split(/\s+/).filter(Boolean)[0] || '';
-}
-
-function cwdOfPid(pid) {
-  if (!pid) return '';
-  const out = run('lsof', ['-p', pid]);
-  const line = out.split(/\r?\n/).find((entry) => /\scwd\s/.test(entry));
-  if (!line) return '';
-  return line.trim().split(/\s+/).at(-1) || '';
-}
-
 async function fetchText(url) {
   try {
     const res = await fetch(url, {
-      ...(apiBearerToken && url.includes('/api/')
-        ? { headers: { authorization: `Bearer ${apiBearerToken}` } }
-        : {}),
+      ...(apiBearerToken && url.includes('/api/') ? { headers: { authorization: `Bearer ${apiBearerToken}` } } : {}),
     });
     const text = await res.text();
     return { ok: res.ok, status: res.status, text, contentType: res.headers.get('content-type') || '' };
@@ -79,21 +56,32 @@ const apiCwd = cwdOfPid(apiPid);
 
 add(Boolean(webPid), `Web 端口 ${frontendPort}`, webPid ? `pid=${webPid}` : '未监听');
 add(Boolean(apiPid), `API 端口 ${apiPort}`, apiPid ? `pid=${apiPid}` : '未监听');
-add(webCwd.startsWith(projectRoot), 'Web 启动目录', webCwd || '无法识别');
-add(apiCwd.startsWith(projectRoot), 'API 启动目录', apiCwd || '无法识别');
+// Windows 不提供进程 cwd（cwdOfPid 返回 null）——跳过而非误报
+if (webCwd !== null) add(webCwd.startsWith(projectRoot), 'Web 启动目录', webCwd || '无法识别');
+if (apiCwd !== null) add(apiCwd.startsWith(projectRoot), 'API 启动目录', apiCwd || '无法识别');
 
 const envPath = resolve(projectRoot, '.env');
 const catalogPath = resolve(projectRoot, '.cat-cafe/cat-catalog.json');
 const legacyUploadsPath = resolve(projectRoot, 'packages/api/uploads');
 const uploadsPath = effectiveUploadDir;
-add(existsSync(envPath), '.env', existsSync(envPath) ? '存在' : '缺失');
+// .env 与 uploads 都是可选资源：无 .env = 按代码默认值运行（合法形态）；
+// uploads 目录懒创建。缺失只提示，不计入失败——否则默认值环境永远体检不过。
+add(true, '.env', existsSync(envPath) ? '存在' : '未创建（按默认值运行）');
 add(existsSync(catalogPath), '.cat-cafe/cat-catalog.json', existsSync(catalogPath) ? '存在' : '缺失');
+if (existsSync(legacyUploadsPath)) {
+  add(
+    lstatSync(legacyUploadsPath).isSymbolicLink(),
+    'packages/api/uploads symlink',
+    `${legacyUploadsPath} -> ${uploadsPath}`,
+  );
+}
 add(
-  existsSync(legacyUploadsPath) && lstatSync(legacyUploadsPath).isSymbolicLink(),
-  'packages/api/uploads symlink',
-  existsSync(legacyUploadsPath) ? `${legacyUploadsPath} -> ${uploadsPath}` : '缺失',
+  true,
+  'uploads 目录',
+  existsSync(uploadsPath)
+    ? `${readdirSync(uploadsPath).length} 个条目：${uploadsPath}`
+    : `未创建（首次上传时生成）：${uploadsPath}`,
 );
-add(existsSync(uploadsPath), 'uploads 目录', existsSync(uploadsPath) ? `${readdirSync(uploadsPath).length} 个条目：${uploadsPath}` : `缺失：${uploadsPath}`);
 
 if (existsSync(catalogPath)) {
   try {
@@ -126,7 +114,11 @@ if (cats.ok) {
 const html = await fetchText(`http://localhost:${frontendPort}/`);
 add(html.ok, 'Web 首页', html.ok ? `HTTP ${html.status}` : html.text);
 if (html.ok) {
-  add(html.text.includes('data-visual-theme="slock"'), '默认 Slock 主题', html.text.includes('data-visual-theme="slock"') ? '首屏已注入' : '首屏未注入');
+  add(
+    html.text.includes('data-visual-theme="slock"'),
+    '默认 Slock 主题',
+    html.text.includes('data-visual-theme="slock"') ? '首屏已注入' : '首屏未注入',
+  );
 }
 
 console.log('Clowder Runtime Doctor');
