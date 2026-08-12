@@ -213,7 +213,13 @@ function Stop-PortProcess {
                 Write-Err "Port $Port ($Name) is in use by non-Clowder PID $($conn.OwningProcess). Stop it manually or change the configured port."
                 throw "Port $Port ($Name) is in use by a non-Clowder process"
             }
-            Write-Warn "Port $Port ($Name) in use by PID $($conn.OwningProcess) - stopping"
+            Write-Warn "Port $Port ($Name) in use by PID $($conn.OwningProcess) - stopping (tree)"
+            # Kill the WHOLE tree, not just the listener: killing only the API
+            # process orphans its dispatched agent CLIs / wrapper processes,
+            # which keep writing the target project (2026-08-12 ghost-writer
+            # incident). NOTE: keep this file ASCII-only - PowerShell 5.1 reads
+            # BOM-less .ps1 as ANSI and non-ASCII comments break parsing.
+            & taskkill /PID $conn.OwningProcess /T /F 2>$null | Out-Null
             Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
         }
         Clear-ManagedProcessId -PidFile $PidFile
@@ -293,6 +299,21 @@ Stop-PortProcess -Port ([int]$ApiPort) -Name "API" -PidFile $ApiPidFile -Project
 Stop-PortProcess -Port ([int]$WebPort) -Name "Frontend" -PidFile $WebPidFile -ProjectRoot $ProjectRoot
 if ($useLocalEmbedSidecar) {
     Stop-PortProcess -Port ([int]$EmbedPort) -Name "Embedding" -PidFile $EmbedPidFile -ProjectRoot $ProjectRoot
+}
+
+# -- Sweep orphan agents (2026-08-12 ghost-writer incident) ---
+# When a previous API got hard-killed (crash / window X / Stop-Process), its
+# dispatched CLI agents and kiro-cli acp carriers survive as orphans and keep
+# writing the target project. Before starting, identify processes whose
+# command line carries the dispatch marker AND whose parent is dead, then
+# kill their whole trees. Agents with a live parent chain belong to another
+# running instance and are left alone. Never fatal for startup.
+Write-Step "Sweep orphan agents"
+try {
+    & node (Join-Path $ScriptDir "sweep-orphan-agents.mjs")
+    if ($LASTEXITCODE -ne 0) { Write-Warn "Orphan agent sweep exited $LASTEXITCODE - continuing" }
+} catch {
+    Write-Warn "Orphan agent sweep failed: $($_.Exception.Message)"
 }
 
 # -- Storage (Redis or Memory) -------------------------------
@@ -691,6 +712,35 @@ try {
 } finally {
     Write-Host "`nShutting down..." -ForegroundColor Yellow
 
+    # Ctrl+C / failure teardown: tree-kill API/Web/Embed BEFORE stopping jobs.
+    # Stop-Job only hard-kills the job's direct node child; agent CLIs and
+    # wrapper processes under the API would be orphaned and keep writing the
+    # target project (2026-08-12 ghost-writer incident - pid 31480 survived
+    # exactly this path). taskkill /T reaps the whole tree; the graceful Redis
+    # SHUTDOWN below is unaffected.
+    $serviceTargets = @(
+        @{ Name = "API"; Port = [int]$ApiPort; PidFile = $ApiPidFile },
+        @{ Name = "Frontend"; Port = [int]$WebPort; PidFile = $WebPidFile }
+    )
+    if ($useLocalEmbedSidecar) {
+        $serviceTargets += @{ Name = "Embedding"; Port = [int]$EmbedPort; PidFile = $EmbedPidFile }
+    }
+    foreach ($svc in $serviceTargets) {
+        try {
+            $svcPid = Get-ManagedProcessId -PidFile $svc.PidFile
+            if (-not $svcPid) {
+                $listener = Get-NetTCPConnection -LocalPort $svc.Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($listener) { $svcPid = [int]$listener.OwningProcess }
+            }
+            if ($svcPid) {
+                & taskkill /PID $svcPid /T /F 2>$null | Out-Null
+                Write-Ok "$($svc.Name) process tree stopped (pid=$svcPid)"
+            }
+        } catch {
+            Write-Warn "Failed to stop $($svc.Name) tree: $($_.Exception.Message)"
+        }
+    }
+
     foreach ($job in $jobs) {
         Stop-Job -Job $job -ErrorAction SilentlyContinue
         Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
@@ -698,6 +748,14 @@ try {
     Clear-ManagedProcessId -PidFile $ApiPidFile
     Clear-ManagedProcessId -PidFile $WebPidFile
     Clear-ManagedProcessId -PidFile $EmbedPidFile
+
+    # Final orphan sweep after the tree kills: catches stragglers whose parent
+    # chain broke during the shutdown window.
+    try {
+        & node (Join-Path $ScriptDir "sweep-orphan-agents.mjs") 2>$null
+    } catch {
+        Write-Warn "Post-shutdown orphan sweep failed: $($_.Exception.Message)"
+    }
 
     if ($startedRedis) {
         try {

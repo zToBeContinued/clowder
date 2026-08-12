@@ -10,6 +10,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readDotEnvValues } from './lib/platform-status.mjs';
 import { commandLineOfPid, killPidTree, listenerPid } from './lib/port-utils.mjs';
+import { sweepOrphanAgents } from './sweep-orphan-agents.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const env = readDotEnvValues(resolve(projectRoot, '.env'));
@@ -47,6 +48,12 @@ for (const target of targets) {
   console.log(`  ${ok ? 'OK  ' : 'ERR '} ${target.name} 端口 ${target.port}：pid=${pid} ${ok ? '已停止' : '停止失败'}`);
   if (ok) stopped++;
 }
+
+// 端口树杀完成后清扫孤儿 agent：API 之前若被硬杀，其派工的 CLI agent /
+// kiro acp carrier 不监听端口、无法被上面的端口扫描发现（2026-08-12 事故）。
+console.log('');
+console.log('孤儿 agent 清扫:');
+sweepOrphanAgents();
 
 console.log('');
 console.log(`已停止 ${stopped} 个服务${skipped > 0 ? `，跳过 ${skipped} 个非本项目进程` : ''}。`);

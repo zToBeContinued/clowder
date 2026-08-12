@@ -56,12 +56,28 @@ export function cwdOfPid(pid) {
   return line.trim().split(/\s+/).at(-1) || '';
 }
 
+/** 进程是否存活（signal 0 探测；EPERM 表示活着但无权限）。 */
+function pidAlive(pid) {
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
 /** 杀掉进程树（Windows taskkill /T；Unix 先 TERM 后 KILL）。 */
 export function killPidTree(pid, { forceAfterMs = 3000 } = {}) {
   if (!pid) return false;
   if (isWindows) {
-    const out = run('taskkill', ['/PID', String(pid), '/T', '/F']);
-    return out.includes('SUCCESS') || out.includes('成功');
+    // taskkill 输出是本地化文本（中文系统还常带编码劣化），不可用来判断成败；
+    // 以「目标进程是否已消失」为准。
+    run('taskkill', ['/PID', String(pid), '/T', '/F']);
+    const deadline = Date.now() + forceAfterMs;
+    while (pidAlive(pid) && Date.now() < deadline) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    return !pidAlive(pid);
   }
   try {
     process.kill(Number(pid), 'SIGTERM');
