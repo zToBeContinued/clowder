@@ -3,6 +3,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { QueueEntry } from '@/stores/chatStore';
+import type { FanOutInfo } from '@/utils/queue-fanout';
 
 const SOURCE_CATEGORY_LABEL: Record<string, string> = {
   ci: 'CI',
@@ -18,6 +19,8 @@ export interface QueueEntryRowProps {
   isPaused: boolean;
   imageCount: number;
   ownerName: string;
+  /** 同源扇出标注(一条消息 @ 多猫拆出的兄弟条目);null = 非扇出 */
+  fanOut?: FanOutInfo | null;
   onRemove: (id: string) => void;
   onSteer: (id: string) => void;
 }
@@ -40,6 +43,7 @@ function QueueEntryRow({
   isPaused,
   imageCount,
   ownerName,
+  fanOut,
   onRemove,
   onSteer,
   dragHandleProps,
@@ -104,10 +108,26 @@ function QueueEntryRow({
                   自动
                 </span>
               )}
+              {fanOut && (
+                <span
+                  className="text-[9px] px-1 py-px rounded font-medium bg-conn-amber-ring/40 text-conn-amber-text shrink-0"
+                  title="同一条消息 @ 了多只猫,按接收方各排一棒——不是重复消息"
+                >
+                  同源 {fanOut.position}/{fanOut.total}
+                </span>
+              )}
             </div>
-            <p className="text-xs text-cafe-muted truncate mt-0.5" title={entry.content}>
-              {entry.content}
-            </p>
+            {/* 同源扇出的兄弟条目不重复正文:一条消息 @ N 只猫会拆成 N 条队列
+                条目,正文一字不差,原样渲染两遍会被误读成「消息重复」。 */}
+            {fanOut?.siblingOfPrevious ? (
+              <p className="text-xs text-cafe-muted truncate mt-0.5 italic" title={entry.content}>
+                ↑ 同一条消息 · 另派 @{entry.targetCats[0] ?? '猫猫'}
+              </p>
+            ) : (
+              <p className="text-xs text-cafe-muted truncate mt-0.5" title={entry.content}>
+                {entry.content}
+              </p>
+            )}
           </>
         ) : (
           <>

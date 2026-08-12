@@ -8,6 +8,7 @@ import { useCoCreatorConfig } from '@/hooks/useCoCreatorConfig';
 import { useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
+import { annotateFanOut } from '@/utils/queue-fanout';
 import { SortableQueueEntryRow } from './QueueEntryRow';
 import { type SteerMode, SteerQueuedEntryModal } from './SteerQueuedEntryModal';
 import { useConfirm } from './useConfirm';
@@ -262,25 +263,29 @@ export function QueuePanel({ threadId }: QueuePanelProps) {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={entryIds} strategy={verticalListSortingStrategy}>
             <div className="max-h-40 overflow-y-auto">
-              {visibleEntries.map((entry, idx) => {
-                const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
-                const imageCount = allMsgIds.reduce((count, msgId) => {
-                  const msg = messages.find((m) => m.id === msgId);
-                  return count + (msg?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0);
-                }, 0);
-                return (
-                  <SortableQueueEntryRow
-                    key={entry.id}
-                    entry={entry}
-                    index={idx}
-                    isPaused={queuePaused}
-                    imageCount={imageCount}
-                    ownerName={coCreator.name}
-                    onRemove={handleRemove}
-                    onSteer={handleSteerOpen}
-                  />
-                );
-              })}
+              {(() => {
+                const fanOutInfos = annotateFanOut(visibleEntries);
+                return visibleEntries.map((entry, idx) => {
+                  const allMsgIds = [entry.messageId, ...(entry.mergedMessageIds ?? [])].filter(Boolean) as string[];
+                  const imageCount = allMsgIds.reduce((count, msgId) => {
+                    const msg = messages.find((m) => m.id === msgId);
+                    return count + (msg?.contentBlocks?.filter((b) => b.type === 'image').length ?? 0);
+                  }, 0);
+                  return (
+                    <SortableQueueEntryRow
+                      key={entry.id}
+                      entry={entry}
+                      index={idx}
+                      isPaused={queuePaused}
+                      imageCount={imageCount}
+                      ownerName={coCreator.name}
+                      fanOut={fanOutInfos[idx]}
+                      onRemove={handleRemove}
+                      onSteer={handleSteerOpen}
+                    />
+                  );
+                });
+              })()}
             </div>
           </SortableContext>
         </DndContext>
