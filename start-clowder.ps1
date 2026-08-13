@@ -8,7 +8,18 @@
 #    4. starts Clowder (API + web) in persistent (Redis) mode
 #  trust-all-tools is already baked into the Kiro ACP profile, so every Kiro
 #  tool call (incl. nested subagents) is auto-approved -- nothing to confirm.
+#
+#  Switches (forwarded to scripts/start-entry.mjs -> start-windows.ps1):
+#    -Dev    web runs `next dev` (hot reload), API runs NODE_ENV=development
+#    -Debug  LOG_LEVEL=debug + pino file logging (packages/api/data/logs/api/)
+#    -Quick  skip package builds (use only when dist/.next are already fresh)
+#  start-clowder-dev.cmd wraps this file with -Dev -Debug for UI iteration.
 # =============================================================================
+param(
+    [switch]$Dev,
+    [switch]$Debug,
+    [switch]$Quick
+)
 $repo = [System.IO.Path]::GetFullPath($PSScriptRoot)
 Set-Location -LiteralPath $repo
 . (Join-Path $repo "scripts\windows-runtime-env.ps1")
@@ -190,8 +201,13 @@ if (Test-Path -LiteralPath $sweepScript -PathType Leaf) {
 }
 
 # --- 5) Start Clowder (default mode = Redis; trust-all is automatic) ---------
-Write-Step "Starting Clowder (API + web) ..."
-& node (Join-Path $repo "scripts\start-entry.mjs") start
+$startArgs = @("start")
+if ($Dev) { $startArgs += "--dev" }
+if ($Debug) { $startArgs += "--debug" }
+if ($Quick) { $startArgs += "--quick" }
+$modeLabel = if ($Dev) { "DEV (hot reload)" } else { "production" }
+Write-Step "Starting Clowder (API + web, $modeLabel) ..."
+& node (Join-Path $repo "scripts\start-entry.mjs") @startArgs
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
