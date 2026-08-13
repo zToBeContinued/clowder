@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { sweepStaleTestTemp } from '../test/helpers/sweep-stale-test-temp.js';
 import { CI_TIERS, selectTests } from './select-ci-tests.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -101,6 +102,12 @@ export function chunkByArgLength(files, budget = WIN_ARG_BUDGET) {
 // Node 等价的 with-test-home.sh：无 bash 的环境（如未装 Git Bash 的 Windows）用它
 // 构造隔离沙箱环境，确保测试不触碰真实 HOME/~/.cat-cafe，并复刻 shell 版的同款语义。
 function createIsolatedHomeEnv(baseEnv) {
+  // 自愈清扫上一轮残留(硬杀/崩溃时 finally 不执行,%TEMP% 会积垃圾)
+  try {
+    sweepStaleTestTemp();
+  } catch {
+    /* 清扫失败绝不影响测试 */
+  }
   const realHome = baseEnv.HOME ?? baseEnv.USERPROFILE ?? homedir();
   const testHome = mkdtempSync(join(tmpdir(), 'cat-cafe-test-home-'));
   const env = {

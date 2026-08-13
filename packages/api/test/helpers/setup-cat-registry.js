@@ -19,9 +19,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { catRegistry } from '@cat-cafe/shared';
+import { sweepStaleTestTemp } from './sweep-stale-test-temp.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, '../../../../cat-template.json');
+
+// 自愈清扫上一轮测试残留:exit 钩子在硬杀/崩溃/worker 线程下不执行,
+// %TEMP% 会积出成百上千个 cat-cafe-test-template-* 目录(2026-08-13 实测)。
+// pid 活着的绝不动,详见 helpers/sweep-stale-test-temp.js。
+try {
+  sweepStaleTestTemp();
+} catch {
+  /* 清扫失败绝不影响测试 */
+}
 
 // Redirect CAT_TEMPLATE_PATH to a temp directory that has no .cat-cafe/ subdir.
 // This ensures loadCatConfig() (called by getCachedConfig → getRoster, etc.)
