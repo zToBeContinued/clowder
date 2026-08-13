@@ -88,7 +88,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     await flushEffects();
 
     const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('安装到当前猫猫'),
+      b.textContent?.trim() === '安装',
     );
     expect(installBtn).toBeTruthy();
     expect(installBtn?.disabled).toBe(false);
@@ -125,7 +125,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     await flushEffects();
 
     const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('安装到当前猫猫'),
+      b.textContent?.trim() === '安装',
     );
 
     await act(async () => {
@@ -154,7 +154,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     await flushEffects();
 
     const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('安装到当前猫猫'),
+      b.textContent?.trim() === '安装',
     );
 
     await act(async () => {
@@ -181,7 +181,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     await flushEffects();
 
     const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('安装到当前猫猫'),
+      b.textContent?.trim() === '安装',
     );
 
     await act(async () => {
