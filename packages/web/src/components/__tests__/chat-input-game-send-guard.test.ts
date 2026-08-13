@@ -72,21 +72,41 @@ afterEach(() => {
   container.remove();
 });
 
+// slock 大改(eb5fe913)后 composer 不再有 Game mode 按钮;
+// 游戏菜单唯一入口是输入 "/game "(detectMenuTrigger)。注意尾随空格:
+// 光标紧贴 "/game" 时会先被 slash 命令菜单拦截,带空格才落入 game 触发。
+function typeInTextarea(value: string) {
+  const ta = container.querySelector('textarea') as HTMLTextAreaElement;
+  expect(ta).toBeTruthy();
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    setter.call(ta, value);
+    ta.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+function openGameMenu() {
+  typeInTextarea('/game ');
+}
+
 describe('sendGameCommand respects sendTemporarilyDisabled', () => {
-  it('does NOT send game command when upload starts after menu is open', () => {
+  it('does NOT start game when upload begins after menu is open (guard moved into startGame)', async () => {
     const onSend = vi.fn();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ status: 'game_started', gameId: 'g1', gameThreadId: 'gt1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    mockApiFetch.mockClear();
 
     // Step 1: render with idle upload — menu can open
     act(() => {
       root.render(React.createElement(ChatInput, { onSend, disabled: false, uploadStatus: 'idle' }));
     });
 
-    // Step 2: open game menu
-    const gameBtn = container.querySelector('button[aria-label="Game mode"]') as HTMLButtonElement;
-    expect(gameBtn).toBeTruthy();
-    act(() => {
-      gameBtn.click();
-    });
+    // Step 2: open game menu (typed trigger)
+    openGameMenu();
 
     // Step 3: drill into modes (layer 1 → layer 2)
     const layer1Item = container.querySelector('[data-testid="game-item-werewolf"]') as HTMLElement;
@@ -100,14 +120,33 @@ describe('sendGameCommand respects sendTemporarilyDisabled', () => {
       root.render(React.createElement(ChatInput, { onSend, disabled: false, uploadStatus: 'uploading' }));
     });
 
-    // Step 5: click a mode — should NOT call onSend because upload is blocking
+    // Step 5: mode click opens lobby (never sends via message pipeline)
     const modeItem = container.querySelector('[data-testid="game-mode-player"]') as HTMLElement;
     expect(modeItem).toBeTruthy();
     act(() => {
       modeItem.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     });
+    expect(container.querySelector('[data-testid="game-lobby"]')).toBeTruthy();
+
+    // Step 6: confirm in lobby — startGame must refuse while upload is blocking
+    for (const catId of ['opus', 'sonnet', 'codex', 'gpt52', 'spark', 'gemini']) {
+      const toggle = container.querySelector(`[data-testid="cat-toggle-${catId}"]`) as HTMLButtonElement;
+      act(() => {
+        toggle.click();
+      });
+    }
+    const confirmBtn = container.querySelector('[data-testid="lobby-confirm"]') as HTMLButtonElement;
+    act(() => {
+      confirmBtn.click();
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
 
     expect(onSend).not.toHaveBeenCalled();
+    expect(mockApiFetch).not.toHaveBeenCalledWith('/api/game/start', expect.anything());
+
+    vi.restoreAllMocks();
   });
 
   it('opens lobby when upload is idle, calls game API on confirm', async () => {
@@ -124,10 +163,7 @@ describe('sendGameCommand respects sendTemporarilyDisabled', () => {
       root.render(React.createElement(ChatInput, { onSend, disabled: false, uploadStatus: 'idle' }));
     });
 
-    const gameBtn = container.querySelector('button[aria-label="Game mode"]') as HTMLButtonElement;
-    act(() => {
-      gameBtn.click();
-    });
+    openGameMenu();
 
     const layer1Item = container.querySelector('[data-testid="game-item-werewolf"]') as HTMLElement;
     act(() => {
@@ -178,28 +214,36 @@ describe('sendGameCommand respects sendTemporarilyDisabled', () => {
   });
 });
 
-describe('game button toggle closes open menu', () => {
-  it('clicking game button again dismisses the menu', () => {
+describe('game menu dismissal (typed trigger era)', () => {
+  it('Escape dismisses the open game menu', () => {
     const onSend = vi.fn();
 
     act(() => {
       root.render(React.createElement(ChatInput, { onSend, disabled: false }));
     });
 
-    const gameBtn = container.querySelector('button[aria-label="Game mode"]') as HTMLButtonElement;
-
-    // Open menu
-    act(() => {
-      gameBtn.click();
-    });
+    openGameMenu();
     expect(container.querySelector('[data-testid="game-item-werewolf"]')).toBeTruthy();
 
-    // Click game button again — should close the menu
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement;
     act(() => {
-      gameBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-      gameBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-      gameBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     });
+    expect(container.querySelector('[data-testid="game-item-werewolf"]')).toBeNull();
+  });
+
+  it('typing text that no longer matches the trigger dismisses the menu', () => {
+    const onSend = vi.fn();
+
+    act(() => {
+      root.render(React.createElement(ChatInput, { onSend, disabled: false }));
+    });
+
+    openGameMenu();
+    expect(container.querySelector('[data-testid="game-item-werewolf"]')).toBeTruthy();
+
+    // Input no longer matches the /game trigger → menu closes
+    typeInTextarea('hello');
     expect(container.querySelector('[data-testid="game-item-werewolf"]')).toBeNull();
   });
 });
@@ -213,10 +257,7 @@ describe('layer drill-in does not trigger outside-click close', () => {
     });
 
     // Open game menu
-    const gameBtn = container.querySelector('button[aria-label="Game mode"]') as HTMLButtonElement;
-    act(() => {
-      gameBtn.click();
-    });
+    openGameMenu();
     expect(container.querySelector('[data-testid="game-item-werewolf"]')).toBeTruthy();
 
     // Click werewolf to drill in
@@ -247,10 +288,7 @@ describe('game start failure handling (P1-1)', () => {
     });
 
     // Open lobby
-    const gameBtn = container.querySelector('button[aria-label="Game mode"]') as HTMLButtonElement;
-    act(() => {
-      gameBtn.click();
-    });
+    openGameMenu();
     const layer1Item = container.querySelector('[data-testid="game-item-werewolf"]') as HTMLElement;
     act(() => {
       layer1Item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -288,10 +326,7 @@ describe('game start failure handling (P1-1)', () => {
     });
 
     // Open lobby
-    const gameBtn = container.querySelector('button[aria-label="Game mode"]') as HTMLButtonElement;
-    act(() => {
-      gameBtn.click();
-    });
+    openGameMenu();
     const layer1Item = container.querySelector('[data-testid="game-item-werewolf"]') as HTMLElement;
     act(() => {
       layer1Item.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -334,10 +369,7 @@ describe('game start calls dedicated API (not message pipeline)', () => {
       root.render(React.createElement(ChatInput, { onSend, disabled: false, hasActiveInvocation: true }));
     });
 
-    const gameBtn = container.querySelector('button[aria-label="Game mode"]') as HTMLButtonElement;
-    act(() => {
-      gameBtn.click();
-    });
+    openGameMenu();
 
     const layer1Item = container.querySelector('[data-testid="game-item-werewolf"]') as HTMLElement;
     act(() => {

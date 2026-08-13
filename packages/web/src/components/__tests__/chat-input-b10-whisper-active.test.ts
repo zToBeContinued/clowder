@@ -1,10 +1,17 @@
 /**
  * F122B AC-B10: Whisper mode disables actively-executing cats.
+ *
+ * 2026-08 更新:slock 大改(eb5fe913)移除了 composer 的 whisper 入口与
+ * 排队 placeholder,ChatInput 的 whisperMode 恒为 false、WhisperCatSelector
+ * 不再可达。AC-B10 的存活语义(执行中的猫在耳语选择器中禁用/带「执行中」
+ * 徽章/点击无效)落在 WhisperCatSelector 组件层,本文件在该层继续守护;
+ * 另以 composer 现状断言固化「入口移除 + 排队 placeholder 退役」。
  */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatInput } from '@/components/ChatInput';
+import { WhisperCatSelector } from '@/components/WhisperCatSelector';
 import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/components/icons/SendIcon', () => ({
@@ -19,34 +26,36 @@ vi.mock('@/components/icons/AttachIcon', () => ({
 vi.mock('@/components/ImagePreview', () => ({ ImagePreview: () => null }));
 vi.mock('@/utils/compressImage', () => ({ compressImage: (f: File) => Promise.resolve(f) }));
 
+const MOCK_CATS = [
+  {
+    id: 'opus',
+    displayName: '布偶猫',
+    color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
+    mentionPatterns: ['布偶', 'opus'],
+    clientId: 'anthropic',
+    defaultModel: 'opus',
+    avatar: '/a.png',
+    roleDescription: 'dev',
+    personality: 'kind',
+  },
+  {
+    id: 'codex',
+    displayName: '缅因猫',
+    color: { primary: '#4CAF50', secondary: '#C8E6C9' },
+    mentionPatterns: ['缅因', 'codex'],
+    clientId: 'openai',
+    defaultModel: 'codex',
+    avatar: '/b.png',
+    roleDescription: 'review',
+    personality: 'steady',
+  },
+];
+
 vi.mock('@/hooks/useCatData', () => ({
   formatCatName: (cat: { displayName: string; variantLabel?: string }) =>
     cat.variantLabel ? `${cat.displayName}（${cat.variantLabel}）` : cat.displayName,
   useCatData: () => ({
-    cats: [
-      {
-        id: 'opus',
-        displayName: '布偶猫',
-        color: { primary: '#9B7EBD', secondary: '#E8D5F5' },
-        mentionPatterns: ['布偶', 'opus'],
-        clientId: 'anthropic',
-        defaultModel: 'opus',
-        avatar: '/a.png',
-        roleDescription: 'dev',
-        personality: 'kind',
-      },
-      {
-        id: 'codex',
-        displayName: '缅因猫',
-        color: { primary: '#4CAF50', secondary: '#C8E6C9' },
-        mentionPatterns: ['缅因', 'codex'],
-        clientId: 'openai',
-        defaultModel: 'codex',
-        avatar: '/b.png',
-        roleDescription: 'review',
-        personality: 'steady',
-      },
-    ],
+    cats: MOCK_CATS,
     isLoading: false,
     getCatById: () => undefined,
     getCatsByBreed: () => new Map(),
@@ -77,28 +86,29 @@ afterEach(() => {
   container.remove();
 });
 
-function getWhisperChips() {
-  // F108 Scene 2 v2: selector rows inside the floating popup (absolute bottom-full)
+function renderSelector(overrides: Partial<React.ComponentProps<typeof WhisperCatSelector>> = {}) {
+  const props = {
+    cats: MOCK_CATS as never,
+    selected: new Set<string>(),
+    activeCatIds: new Set<string>(),
+    onToggle: vi.fn(),
+    ...overrides,
+  };
+  act(() => root.render(React.createElement(WhisperCatSelector, props)));
+  return props;
+}
+
+function getChips() {
   const popup = container.querySelector('.absolute.bottom-full');
   if (!popup) return [];
   return [...popup.querySelectorAll('button')];
 }
 
-function enterWhisperMode() {
-  const btn = container.querySelector<HTMLButtonElement>('[aria-label="Whisper mode"]');
-  act(() => btn?.click());
-}
+describe('F122B AC-B10: executing cats in whisper selector (WhisperCatSelector level)', () => {
+  it('disables executing cat chips and keeps idle cats selectable', () => {
+    renderSelector({ activeCatIds: new Set(['opus']) });
 
-describe('F122B AC-B10: whisper mode + executing cats', () => {
-  it('disables executing cat chips in whisper selector', () => {
-    useChatStore.setState({
-      activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
-      hasActiveInvocation: true,
-    });
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
-    enterWhisperMode();
-
-    const chips = getWhisperChips();
+    const chips = getChips();
     const opusChip = chips.find((b) => b.textContent?.includes('布偶猫'));
     const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
 
@@ -106,115 +116,72 @@ describe('F122B AC-B10: whisper mode + executing cats', () => {
     expect(codexChip).toBeDefined();
     expect(opusChip?.disabled).toBe(true);
     expect(codexChip?.disabled).toBe(false);
+    expect(opusChip?.className).toContain('cursor-not-allowed');
   });
 
-  it('does not auto-select executing cats when entering whisper mode', () => {
-    useChatStore.setState({
-      activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
-      hasActiveInvocation: true,
-    });
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
-    enterWhisperMode();
+  it('mousedown on executing cat does NOT toggle; idle cat toggles', () => {
+    const { onToggle } = renderSelector({ activeCatIds: new Set(['opus']) });
 
-    const chips = getWhisperChips();
+    const chips = getChips();
     const opusChip = chips.find((b) => b.textContent?.includes('布偶猫'));
     const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
 
-    // opus (executing) should NOT be selected and is disabled
-    expect(opusChip?.className).toContain('cursor-not-allowed');
-    expect(opusChip?.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated');
-    // codex (idle) should NOT be pre-selected either (F108B: default none)
-    expect(codexChip?.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated');
+    act(() => opusChip?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    expect(onToggle).not.toHaveBeenCalled();
+
+    act(() => codexChip?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+    expect(onToggle).toHaveBeenCalledWith('codex');
   });
 
   it('shows "执行中" status badge on executing cat row', () => {
-    useChatStore.setState({
-      activeInvocations: { 'inv-1': { catId: 'codex', mode: 'execute', startedAt: Date.now() } },
-      hasActiveInvocation: true,
-    });
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
-    enterWhisperMode();
+    renderSelector({ activeCatIds: new Set(['codex']) });
 
-    const chips = getWhisperChips();
+    const chips = getChips();
     const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
     expect(codexChip?.textContent).toContain('执行中');
   });
 
-  it('all cats selectable but none pre-selected when none are executing', () => {
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn() })));
-    enterWhisperMode();
+  it('F108B P1-1: with empty selection, no chip is pre-selected (executing or idle)', () => {
+    renderSelector({ activeCatIds: new Set(['opus']) });
 
-    const chips = getWhisperChips();
+    for (const chip of getChips()) {
+      expect(chip.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated');
+    }
+  });
+
+  it('all cats selectable and none pre-selected when none are executing', () => {
+    renderSelector();
+
+    const chips = getChips();
+    expect(chips.length).toBeGreaterThan(0);
     for (const chip of chips) {
       expect(chip.disabled).toBe(false);
-      expect(chip.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated'); // F108B: default none selected
+      expect(chip.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated');
     }
   });
+});
 
-  it('F108B AC-B7: whisper to idle cat shows whisper placeholder, not queue placeholder', () => {
+describe('composer whisper posture (slock overhaul)', () => {
+  it('no whisper entry and no selector popup, even while a cat is executing', () => {
     useChatStore.setState({
-      activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
+      activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } } as never,
       hasActiveInvocation: true,
     });
-    // Before whisper mode: should show queue placeholder (cat is active)
     act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
+
+    expect(container.querySelector('[aria-label="Whisper mode"]')).toBeNull();
+    expect(container.textContent).not.toContain('悄悄话目标');
+  });
+
+  it('queue placeholder retired: placeholder stays default while a cat is executing', () => {
+    useChatStore.setState({
+      activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } } as never,
+      hasActiveInvocation: true,
+    });
+    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
+
     const textarea = container.querySelector('textarea')!;
-    expect(textarea.placeholder).toContain('排队');
-
-    // Enter whisper mode — default is no selection (F108B P1-1 fix)
-    enterWhisperMode();
-
-    // Manually select codex (idle) — simulates user clicking the chip
-    const chips = getWhisperChips();
-    const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
-    act(() => codexChip?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
-
-    // After selecting idle cat: should show whisper placeholder, not queue
-    expect(textarea.placeholder).toBe('悄悄话...');
-  });
-
-  it('P1-1: entering whisper mode defaults to NO cats selected (design spec)', () => {
-    // Design: F108-side-dispatch-phase-b-ux.pen Scene 1 says "默认都不选（✅）"
-    // No active invocations — all cats should be selectable but NONE pre-selected.
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn() })));
-    enterWhisperMode();
-
-    const chips = getWhisperChips();
-    for (const chip of chips) {
-      expect(chip.disabled).toBe(false); // All selectable
-      expect(chip.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated'); // None pre-selected
-    }
-  });
-
-  it('P1-1: entering whisper with active cat — idle cats NOT pre-selected either', () => {
-    useChatStore.setState({
-      activeInvocations: { 'inv-1': { catId: 'opus', mode: 'execute', startedAt: Date.now() } },
-      hasActiveInvocation: true,
-    });
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
-    enterWhisperMode();
-
-    const chips = getWhisperChips();
-    const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
-    // codex is idle but should NOT be auto-selected
-    expect(codexChip?.disabled).toBe(false);
-    expect(codexChip?.className.split(/\s+/)).not.toContain('bg-cafe-surface-elevated');
-  });
-
-  it('falls back to targetCats when activeInvocations is empty but hasActiveInvocation is true (legacy path)', () => {
-    useChatStore.setState({
-      activeInvocations: {},
-      hasActiveInvocation: true,
-      targetCats: ['opus'],
-    });
-    act(() => root.render(React.createElement(ChatInput, { onSend: vi.fn(), hasActiveInvocation: true })));
-    enterWhisperMode();
-
-    const chips = getWhisperChips();
-    const opusChip = chips.find((b) => b.textContent?.includes('布偶猫'));
-    const codexChip = chips.find((b) => b.textContent?.includes('缅因猫'));
-
-    expect(opusChip?.disabled).toBe(true);
-    expect(codexChip?.disabled).toBe(false);
+    // eb5fe913 前:执行中显示「继续输入,消息会排队...」;现统一为默认 placeholder。
+    expect(textarea.placeholder).toBe('输入消息 #当前对话');
   });
 });

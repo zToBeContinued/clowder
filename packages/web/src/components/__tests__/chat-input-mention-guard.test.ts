@@ -138,6 +138,12 @@ function pressKey(key: string) {
   });
 }
 
+// mention 菜单宽度类已从 w-72 演进为 w-[26rem];改用结构性选择器
+// (输入框上方的浮层容器),不再依赖具体宽度 class。
+function mentionMenuCount() {
+  return container.querySelectorAll('.absolute.bottom-full').length;
+}
+
 describe('ChatInput mention menu guards', () => {
   it('Enter on mention menu with empty catOptions does not crash and closes menu', () => {
     // All cats have empty mentionPatterns → buildCatOptions filters all out → catOptions = []
@@ -150,8 +156,8 @@ describe('ChatInput mention menu guards', () => {
     // Press Enter — should not crash (guard: activeOptions.length === 0)
     pressKey('Enter');
 
-    // Menu should be closed (no .w-72 mention menu div)
-    expect(container.querySelectorAll('.w-72').length).toBe(0);
+    // Menu should be closed
+    expect(mentionMenuCount()).toBe(0);
   });
 
   it('Enter on mention menu with valid catOptions inserts mention', () => {
@@ -161,13 +167,13 @@ describe('ChatInput mention menu guards', () => {
     typeInTextarea('@');
 
     // Mention menu should be visible
-    expect(container.querySelectorAll('.w-72').length).toBe(1);
+    expect(mentionMenuCount()).toBe(1);
 
     // Press Enter to select first cat (selectedIdx defaults to 0)
     pressKey('Enter');
 
     // Menu should close
-    expect(container.querySelectorAll('.w-72').length).toBe(0);
+    expect(mentionMenuCount()).toBe(0);
 
     // Input should contain the inserted mention
     const ta = getTextarea();
@@ -179,7 +185,7 @@ describe('ChatInput mention menu guards', () => {
     render();
 
     typeInTextarea('@');
-    expect(container.querySelectorAll('.w-72').length).toBe(1);
+    expect(mentionMenuCount()).toBe(1);
 
     // ArrowDown 3 times: 0→1→0→1 (mod 2 wrapping)
     pressKey('ArrowDown');

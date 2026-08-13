@@ -58,15 +58,17 @@ describe('ChatInput mobile toolbar', () => {
     expect(plusBtn?.className).toContain('md:hidden');
   });
 
-  it('expands toolbar on + click and shows attach/whisper buttons', () => {
+  it('expands toolbar on + click and shows attach button', () => {
     render();
     const plusBtn = container.querySelector('button[aria-label="展开工具栏"]') as HTMLButtonElement;
     act(() => {
       plusBtn.click();
     });
-    // MobileInputToolbar should now be visible
+    // MobileInputToolbar should now be visible.
+    // slock 大改(eb5fe913)后移动工具栏只保留附件入口,悄悄话入口随
+    // composer whisper 功能一并下线(入口移除,详见 chat-input-b10-whisper-active)。
     expect(container.textContent).toContain('附件');
-    expect(container.textContent).toContain('悄悄话');
+    expect(container.textContent).not.toContain('悄悄话');
   });
 
   it('collapses toolbar when + is clicked again (rotate-45 toggle)', () => {
