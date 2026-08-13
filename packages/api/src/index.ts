@@ -120,7 +120,6 @@ import { AgentPaneRegistry } from './domains/terminal/agent-pane-registry.js';
 import { TmuxGateway } from './domains/terminal/tmux-gateway.js';
 import { CatSupervisor } from './infrastructure/cats/CatSupervisor.js';
 import { CommandRegistry } from './infrastructure/commands/CommandRegistry.js';
-import { appendThreadLog } from './infrastructure/thread-logger.js';
 import { parseManifestSlashCommands } from './infrastructure/commands/manifest-commands.js';
 import { buildThreadDeepLink } from './infrastructure/connectors/connector-command-helpers.js';
 import {
@@ -138,6 +137,7 @@ import {
 import { runSchedulerReplyUserIdBackfill } from './infrastructure/scheduler/scheduler-reply-userid-backfill.js';
 import { securityHeadersPlugin } from './infrastructure/security-headers.js';
 import { apiBearerAuthPlugin, sessionAuthPlugin, sessionRoute } from './infrastructure/session-auth.js';
+import { appendThreadLog } from './infrastructure/thread-logger.js';
 import { SocketManager } from './infrastructure/websocket/index.js';
 import { avatarsRoutes } from './routes/avatars.js';
 import { CallbackAuthSystemMessageNotifier } from './routes/callback-auth-system-message.js';
@@ -1538,6 +1538,9 @@ async function main(): Promise<void> {
       });
     }
   }
+  // 债务1(2026-08-13): 队列推进纯事件驱动无兜底——收口丢失时 thread 永久停摆。
+  // 周期看守负责孤儿 processing 条目收尸 + 0 活跃有排队时自动推进。
+  queueProcessor.startQueueWatchdog();
   app.addHook('onClose', async () => {
     queueProcessor.dispose();
   });

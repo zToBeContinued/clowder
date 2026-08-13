@@ -168,8 +168,7 @@ export class InvocationQueue {
     // 几小时前的旧棒。缺 createdAt 的一律清掉。
     const FALLBACK_TTL_MS = 2 * 60 * 60 * 1000;
     for (const persisted of entries) {
-      const effectiveExpiry =
-        persisted.expiresAt ?? (persisted.createdAt ? persisted.createdAt + FALLBACK_TTL_MS : 0);
+      const effectiveExpiry = persisted.expiresAt ?? (persisted.createdAt ? persisted.createdAt + FALLBACK_TTL_MS : 0);
       if (effectiveExpiry <= now) {
         await this.persistence.delete(persisted.id);
         continue;
@@ -932,6 +931,34 @@ export class InvocationQueue {
       }
     }
     return false;
+  }
+
+  /** 周期看守用:当前持有任何条目(不限状态)的 threadId 全集。 */
+  listThreadIdsWithEntries(): string[] {
+    const threadIds = new Set<string>();
+    for (const q of this.queues.values()) {
+      for (const e of q) threadIds.add(e.threadId);
+    }
+    return [...threadIds];
+  }
+
+  /**
+   * 周期看守用:跨用户列出超过 STALE_PROCESSING_THRESHOLD_MS 的 processing 条目(副本)。
+   * 是否为孤儿(runner 已死)由调用方结合 InvocationTracker/slot 状态裁决。
+   */
+  listStaleProcessingAcrossUsers(threadId: string, now = Date.now()): QueueEntry[] {
+    const stale: QueueEntry[] = [];
+    for (const q of this.queues.values()) {
+      if (!this.queueMatchesThread(q, threadId)) continue;
+      for (const e of q) {
+        if (e.status !== 'processing') continue;
+        const processingAge = now - (e.processingStartedAt ?? e.createdAt);
+        if (processingAge >= InvocationQueue.STALE_PROCESSING_THRESHOLD_MS) {
+          stale.push({ ...e });
+        }
+      }
+    }
+    return stale;
   }
 
   /** Whether any scope has fresh queued entries for this thread.

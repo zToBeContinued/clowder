@@ -73,7 +73,6 @@
 
 ### 已知债务(修前先读对应事故记录)
 
-- 队列条目消费泄漏:某种回合收口不消费自己的条目(卡 processing),且队列推进纯事件驱动无周期兜底 → 需完成路径补消费 + QueueProcessor 加看守。临时解法:`pnpm diag:patrol --unblock`。
 - 调用释放与进程终止解耦:tracker 释放槽位时 provider 进程可能仍活着(曾存活 98 分钟继续写工作树)。
 - `CliRawArchive` 无保留策略,只增不减。
 - `system-prompt-builder.test.js` 有 2 个"行首 @ 时代"旧文案断言未跟进 a4d2f96b。

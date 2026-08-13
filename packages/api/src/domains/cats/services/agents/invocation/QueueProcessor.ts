@@ -20,11 +20,6 @@ import {
 } from '@cat-cafe/shared';
 import { resolveCliTimeoutMs } from '../../../../../utils/cli-timeout.js';
 import { findMonorepoRoot } from '../../../../../utils/monorepo-root.js';
-import {
-  decideFailureResume,
-  getAutoResumeDelayMs,
-  getAutoResumeMaxRetries,
-} from './failure-resume-policy.js';
 import { hydrateReplyPreview, type IMessageStore, type StoredMessage } from '../../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../../stores/ports/TaskStore.js';
 import { type MessageMetadata, mergeTokenUsage, type TokenUsage } from '../../types.js';
@@ -53,6 +48,7 @@ import {
 } from './CollaborationContinuityCapsule.js';
 import { type FastLaneExecutionResult, FastLaneExecutor } from './FastLaneExecutor.js';
 import { FastLaneRouter, isFastLaneEnabled } from './FastLaneRouter.js';
+import { decideFailureResume, getAutoResumeDelayMs, getAutoResumeMaxRetries } from './failure-resume-policy.js';
 import type {
   FreshnessReviewPayload,
   FreshnessReviewQueueMetadata,
@@ -608,6 +604,9 @@ export class QueueProcessor {
   private freshnessReviewPayloads = new Map<string, FreshnessReviewPayload>();
   /** Fixed-window user batches; later messages join without extending the first deadline. */
   private userBatchTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** 债务1(2026-08-13): 周期看守定时器——事件驱动推进失灵时的兜底。 */
+  private queueWatchdogTimer?: ReturnType<typeof setInterval>;
+  private queueWatchdogTickRunning = false;
   private fastLaneRouter = new FastLaneRouter();
   private fastLaneExecutor = new FastLaneExecutor({ monorepoRoot: findMonorepoRoot(process.cwd()) });
   private static readonly CONTINUATION_WINDOW_MS = 60 * 60 * 1000;
@@ -667,6 +666,103 @@ export class QueueProcessor {
   dispose(): void {
     for (const timer of this.userBatchTimers.values()) clearTimeout(timer);
     this.userBatchTimers.clear();
+    this.stopQueueWatchdog();
+  }
+
+  /** 债务1: 周期看守默认节奏(60s 级)。事故伤害窗口约 15 分钟,60s 绰绰有余。 */
+  private static readonly QUEUE_WATCHDOG_INTERVAL_MS = 60_000;
+
+  /**
+   * 债务1(2026-08-13 事故): 队列推进此前纯事件驱动——invocation 收口丢失
+   * (如 tracker TTL 释放后 executeEntry 悬置)时整个 thread 永久停摆,
+   * 只能人工 POST queue/next。周期看守是事件驱动失灵时的兜底。
+   */
+  startQueueWatchdog(intervalMs = QueueProcessor.QUEUE_WATCHDOG_INTERVAL_MS): void {
+    if (this.queueWatchdogTimer) return;
+    this.queueWatchdogTimer = setInterval(() => {
+      void this.runQueueWatchdogTick();
+    }, intervalMs);
+    this.queueWatchdogTimer.unref?.();
+  }
+
+  stopQueueWatchdog(): void {
+    if (!this.queueWatchdogTimer) return;
+    clearInterval(this.queueWatchdogTimer);
+    this.queueWatchdogTimer = undefined;
+  }
+
+  /** 单轮看守巡检。public 以便运维/测试直接触发;任何 thread 巡检失败不影响其它 thread。 */
+  async runQueueWatchdogTick(): Promise<void> {
+    if (this.queueWatchdogTickRunning) return;
+    this.queueWatchdogTickRunning = true;
+    try {
+      for (const threadId of this.deps.queue.listThreadIdsWithEntries()) {
+        try {
+          await this.watchdogInspectThread(threadId);
+        } catch (err) {
+          this.deps.log.warn({ err, threadId }, '[DIAG/watchdog] thread inspection failed');
+        }
+      }
+    } finally {
+      this.queueWatchdogTickRunning = false;
+    }
+  }
+
+  /**
+   * 看守单 thread 巡检,两件事:
+   * 1. 孤儿 processing 条目收尸——条目 stale(≥STALE_PROCESSING_THRESHOLD_MS,
+   *    复用僵尸旁路阈值)且 tracker 无该猫活跃调用、slot 互斥已释放,说明其
+   *    invocation 已终态但收口路径没消费条目(不允许第三态)→ 消费之。
+   * 2. 停摆推进——有 queued 条目且整个 thread 无任何活跃调用/新鲜 slot → 自动
+   *    推进(与 onInvocationComplete succeeded 分支同一套出队逻辑)。
+   */
+  private async watchdogInspectThread(threadId: string): Promise<void> {
+    // 先清僵尸 slot(其内部会触发 tracker 的 TTL 惰性过期),孤儿判定才不被
+    // 已死的 slot 互斥假阳性挡住。
+    this.sweepZombieSlots(threadId);
+
+    for (const entry of this.deps.queue.listStaleProcessingAcrossUsers(threadId)) {
+      const entryCat = entry.targetCats[0] ?? 'unknown';
+      if (this.deps.invocationTracker.has(threadId, entryCat)) continue; // 真在跑,别动
+      if (this.processingSlots.has(QueueProcessor.slotKey(threadId, entryCat))) continue; // 收口在途
+      const removed = this.deps.queue.removeProcessedAcrossUsers(threadId, entry.id);
+      if (!removed) continue;
+      this.deps.log.warn(
+        {
+          threadId,
+          entryId: entry.id,
+          catId: entryCat,
+          userId: entry.userId,
+          processingAgeMs: Date.now() - (entry.processingStartedAt ?? entry.createdAt),
+          source: entry.source,
+          sourceCategory: entry.sourceCategory,
+        },
+        '[DIAG/watchdog] consumed orphaned processing entry (invocation terminated without consuming it)',
+      );
+      this.deps.socketManager.emitToUser(entry.userId, 'queue_updated', {
+        threadId,
+        queue: this.deps.queue.list(threadId, entry.userId),
+        action: 'completed',
+      });
+    }
+
+    if (!this.hasDispatchableQueuedForThread(threadId)) return;
+    // hasActiveExecution = tracker(读取即触发其 TTL 惰性过期)+ 新鲜 processingSlots;
+    // 不能用 isThreadBusy——它把 queued 条目本身也算 busy,恰是待推进的状态。
+    if (this.hasActiveExecution(threadId)) return;
+    if (this.isPaused(threadId)) return; // 暂停槽有自己的 10s 自动恢复推进
+    this.deps.log.warn(
+      { threadId },
+      '[DIAG/watchdog] stalled queue detected (queued entries with zero active invocations) — advancing',
+    );
+    const advanced = isParallelDispatchEnabled()
+      ? await this.tryExecuteAllAcrossUsers(threadId, 'queue-watchdog')
+      : await this.tryExecuteNextAcrossUsers(threadId, 'queue-watchdog');
+    await this.tryAutoExecute(threadId);
+    this.deps.log.info(
+      { threadId, started: advanced.started, entryId: advanced.entry?.id },
+      '[DIAG/watchdog] stall advance result',
+    );
   }
 
   private async appendA2AHandoffTaskEvent(params: {
