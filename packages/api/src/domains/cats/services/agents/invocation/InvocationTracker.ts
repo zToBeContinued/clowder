@@ -55,9 +55,18 @@ export class InvocationTracker {
     return `${threadId}:${catId}`;
   }
 
-  /** F118 D3: Check if an invocation has exceeded the TTL. Auto-deletes if expired. */
+  /**
+   * F118 D3: Check if an invocation has exceeded the TTL. Auto-deletes if expired.
+   *
+   * 债务2(2026-08-13): 释放槽位 ⇒ 进程树死亡,二者不允许解耦。此前 TTL 过期
+   * 只删 map 不 abort——tracker 显示 active=0,而 provider 进程继续存活并持有
+   * 目标项目写权(调用 2d033f73 的 cursor-agent 活到自然跑完,cli-spawn 的
+   * finally 树击杀因信号未到从未执行)。强制释放必须触发该调用的 AbortSignal,
+   * 经 invoke-single-cat 的 abortableNext → cli-spawn killChild 整树击杀。
+   */
   private isExpired(key: string, inv: ActiveInvocation): boolean {
     if (Date.now() - inv.startedAt > this.maxSlotTtlMs) {
+      inv.controller.abort('slot_ttl_expired');
       this.active.delete(key);
       return true;
     }
