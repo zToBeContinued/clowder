@@ -1,3 +1,8 @@
+// A2A 文本扫描依赖 catRegistry 句柄(F32-a: analyzeA2AMentions 从注册表读
+// mentionPatterns)。此前本文件只有经 package.json test 脚本的全局 --import
+// 预载注册表才能过,裸 `node --test` 单跑必红(2026-08-13 排查实锤)。
+// 测试必须自给自足:自己预载注册表,不依赖调用方式。
+import './helpers/setup-cat-registry.js';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
