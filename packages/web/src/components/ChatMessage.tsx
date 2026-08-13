@@ -637,7 +637,7 @@ export function ChatMessage({
       data-message-id={message.id}
       className={`group flex gap-2 items-start transition-colors [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] ${assistantAppearClass} ${isAssistantContinuation ? 'mb-1' : 'mb-4'} ${
         needsUserAttention
-          ? 'border-l-[3px] border-[#F5A623] bg-[#F5A623]/[0.07] rounded-r-lg pl-2 pr-2 py-2 -ml-2'
+          ? 'border-l-[3px] border-[var(--cafe-needs-you)] bg-[var(--cafe-needs-you-wash)] rounded-r-lg pl-2 pr-2 py-2 -ml-2'
           : ''
       }`}
     >
@@ -670,7 +670,7 @@ export function ChatMessage({
                 {catStyle.label}
               </span>
               {needsUserAttention && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-[#F5A623]/40 bg-[#F5A623]/15 px-2 py-0.5 font-semibold text-[#F5A623] [font-size:var(--clowder-type-meta)]">
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--cafe-needs-you-ring)] bg-[var(--cafe-needs-you-soft)] px-2 py-0.5 font-semibold text-[var(--cafe-needs-you)] [font-size:var(--clowder-type-meta)]">
                   <span aria-hidden>👋</span>
                   <span>@你 · 需要你</span>
                 </span>

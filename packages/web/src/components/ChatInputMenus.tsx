@@ -156,7 +156,9 @@ export function ChatInputMenus({
                         role="img"
                         className="h-2 w-2 flex-shrink-0 rounded-full"
                         style={{
-                          backgroundColor: isWorking ? '#eab308' : (opt.color ?? 'var(--console-status-connected)'),
+                          backgroundColor: isWorking
+                            ? 'var(--cafe-status-working)'
+                            : (opt.color ?? 'var(--console-status-connected)'),
                         }}
                         aria-label={isWorking ? '工作中' : '在线'}
                       />
@@ -169,7 +171,7 @@ export function ChatInputMenus({
                         {opt.label}
                       </span>
                       {isWorking && (
-                        <span className="flex-shrink-0 rounded-full bg-[#eab308]/15 px-1.5 py-px text-[10px] font-semibold text-[#9a7b00]">
+                        <span className="flex-shrink-0 rounded-full bg-[var(--cafe-status-working-soft)] px-1.5 py-px text-[10px] font-semibold text-[var(--cafe-status-working-text)]">
                           工作中
                         </span>
                       )}

@@ -23,6 +23,17 @@
   --cafe-interactive: #6f6259;
   --color-cafe-accent: var(--cafe-accent);
 
+  /* 「需要你」金色强调（@你 / mention）：跨主题常量；Tailwind v3 的 var()
+     任意值不支持透明度修饰符，alpha 变体单独建 token。 */
+  --cafe-needs-you: #f5a623;
+  --cafe-needs-you-ring: rgba(245, 166, 35, 0.4);
+  --cafe-needs-you-soft: rgba(245, 166, 35, 0.15);
+  --cafe-needs-you-wash: rgba(245, 166, 35, 0.07);
+  /* 猫「工作中」状态黄：mention 菜单状态点/徽章、侧栏成员点同源。 */
+  --cafe-status-working: #eab308;
+  --cafe-status-working-soft: rgba(234, 179, 8, 0.15);
+  --cafe-status-working-text: #9a7b00;
+
   --color-base-white: var(--cat-cream-white);
   --color-base-black: var(--cat-deep-ink);
   --color-opus-primary: #9b7ebd;

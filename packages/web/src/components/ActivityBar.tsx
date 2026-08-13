@@ -213,7 +213,8 @@ function activityKindLabel(kind: ActivityInboxItem['kind']): string {
 
 function activityKindTone(kind: ActivityInboxItem['kind']): string {
   // @你 用铲屎官主题金色，和消息卡片的「需要你」标识同源，一眼可辨
-  if (kind === 'mention') return 'border border-[#F5A623]/40 bg-[#F5A623]/15 text-[#F5A623]';
+  if (kind === 'mention')
+    return 'border border-[var(--cafe-needs-you-ring)] bg-[var(--cafe-needs-you-soft)] text-[var(--cafe-needs-you)]';
   if (kind === 'reply') return 'bg-conn-amber-bg text-conn-amber-text';
   return 'bg-[var(--console-hover-bg)] text-[var(--clowder-sidebar-row-muted)]';
 }
@@ -344,7 +345,7 @@ export function ActivityBar({ className }: ActivityBarProps) {
         {activityUnread > 0 && (
           <span
             className={`slock-unread-badge absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold leading-none text-[var(--cafe-surface)] ${
-              activityMentionThreads > 0 ? 'bg-[#F5A623]' : 'bg-conn-red-text'
+              activityMentionThreads > 0 ? 'bg-[var(--cafe-needs-you)]' : 'bg-conn-red-text'
             }`}
             title={activityMentionThreads > 0 ? `${activityMentionThreads} 个频道有 @你` : `${activityUnread} 条未读`}
           >

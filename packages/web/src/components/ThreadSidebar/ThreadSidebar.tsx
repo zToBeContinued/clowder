@@ -1079,7 +1079,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                             style={{
                               backgroundColor:
                                 status === 'streaming'
-                                  ? '#eab308'
+                                  ? 'var(--cafe-status-working)'
                                   : status === 'offline'
                                     ? 'var(--clowder-sidebar-row-muted)'
                                     : 'var(--console-status-connected)',
