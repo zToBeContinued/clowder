@@ -82,6 +82,7 @@
     "check:skills:manifest": "node scripts/check-skills-manifest.mjs",
     "check:pre-merge-gate": "node --test scripts/pre-merge-check.test.mjs scripts/test-bash-runtime.test.mjs",
     "mcp:doctor": "node scripts/mcp-doctor.mjs",
+    "diag:patrol": "node scripts/patrol-clowder.mjs",
     "diag:dup-messages": "node scripts/find-duplicate-messages.mjs",
     "diag:echo-messages": "node scripts/find-echo-messages.mjs",
     "diag:similar-messages": "node scripts/find-similar-messages.mjs",
