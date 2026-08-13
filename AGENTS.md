@@ -69,9 +69,8 @@
 
 - 测试临时目录(`%TEMP%\cat-cafe-test-*`):启动自愈清扫(≥24h 必删,<24h 看 pid 死活),见 `packages/api/test/helpers/sweep-stale-test-temp.js`。
 - 孤儿 agent 进程:启动/停止/Ctrl+C 三路自动清扫(`scripts/sweep-orphan-agents.mjs`,判定=派工标记+父进程已死)。
-- kiro 安装器缓存:启动器自动更新+清扫。API 日志 14 天轮转。
+- kiro 安装器缓存:启动器自动更新+清扫。API 日志 14 天轮转;CLI 原始归档(`cli-raw-archive`)同样 14 天保留(启动清一次+每日清扫,按 mtime 裁决)。
 
 ### 已知债务(修前先读对应事故记录)
 
-- `CliRawArchive` 无保留策略,只增不减。
 - `system-prompt-builder.test.js` 有 2 个"行首 @ 时代"旧文案断言未跟进 a4d2f96b。

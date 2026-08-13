@@ -1546,6 +1546,14 @@ async function main(): Promise<void> {
   });
   socketManager.setQueueProcessor(queueProcessor);
 
+  // 债务3(2026-08-13): CLI 原始事件归档(CliRawArchive)只增不减 → 14 天保留,
+  // 与 api 日志轮转对齐:启动清一次 + 每日定时清扫,清扫失败不影响主流程。
+  const { CliRawArchive } = await import('./domains/cats/services/session/CliRawArchive.js');
+  const stopCliRawArchiveRetention = new CliRawArchive().startRetentionSweep(app.log);
+  app.addHook('onClose', async () => {
+    stopCliRawArchiveRetention();
+  });
+
   const reminderStore = new AgentReminderStore();
   const stopReminderScheduler = startAgentReminderScheduler({
     store: reminderStore,
