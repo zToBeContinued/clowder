@@ -309,9 +309,7 @@ test(
 
     const originalLocalAppData = process.env.LOCALAPPDATA;
     const originalPath = process.env.PATH;
-    const { detectClient } = await import(
-      '../dist/domains/cats/services/first-run-quest/client-detection.js'
-    );
+    const { detectClient } = await import('../dist/domains/cats/services/first-run-quest/client-detection.js');
     const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
     const executed = [];
     try {
@@ -362,9 +360,7 @@ test(
     const originalAppData = process.env.APPDATA;
     const originalLocalAppData = process.env.LOCALAPPDATA;
     const originalPath = process.env.PATH;
-    const { detectClient } = await import(
-      '../dist/domains/cats/services/first-run-quest/client-detection.js'
-    );
+    const { detectClient } = await import('../dist/domains/cats/services/first-run-quest/client-detection.js');
     const { invalidateCliCommand } = await import('../dist/utils/cli-resolve.js');
     try {
       process.env.APPDATA = tempRoot;

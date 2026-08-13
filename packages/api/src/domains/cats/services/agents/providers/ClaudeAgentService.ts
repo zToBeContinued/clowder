@@ -31,16 +31,16 @@ import { appendLocalImagePathHints, collectImageAccessDirectories } from '../pro
 import { extractImagePaths } from '../providers/image-paths.js';
 import { findGitBashPath } from './claude-agent-win.js';
 import {
-  buildClaudeStreamJsonUserMessage,
-  isClaudeRuntimeSteerEnabled,
-  registerClaudeRuntimeSteerChannel,
-} from './claude-runtime-steer.js';
-import {
   extractClaudeUsage,
   isDiagnosticOnlyEdeResult,
   isResultErrorEvent,
   transformClaudeEvent,
 } from './claude-ndjson-parser.js';
+import {
+  buildClaudeStreamJsonUserMessage,
+  isClaudeRuntimeSteerEnabled,
+  registerClaudeRuntimeSteerChannel,
+} from './claude-runtime-steer.js';
 
 const log = createModuleLogger('claude-agent');
 

@@ -6,9 +6,7 @@ import { Redis } from 'ioredis';
 const onlyThread = process.argv[2];
 const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6399');
 
-const threadKeys = onlyThread
-  ? [`cat-cafe:msg:thread:${onlyThread}`]
-  : await redis.keys('cat-cafe:msg:thread:*');
+const threadKeys = onlyThread ? [`cat-cafe:msg:thread:${onlyThread}`] : await redis.keys('cat-cafe:msg:thread:*');
 
 let totalGroups = 0;
 for (const tk of threadKeys) {

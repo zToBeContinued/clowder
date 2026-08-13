@@ -21,8 +21,8 @@ import {
   DEFAULT_ANTIGRAVITY_COMMAND_ARGS,
   filterProfiles,
   getCliEffortOptionsForClient,
-  initialState,
   type HubCatEditorFormState,
+  initialState,
   splitCommandArgs,
   validateModelFormatForClient,
 } from '@/components/hub-cat-editor.model';
@@ -315,7 +315,8 @@ describe('HubCatEditor', () => {
       cliRuntimeProfileRef: 'missing-office-proxy',
     };
     mockApiFetch.mockImplementation((path: string) => {
-      if (path === '/api/accounts') return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', providers: [] }));
+      if (path === '/api/accounts')
+        return Promise.resolve(jsonResponse({ projectPath: '/tmp/project', providers: [] }));
       if (path === '/api/cat-model-options') return Promise.resolve(jsonResponse({ clients: {} }));
       if (path === '/api/config/session-strategy') return Promise.resolve(jsonResponse({ cats: [] }));
       if (path === '/api/cli-runtime-profiles') {

@@ -204,7 +204,9 @@ export function DangerousActionAuditPanel() {
                   <div className="grid gap-2 md:grid-cols-[120px_1fr_150px_110px] md:items-center">
                     <span className="text-xs tabular-nums text-cafe-muted">{formatTime(event.timestamp)}</span>
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-cafe">{event.data.action ?? 'unknown_action'}</div>
+                      <div className="truncate text-sm font-semibold text-cafe">
+                        {event.data.action ?? 'unknown_action'}
+                      </div>
                       <div className="mt-0.5 truncate text-xs text-cafe-muted">{formatTarget(event)}</div>
                     </div>
                     <span className="truncate text-xs text-cafe-secondary">{event.data.actorId ?? 'unknown'}</span>

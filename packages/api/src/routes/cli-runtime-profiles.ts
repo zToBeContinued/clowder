@@ -22,7 +22,10 @@ const envKeySchema = z
   .regex(/^[A-Z_][A-Za-z0-9_]*$/, 'env key must match [A-Z_][A-Za-z0-9_]*')
   .refine((key) => !key.startsWith('CAT_CAFE_'), 'CAT_CAFE_ env keys are reserved');
 const envSetSchema = z.record(envKeySchema, z.string());
-const profileIdSchema = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
+const profileIdSchema = z
+  .string()
+  .trim()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
 
 const createSchema = z.object({
   id: profileIdSchema.optional(),

@@ -15,10 +15,62 @@ describe('SqliteThreadHistorySummaryStore', () => {
       VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 'high', ?, ?, ?)
     `);
 
-    insert.run('seg-old', 'thread-1', 'm1', 'm3', 3, 'old', 'old', 'Old', 'old boundary', 'haiku', 'v1', '2026-07-03T10:00:00.000Z');
-    insert.run('seg-mid', 'thread-1', 'm4', 'm6', 3, 'mid', 'mid', 'Mid', 'mid boundary', 'haiku', 'v1', '2026-07-03T11:00:00.000Z');
-    insert.run('seg-new', 'thread-1', 'm7', 'm9', 3, 'new', 'new', 'New', 'new boundary', 'haiku', 'v1', '2026-07-03T12:00:00.000Z');
-    insert.run('seg-other', 'thread-2', 'x1', 'x2', 2, 'other', 'other', 'Other', 'other boundary', 'haiku', 'v1', '2026-07-03T13:00:00.000Z');
+    insert.run(
+      'seg-old',
+      'thread-1',
+      'm1',
+      'm3',
+      3,
+      'old',
+      'old',
+      'Old',
+      'old boundary',
+      'haiku',
+      'v1',
+      '2026-07-03T10:00:00.000Z',
+    );
+    insert.run(
+      'seg-mid',
+      'thread-1',
+      'm4',
+      'm6',
+      3,
+      'mid',
+      'mid',
+      'Mid',
+      'mid boundary',
+      'haiku',
+      'v1',
+      '2026-07-03T11:00:00.000Z',
+    );
+    insert.run(
+      'seg-new',
+      'thread-1',
+      'm7',
+      'm9',
+      3,
+      'new',
+      'new',
+      'New',
+      'new boundary',
+      'haiku',
+      'v1',
+      '2026-07-03T12:00:00.000Z',
+    );
+    insert.run(
+      'seg-other',
+      'thread-2',
+      'x1',
+      'x2',
+      2,
+      'other',
+      'other',
+      'Other',
+      'other boundary',
+      'haiku',
+      'v1',
+      '2026-07-03T13:00:00.000Z',
+    );
 
     const store = new SqliteThreadHistorySummaryStore(db);
     const result = await store.listLatestByThread('thread-1', 2);

@@ -139,9 +139,7 @@ async function restoreThread(threadId: string, onRestored?: (threadId: string) =
     const revived = (await response.json().catch(() => null)) as Thread | null;
     if (revived?.id) {
       useChatStore.setState((state) => ({
-        threads: state.threads.some((thread) => thread.id === revived.id)
-          ? state.threads
-          : [...state.threads, revived],
+        threads: state.threads.some((thread) => thread.id === revived.id) ? state.threads : [...state.threads, revived],
       }));
     }
     onRestored?.(threadId);

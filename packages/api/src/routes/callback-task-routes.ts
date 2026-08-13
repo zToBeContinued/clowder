@@ -9,7 +9,7 @@
  */
 
 import type { CatId } from '@cat-cafe/shared';
-import { catRegistry, createCatId, validateStatusTransition, detectStatusFlapping } from '@cat-cafe/shared';
+import { catRegistry, createCatId, detectStatusFlapping, validateStatusTransition } from '@cat-cafe/shared';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { FreshnessEgressGate } from '../domains/cats/services/agents/freshness/FreshnessEgressGate.js';
@@ -35,13 +35,15 @@ const updateTaskSchema = z.object({
   /** 代切权限：当 owner 失联时，总负责人/派工方可用此字段代为切换状态 */
   delegateActorId: z.string().min(1).optional(),
   /** 交付证据：猫可在切 done/in_review 时同步填写 */
-  evidence: z.object({
-    tests: z.string().max(2000).optional(),
-    build: z.string().max(2000).optional(),
-    screenshot: z.string().max(2000).optional(),
-    review: z.string().max(2000).optional(),
-    lesson: z.string().max(2000).optional(),
-  }).optional(),
+  evidence: z
+    .object({
+      tests: z.string().max(2000).optional(),
+      build: z.string().max(2000).optional(),
+      screenshot: z.string().max(2000).optional(),
+      review: z.string().max(2000).optional(),
+      lesson: z.string().max(2000).optional(),
+    })
+    .optional(),
 });
 
 const claimTaskSchema = z.object({
@@ -157,7 +159,10 @@ export function registerCallbackTaskRoutes(
     // 症状一修复：stale/replayed 使用明确的非 200 状态码
     if (freshness.outcome === 'stale') {
       reply.status(409);
-      return { ...freshness.response, error: 'Invocation is stale — update was NOT applied. Retry with a fresh invocation.' };
+      return {
+        ...freshness.response,
+        error: 'Invocation is stale — update was NOT applied. Retry with a fresh invocation.',
+      };
     }
     if (freshness.outcome === 'replayed') {
       // 幂等重放，数据已写过，返回 200 但标记 replayed

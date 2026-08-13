@@ -16,7 +16,7 @@
 import type { AutomationState, CatId, CreateTaskInput, TaskItem, TaskKind, UpdateTaskInput } from '@cat-cafe/shared';
 import type { RedisClient } from '@cat-cafe/shared/utils';
 import { generateSortableId } from '../ports/MessageStore.js';
-import { createSubjectOwnershipConflict, mergeTaskEvents, type ITaskStore } from '../ports/TaskStore.js';
+import { createSubjectOwnershipConflict, type ITaskStore, mergeTaskEvents } from '../ports/TaskStore.js';
 import { TaskKeys } from '../redis-keys/task-keys.js';
 
 const DEFAULT_TTL = 0; // persistent — set >0 via env to enable expiry

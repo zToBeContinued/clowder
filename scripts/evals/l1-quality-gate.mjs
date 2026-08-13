@@ -17,9 +17,9 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { dirname, resolve, relative } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseDirtyEntries, isSensitiveUntrackedPath } from '../live-worktree-build-gate.mjs';
+import { isSensitiveUntrackedPath, parseDirtyEntries } from '../live-worktree-build-gate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '../..');
@@ -60,10 +60,7 @@ function runCommand(cmd, args, cwd, timeoutMs = 120_000) {
 function findRepoRoot(startDir) {
   let current = resolve(startDir);
   while (true) {
-    if (
-      existsSync(resolve(current, 'pnpm-workspace.yaml')) &&
-      existsSync(resolve(current, 'ecosystem.config.cjs'))
-    ) {
+    if (existsSync(resolve(current, 'pnpm-workspace.yaml')) && existsSync(resolve(current, 'ecosystem.config.cjs'))) {
       return current;
     }
     const parent = dirname(current);
@@ -95,7 +92,10 @@ function assertWorktreeClean(repoRoot) {
       };
     }
 
-    const summary = dirtyEntries.slice(0, 10).map((e) => `${e.code} ${e.path}`).join('\n');
+    const summary = dirtyEntries
+      .slice(0, 10)
+      .map((e) => `${e.code} ${e.path}`)
+      .join('\n');
     const more = dirtyEntries.length > 10 ? `\n... ${dirtyEntries.length - 10} more` : '';
     return {
       name: 'L1: Worktree clean',
@@ -144,7 +144,12 @@ function assertTypeCheckClean(webOnly) {
   const start = Date.now();
   const cmd = webOnly
     ? runCommand('pnpm', ['--filter', '@cat-cafe/web', 'exec', 'tsc', '--noEmit'], rootDir, 60_000)
-    : runCommand('pnpm', ['-r', 'exec', 'bash', '-lc', 'if command -v tsc >/dev/null 2>&1; then tsc --noEmit; fi'], rootDir, 120_000);
+    : runCommand(
+        'pnpm',
+        ['-r', 'exec', 'bash', '-lc', 'if command -v tsc >/dev/null 2>&1; then tsc --noEmit; fi'],
+        rootDir,
+        120_000,
+      );
 
   if (cmd.ok) {
     return {

@@ -13,17 +13,8 @@ html {
 
 body {
   font-family:
-    var(--font-raft-ui),
-    "Space Grotesk",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    "PingFang SC",
-    "Hiragino Sans GB",
-    "Microsoft YaHei",
-    "Noto Sans SC",
-    sans-serif;
+    var(--font-raft-ui), "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   color: var(--cafe-text);
   background: var(--cafe-surface);
 }

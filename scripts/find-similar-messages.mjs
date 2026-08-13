@@ -5,9 +5,7 @@ import { Redis } from 'ioredis';
 
 const onlyThread = process.argv[2];
 const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6399');
-const threadKeys = onlyThread
-  ? [`cat-cafe:msg:thread:${onlyThread}`]
-  : await redis.keys('cat-cafe:msg:thread:*');
+const threadKeys = onlyThread ? [`cat-cafe:msg:thread:${onlyThread}`] : await redis.keys('cat-cafe:msg:thread:*');
 
 function grams(s) {
   const t = s.replace(/\s+/g, '').slice(0, 2000);
@@ -45,7 +43,9 @@ for (const tk of threadKeys) {
         console.log(`\n=== 相似实例 ${found} thread=${threadId} sim=${sim.toFixed(2)} ===`);
         console.log(`  A: id=${a.id} cat=${a.catId} ts=${new Date(a.ts).toISOString()} len=${a.content.length}`);
         console.log(`     头: ${a.content.slice(0, 80).replace(/\n/g, ' ⏎ ')}`);
-        console.log(`  B: id=${b.id} cat=${b.catId} ts=${new Date(b.ts).toISOString()} len=${b.content.length} (相隔 ${Math.round((b.ts - a.ts) / 1000)}s)`);
+        console.log(
+          `  B: id=${b.id} cat=${b.catId} ts=${new Date(b.ts).toISOString()} len=${b.content.length} (相隔 ${Math.round((b.ts - a.ts) / 1000)}s)`,
+        );
         console.log(`     头: ${b.content.slice(0, 80).replace(/\n/g, ' ⏎ ')}`);
       }
     }

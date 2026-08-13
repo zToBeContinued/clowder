@@ -143,7 +143,6 @@ describe('DareAgentService', () => {
     assert.ok(args.includes('-m') && args.includes('client'), `expected -m client in args: ${args}`);
   });
 
-
   test('uses the configured CLI executable without changing darePath semantics', async () => {
     const proc = createMockProcess();
     const spawnFn = mock.fn(() => proc);

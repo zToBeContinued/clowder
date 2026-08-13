@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { formatCatName, type CatData } from '@/hooks/useCatData';
+import { type CatData, formatCatName } from '@/hooks/useCatData';
 import type { CatInvocationInfo, CatStatusType, InvocationPhase, ThreadState } from '@/stores/chat-types';
 import { apiFetch } from '@/utils/api-client';
 

@@ -33,7 +33,9 @@ async function changeValue(element: HTMLInputElement, value: string) {
 }
 
 function button(container: HTMLElement, label: string): HTMLButtonElement {
-  const result = Array.from(container.querySelectorAll('button')).find((candidate) => candidate.textContent?.trim() === label);
+  const result = Array.from(container.querySelectorAll('button')).find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
   if (!result) throw new Error(`Missing button: ${label}`);
   return result;
 }

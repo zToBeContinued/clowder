@@ -42,7 +42,9 @@ describe('F070: governance_blocked event contract', () => {
     assert.equal(payload.type, 'governance_blocked');
     assert.equal(typeof payload.projectPath, 'string');
     assert.ok(payload.projectPath.length > 0);
-    assert.ok(['needs_bootstrap', 'needs_confirmation', 'files_missing', 'permission_denied'].includes(payload.reasonKind));
+    assert.ok(
+      ['needs_bootstrap', 'needs_confirmation', 'files_missing', 'permission_denied'].includes(payload.reasonKind),
+    );
     assert.equal(typeof payload.reason, 'string');
     assert.equal(payload.invocationId, 'inv-test-123');
   });

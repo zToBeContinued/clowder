@@ -6,7 +6,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { readdir, readFile, lstat, mkdir, symlink, readlink, rm } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, readlink, rm, symlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -292,7 +292,13 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     const managedNames = state?.managedSkillNames ?? sourceSkills;
     const [staleness, conflicts] = await Promise.all([
       isSelfRepo
-        ? Promise.resolve({ stale: false, currentHash: '', recordedHash: '', newSkills: [], removedSkills: [] } as import('../config/governance/skills-state.js').SkillsStaleness)
+        ? Promise.resolve({
+            stale: false,
+            currentHash: '',
+            recordedHash: '',
+            newSkills: [],
+            removedSkills: [],
+          } as import('../config/governance/skills-state.js').SkillsStaleness)
         : checkStaleness(projectRoot, skillsSrc),
       detectConflicts(projectRoot, home, managedNames),
     ]);
@@ -451,7 +457,9 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
     // Determine which providers to mount for (default: claude only)
     const allProviders = ['claude', 'codex', 'gemini', 'kimi'] as const;
     const requestedProviders = body.providers?.length
-      ? body.providers.filter((p): p is typeof allProviders[number] => (allProviders as readonly string[]).includes(p))
+      ? body.providers.filter((p): p is (typeof allProviders)[number] =>
+          (allProviders as readonly string[]).includes(p),
+        )
       : (['claude'] as const);
 
     const mounted: string[] = [];
@@ -465,7 +473,10 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
       // Check source skill exists
       try {
         const s = await lstat(join(sourceSkillDir, 'SKILL.md'));
-        if (!s.isFile()) { notFound.push(skillName); continue; }
+        if (!s.isFile()) {
+          notFound.push(skillName);
+          continue;
+        }
       } catch {
         notFound.push(skillName);
         continue;
@@ -496,7 +507,8 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
         await symlink(linkTarget, linkPath, IS_WIN32 ? 'junction' : undefined);
         anyMounted = true;
       }
-      if (anyMounted) mounted.push(skillName); else skipped.push(skillName);
+      if (anyMounted) mounted.push(skillName);
+      else skipped.push(skillName);
     }
 
     // Update skills-state.json to reflect new mounted skills
@@ -556,7 +568,9 @@ export const skillsRoutes: FastifyPluginAsync = async (app) => {
 
     const allProviders = ['claude', 'codex', 'gemini', 'kimi'] as const;
     const requestedProviders = body.providers?.length
-      ? body.providers.filter((p): p is typeof allProviders[number] => (allProviders as readonly string[]).includes(p))
+      ? body.providers.filter((p): p is (typeof allProviders)[number] =>
+          (allProviders as readonly string[]).includes(p),
+        )
       : (['claude', 'codex', 'gemini', 'kimi'] as const);
 
     const unmounted: string[] = [];

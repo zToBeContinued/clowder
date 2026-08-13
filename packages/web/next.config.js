@@ -128,6 +128,4 @@ const pwaOptions = {
 };
 
 module.exports =
-  process.env.NODE_ENV === 'development' && !enablePwaInDev
-    ? nextConfig
-    : withPWA(pwaOptions)(nextConfig);
+  process.env.NODE_ENV === 'development' && !enablePwaInDev ? nextConfig : withPWA(pwaOptions)(nextConfig);

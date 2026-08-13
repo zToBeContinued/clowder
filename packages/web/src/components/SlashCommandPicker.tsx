@@ -130,7 +130,8 @@ export function SlashCommandPicker({
     const needle = query.trim().toLowerCase();
     if (!needle) return items;
     return items.filter((item) => {
-      const haystack = `${item.command} ${item.name} ${item.category} ${item.description} ${item.rawTrigger}`.toLowerCase();
+      const haystack =
+        `${item.command} ${item.name} ${item.category} ${item.description} ${item.rawTrigger}`.toLowerCase();
       return haystack.includes(needle);
     });
   }, [items, query]);
@@ -184,9 +185,7 @@ export function SlashCommandPicker({
             </span>
           </button>
         ))}
-        {!loading && filtered.length === 0 && (
-          <div className="px-3 py-3 text-sm text-cafe-muted">没有匹配的命令</div>
-        )}
+        {!loading && filtered.length === 0 && <div className="px-3 py-3 text-sm text-cafe-muted">没有匹配的命令</div>}
         {loading && <div className="px-3 py-3 text-sm text-cafe-muted">正在加载命令...</div>}
         {error && <div className="px-3 py-3 text-sm text-conn-red-text">加载失败：{error}</div>}
       </div>

@@ -41,9 +41,7 @@ export interface InvocationUsageSummary {
 
 export function isInvocationCostPanelEnabled(): boolean {
   const value =
-    process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL ??
-    process.env.NEXT_PUBLIC_CAT_CAFE_USAGE_COST_PANEL ??
-    '';
+    process.env.NEXT_PUBLIC_CAT_CAFE_INVOCATION_COST_PANEL ?? process.env.NEXT_PUBLIC_CAT_CAFE_USAGE_COST_PANEL ?? '';
   return ENABLED_VALUES.has(value.trim().toLowerCase());
 }
 
@@ -217,8 +215,7 @@ export function summarizeTaskUsage(events: readonly InvocationUsageSummary[]): I
       total.budgetGateTriggered = total.budgetGateTriggered === true || event.budgetGateTriggered;
     }
     if (event.historyFullTokensBeforeGate != null) {
-      total.historyFullTokensBeforeGate =
-        (total.historyFullTokensBeforeGate ?? 0) + event.historyFullTokensBeforeGate;
+      total.historyFullTokensBeforeGate = (total.historyFullTokensBeforeGate ?? 0) + event.historyFullTokensBeforeGate;
     }
   }
   return total;

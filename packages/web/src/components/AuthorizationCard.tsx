@@ -26,10 +26,15 @@ export function AuthorizationCard({ request, onRespond }: AuthorizationCardProps
         <span className="text-conn-amber-text mt-0.5 text-lg">🔐</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-[var(--conn-amber-hover)]">
-            {catLabel} 请求权限: <code className="text-xs bg-[var(--conn-amber-ring)] text-[var(--conn-amber-hover)] px-1 py-0.5 rounded font-semibold">{request.action}</code>
+            {catLabel} 请求权限:{' '}
+            <code className="text-xs bg-[var(--conn-amber-ring)] text-[var(--conn-amber-hover)] px-1 py-0.5 rounded font-semibold">
+              {request.action}
+            </code>
           </div>
           <p className="text-xs text-[var(--conn-amber-hover)] mt-1 opacity-90">{request.reason}</p>
-          {request.context && <p className="text-xs text-[var(--conn-amber-hover)] mt-1 italic opacity-80">{request.context}</p>}
+          {request.context && (
+            <p className="text-xs text-[var(--conn-amber-hover)] mt-1 italic opacity-80">{request.context}</p>
+          )}
         </div>
       </div>
 

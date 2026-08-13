@@ -104,7 +104,9 @@ export class FastLaneExecutor {
         stdout: result.stdout.trim(),
         stderr: result.stderr.trim(),
         durationMs: Date.now() - startedAt,
-        files: input.security ? [...projectFiles(input.projectName), `.cat-cafe/projects/${input.projectName}/security.md`] : projectFiles(input.projectName),
+        files: input.security
+          ? [...projectFiles(input.projectName), `.cat-cafe/projects/${input.projectName}/security.md`]
+          : projectFiles(input.projectName),
       };
     } catch (err) {
       const error = err as Error & {

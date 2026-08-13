@@ -36,9 +36,7 @@ function collectSectionRanges(text: string, headingPatterns: readonly RegExp[]):
 }
 
 function mergeRanges(ranges: Array<{ start: number; end: number }>): Array<{ start: number; end: number }> {
-  const sorted = ranges
-    .filter((range) => range.end > range.start)
-    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const sorted = ranges.filter((range) => range.end > range.start).sort((a, b) => a.start - b.start || a.end - b.end);
   const merged: Array<{ start: number; end: number }> = [];
   for (const range of sorted) {
     const last = merged.at(-1);

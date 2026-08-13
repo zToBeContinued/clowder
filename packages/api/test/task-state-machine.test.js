@@ -11,8 +11,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 // 状态机验证函数从 shared 包导入
-const { validateStatusTransition, detectStatusFlapping, TASK_VALID_TRANSITIONS } =
-  await import('../../shared/dist/types/task-state-machine.js');
+const { validateStatusTransition, detectStatusFlapping, TASK_VALID_TRANSITIONS } = await import(
+  '../../shared/dist/types/task-state-machine.js'
+);
 
 describe('Task State Machine — validateStatusTransition', () => {
   it('allows todo → doing', () => {

@@ -72,6 +72,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="zh-CN" data-visual-theme="slock" suppressHydrationWarning>
       <body className={`${spaceGrotesk.variable} min-h-screen`}>
+        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 主题引导脚本是本地常量(非用户输入),必须内联同步执行以防明暗主题闪烁(FOUC),Next.js 标准手法 */}
         <script dangerouslySetInnerHTML={{ __html: visualThemeBootstrapScript }} />
         <ChunkLoadRefreshGuard />
         <SessionBootstrap />

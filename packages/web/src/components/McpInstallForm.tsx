@@ -130,7 +130,8 @@ export function McpInstallForm({ projectPath, onInstalled, onClose, prefilledId 
         <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-cafe-muted">MCP Install</p>
         <h3 className="text-lg font-semibold tracking-[-0.03em] text-cafe">添加 MCP</h3>
         <p className="text-sm leading-6 text-cafe-secondary">
-          通过本地命令或远程 URL 注册新的 MCP 服务。实际访问范围由 OS、进程和远端账号权限决定；Clowder 先做预览、确认和审计安全网。
+          通过本地命令或远程 URL 注册新的 MCP 服务。实际访问范围由 OS、进程和远端账号权限决定；Clowder
+          先做预览、确认和审计安全网。
         </p>
       </div>
 

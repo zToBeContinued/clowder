@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type CSSProperties } from 'react';
+import { type CSSProperties, useState } from 'react';
 import { usePinnedSections } from '@/hooks/usePinnedSections';
 import { HubIcon } from '../hub-icons';
 import {
@@ -101,7 +101,8 @@ const SETTINGS_GROUP_ORDER: SettingsSectionGroup[] = ['basic', 'advanced', 'expe
 const SECTION_KEYWORDS: Record<string, string> = {
   members: '猫猫 成员 名册 roster cat',
   accounts: '密钥 API key 账号 credentials',
-  'cli-runtime': 'CLI 运行环境 runtime profile 本机 local command override HTTP_PROXY HTTPS_PROXY NO_PROXY 代理 环境变量 Kiro Codex Claude',
+  'cli-runtime':
+    'CLI 运行环境 runtime profile 本机 local command override HTTP_PROXY HTTPS_PROXY NO_PROXY 代理 环境变量 Kiro Codex Claude',
   im: '飞书 钉钉 企微 telegram 微信 connector',
   skills: 'skill 技能 能力 marketplace',
   mcp: 'MCP tool 工具',
@@ -168,7 +169,11 @@ export function SettingsNav({ activeSection, onSelect, searchQuery, variant = 's
           if (sections.length === 0) return null;
           const expanded = expandedGroups.has(group);
           if (group === 'basic') {
-            return <div key={group} className="contents">{sections.map(renderItem)}</div>;
+            return (
+              <div key={group} className="contents">
+                {sections.map(renderItem)}
+              </div>
+            );
           }
           return (
             <div key={group} className="mt-2">

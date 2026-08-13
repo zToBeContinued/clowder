@@ -181,7 +181,18 @@ $runtime = Initialize-ClowderWindowsRuntimeEnvironment -ProjectRoot $ProjectRoot
 
       const result = spawnSync(
         'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', driver, '-HelperPath', helperCopy, '-ProjectRoot', projectRoot],
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          driver,
+          '-HelperPath',
+          helperCopy,
+          '-ProjectRoot',
+          projectRoot,
+        ],
         { encoding: 'utf8', windowsHide: true },
       );
       assert.equal(result.status, 0, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`);

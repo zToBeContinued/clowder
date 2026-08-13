@@ -198,7 +198,10 @@ describe('SummaryCompaction e2e', () => {
     assert.equal(result, true);
     assert.equal(requestedAfter[0], 'msg-002');
     assert.equal(modelInput.previousSummary, null);
-    assert.deepEqual(modelInput.messages.map((message) => message.content), ['POST_RESET_ONLY']);
+    assert.deepEqual(
+      modelInput.messages.map((message) => message.content),
+      ['POST_RESET_ONLY'],
+    );
     const segment = db.prepare('SELECT summary FROM summary_segments WHERE thread_id = ?').get('test-thread');
     assert.equal(segment.summary, 'POST_RESET_SUMMARY');
     const doc = db.prepare('SELECT summary FROM evidence_docs WHERE anchor = ?').get('thread-test-thread');
@@ -282,7 +285,9 @@ describe('SummaryCompaction e2e', () => {
       null,
     );
     const failureState = db
-      .prepare('SELECT invalid_format_batch_key, invalid_format_streak, invalid_format_latched FROM summary_state WHERE thread_id = ?')
+      .prepare(
+        'SELECT invalid_format_batch_key, invalid_format_streak, invalid_format_latched FROM summary_state WHERE thread_id = ?',
+      )
       .get('test-thread');
     assert.equal(failureState.invalid_format_batch_key, null);
     assert.equal(failureState.invalid_format_streak, 0);
@@ -315,7 +320,9 @@ describe('SummaryCompaction e2e', () => {
 
     assert.equal(await processThread(state, deps, SUMMARY_CONFIG_OVERRIDE), false);
     const failureState = db
-      .prepare('SELECT invalid_format_batch_key, invalid_format_streak, invalid_format_latched FROM summary_state WHERE thread_id = ?')
+      .prepare(
+        'SELECT invalid_format_batch_key, invalid_format_streak, invalid_format_latched FROM summary_state WHERE thread_id = ?',
+      )
       .get('test-thread');
     assert.deepEqual(failureState, {
       invalid_format_batch_key: null,
@@ -370,9 +377,9 @@ describe('SummaryCompaction e2e', () => {
     );
 
     assert.equal(result, true);
-    const doc = db.prepare('SELECT kind, status, title, summary FROM evidence_docs WHERE anchor = ?').get(
-      'thread-test-thread',
-    );
+    const doc = db
+      .prepare('SELECT kind, status, title, summary FROM evidence_docs WHERE anchor = ?')
+      .get('thread-test-thread');
     assert.equal(doc.kind, 'thread');
     assert.equal(doc.status, 'active');
     assert.equal(doc.title, 'Thread test-thread');

@@ -151,7 +151,10 @@ describe('GovernanceEjectService', () => {
     const eject = new GovernanceEjectService(catCafeRoot);
     const report = await eject.eject(targetProject, { dryRun: true });
 
-    assert.ok(report.actions.some((a) => a.action !== 'skipped'), 'reports pending removals');
+    assert.ok(
+      report.actions.some((a) => a.action !== 'skipped'),
+      'reports pending removals',
+    );
     // Everything still on disk
     assert.ok((await lstat(join(targetProject, 'CLAUDE.md'))).isFile());
     assert.ok((await lstat(join(targetProject, '.claude', 'skills', 'tdd'))).isSymbolicLink());

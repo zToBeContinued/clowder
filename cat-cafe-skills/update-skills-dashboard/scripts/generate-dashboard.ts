@@ -6,8 +6,8 @@
 
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -64,7 +64,10 @@ async function extractSkillMeta(skillPath: string, source: string): Promise<Skil
     const name = nameMatch[1].trim();
     const description = descMatch[1].trim().replace(/\n\s*/g, ' ');
     const triggers = triggersMatch
-      ? triggersMatch[1].split('\n').map(t => t.trim().replace(/^-\s*/, '')).filter(Boolean)
+      ? triggersMatch[1]
+          .split('\n')
+          .map((t) => t.trim().replace(/^-\s*/, ''))
+          .filter(Boolean)
       : [];
 
     // 推断分类和风险
@@ -154,9 +157,9 @@ async function generateHTML(skills: SkillMeta[]): Promise<string> {
   // 生成统计数据
   const stats = {
     total: skills.length,
-    clowder: skills.filter(s => s.source === 'clowder').length,
-    personal: skills.filter(s => s.source === 'personal').length,
-    highRisk: skills.filter(s => s.risk === 'high').length,
+    clowder: skills.filter((s) => s.source === 'clowder').length,
+    personal: skills.filter((s) => s.source === 'personal').length,
+    highRisk: skills.filter((s) => s.risk === 'high').length,
   };
 
   // 重新组装 HTML（保留双语标题逻辑）
@@ -201,8 +204,8 @@ async function main() {
   const skills = await scanSkills();
 
   console.log(`Found ${skills.length} skills`);
-  console.log(`  - Clowder: ${skills.filter(s => s.source === 'clowder').length}`);
-  console.log(`  - Personal: ${skills.filter(s => s.source === 'personal').length}`);
+  console.log(`  - Clowder: ${skills.filter((s) => s.source === 'clowder').length}`);
+  console.log(`  - Personal: ${skills.filter((s) => s.source === 'personal').length}`);
 
   console.log('Generating HTML...');
   const html = await generateHTML(skills);

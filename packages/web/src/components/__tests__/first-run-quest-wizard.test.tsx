@@ -370,5 +370,4 @@ describe('FirstRunQuestWizard', () => {
     expect(threadAttempts).toBe(2);
     expect(requestedUrls.some((url) => url.includes('/api/accounts'))).toBe(false);
   });
-
 });

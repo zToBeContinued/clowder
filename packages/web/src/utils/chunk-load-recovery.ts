@@ -15,7 +15,13 @@ function collectErrorText(reason: unknown): string {
   if (typeof reason === 'string') return reason;
   if (reason instanceof Error) return `${reason.name}\n${reason.message}\n${reason.stack ?? ''}`;
   if (typeof reason === 'object') {
-    const candidate = reason as { name?: unknown; message?: unknown; stack?: unknown; type?: unknown; target?: unknown };
+    const candidate = reason as {
+      name?: unknown;
+      message?: unknown;
+      stack?: unknown;
+      type?: unknown;
+      target?: unknown;
+    };
     const target = candidate.target as { src?: unknown; href?: unknown } | undefined;
     return [candidate.name, candidate.message, candidate.stack, candidate.type, target?.src, target?.href]
       .filter((value): value is string => typeof value === 'string')
@@ -48,9 +54,9 @@ export function markChunkReloadAttempt(windowRef: Window): boolean {
 
 export async function clearStaleBrowserShell(windowRef: Window): Promise<void> {
   await Promise.allSettled([
-    windowRef.navigator.serviceWorker?.getRegistrations().then((registrations) =>
-      Promise.allSettled(registrations.map((registration) => registration.unregister())),
-    ),
+    windowRef.navigator.serviceWorker
+      ?.getRegistrations()
+      .then((registrations) => Promise.allSettled(registrations.map((registration) => registration.unregister()))),
     'caches' in windowRef
       ? windowRef.caches.keys().then((keys) => Promise.allSettled(keys.map((key) => windowRef.caches.delete(key))))
       : Promise.resolve(),

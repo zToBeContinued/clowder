@@ -31,8 +31,8 @@ import {
 import { resolveBoundAccountRefForCat } from '../config/cat-account-binding.js';
 import { resolveCatCatalogPath } from '../config/cat-catalog-store.js';
 import { getAcpConfig, getRoster, loadCatConfig, toAllCatConfigs } from '../config/cat-config-loader.js';
-import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { getCliRuntimeProfile } from '../config/cli-runtime-profile-store.js';
+import { configEventBus, createChangeSetId } from '../config/config-event-bus.js';
 import { resolveProjectTemplatePath } from '../config/project-template-path.js';
 import { getResolvedCats } from '../config/resolved-cats.js';
 import { createRuntimeCat, deleteRuntimeCat, updateRuntimeCat } from '../config/runtime-cat-catalog.js';
@@ -494,13 +494,7 @@ async function validateAccountBindingOrThrow(
   if ((client === 'antigravity' || client === 'kiro' || client === 'cursor') && trimmedAccountRef) {
     throw new Error(`${client} client does not support accountRef`);
   }
-  if (
-    client !== 'antigravity' &&
-    client !== 'pi' &&
-    client !== 'kiro' &&
-    client !== 'cursor' &&
-    !trimmedAccountRef
-  ) {
+  if (client !== 'antigravity' && client !== 'pi' && client !== 'kiro' && client !== 'cursor' && !trimmedAccountRef) {
     throw new Error(`client "${client}" requires a provider binding`);
   }
   if (!trimmedAccountRef) return;
@@ -962,9 +956,7 @@ export const catsRoutes: FastifyPluginAsync<CatsRoutesOptions> = async (app, _op
         ...(body.color !== undefined ? { color: body.color } : {}),
         ...(body.mentionPatterns !== undefined ? { mentionPatterns: body.mentionPatterns } : {}),
         ...(targetAccountRef !== undefined ? { accountRef: targetAccountRef } : {}),
-        ...(body.cliRuntimeProfileRef !== undefined
-          ? { cliRuntimeProfileRef: body.cliRuntimeProfileRef }
-          : {}),
+        ...(body.cliRuntimeProfileRef !== undefined ? { cliRuntimeProfileRef: body.cliRuntimeProfileRef } : {}),
         ...(body.assetCard !== undefined ? { assetCard: body.assetCard } : {}),
         ...(body.contextBudget !== undefined ? { contextBudget: body.contextBudget } : {}),
         ...(body.toolPolicy !== undefined ? { toolPolicy: body.toolPolicy } : {}),

@@ -118,7 +118,10 @@ function modelVersionLabelFamily(label: string | undefined): string | undefined 
   return undefined;
 }
 
-export function normalizeVariantLabelForModel(label: string | undefined, model: string | undefined): string | undefined {
+export function normalizeVariantLabelForModel(
+  label: string | undefined,
+  model: string | undefined,
+): string | undefined {
   if (!label) return undefined;
   const derived = deriveModelVariantLabel(model);
   if (!derived) return label;
@@ -502,10 +505,8 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
       // undefined (omitted) inherits breed-level restrictions.
       const restrictions = variant.restrictions ?? breed.restrictions;
       const variantLabel = normalizeVariantLabelForModel(variant.variantLabel, variant.defaultModel);
-      const capabilityContract =
-        variant.capabilityContract ??
-        breed.capabilityContract ??
-        {
+      const capabilityContract = variant.capabilityContract ??
+        breed.capabilityContract ?? {
           primaryRoles: uniqueNonEmpty([breed.displayName, variant.displayName, variantLabel]),
           canHandle: uniqueNonEmpty([
             ...splitCapabilityText(teamStrengths),
@@ -530,9 +531,7 @@ export function toAllCatConfigs(config: CatCafeConfig): Record<string, CatConfig
         color: variant.color ?? breed.color, // F32-b P4c: variant can override
         mentionPatterns,
         ...(variant.accountRef != null ? { accountRef: variant.accountRef } : {}),
-        ...(variant.cliRuntimeProfileRef != null
-          ? { cliRuntimeProfileRef: variant.cliRuntimeProfileRef }
-          : {}),
+        ...(variant.cliRuntimeProfileRef != null ? { cliRuntimeProfileRef: variant.cliRuntimeProfileRef } : {}),
         ...(assetCard != null ? { assetCard } : {}),
         clientId: variant.clientId as ClientId, // #252: Zod now accepts any string; downstream switch/case has default branches
         defaultModel: variant.defaultModel,

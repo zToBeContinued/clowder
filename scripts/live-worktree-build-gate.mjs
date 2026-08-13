@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
-import { dirname, resolve, relative } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 function runGit(argsForGit, cwd = process.cwd()) {
   return spawnSync('git', argsForGit, {
@@ -14,10 +14,7 @@ function runGit(argsForGit, cwd = process.cwd()) {
 function findClowderRepoRoot(startDir) {
   let current = resolve(startDir);
   while (true) {
-    if (
-      existsSync(resolve(current, 'pnpm-workspace.yaml')) &&
-      existsSync(resolve(current, 'ecosystem.config.cjs'))
-    ) {
+    if (existsSync(resolve(current, 'pnpm-workspace.yaml')) && existsSync(resolve(current, 'ecosystem.config.cjs'))) {
       return current;
     }
     const parent = dirname(current);

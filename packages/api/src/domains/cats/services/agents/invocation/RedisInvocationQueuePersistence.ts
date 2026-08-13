@@ -24,7 +24,11 @@ export class RedisInvocationQueuePersistence implements InvocationQueuePersisten
     const now = Date.now();
     const expiredIds = await this.redis.zrangebyscore(EXPIRY_ZSET, '-inf', now);
     if (expiredIds.length > 0) {
-      await this.redis.multi().hdel(ENTRY_HASH, ...expiredIds).zrem(EXPIRY_ZSET, ...expiredIds).exec();
+      await this.redis
+        .multi()
+        .hdel(ENTRY_HASH, ...expiredIds)
+        .zrem(EXPIRY_ZSET, ...expiredIds)
+        .exec();
     }
     const rawEntries = await this.redis.hvals(ENTRY_HASH);
     const entries: QueueEntry[] = [];

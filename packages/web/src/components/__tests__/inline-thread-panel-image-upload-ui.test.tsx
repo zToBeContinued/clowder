@@ -168,7 +168,10 @@ describe('InlineThreadPanel image upload', () => {
       await Promise.resolve();
     });
 
-    expect(apiFetchMock).toHaveBeenCalledWith('/api/threads/thread-branch/reset-context', expect.objectContaining({ method: 'POST' }));
+    expect(apiFetchMock).toHaveBeenCalledWith(
+      '/api/threads/thread-branch/reset-context',
+      expect.objectContaining({ method: 'POST' }),
+    );
     expect(
       apiFetchMock.mock.calls.some(
         ([url, init]) => url === '/api/messages' && (init as RequestInit | undefined)?.method === 'POST',

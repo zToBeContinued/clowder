@@ -21,7 +21,12 @@ export interface CliRuntimeProfilesResponse {
 function uniqueNonEmptyStrings(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
   return Array.from(
-    new Set(values.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean)),
+    new Set(
+      values
+        .filter((value): value is string => typeof value === 'string')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
   );
 }
 

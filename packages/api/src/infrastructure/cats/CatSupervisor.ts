@@ -232,11 +232,7 @@ export class CatSupervisor {
     this.timeoutTimers.delete(catId);
   }
 
-  private async setStatus(
-    catId: string,
-    status: CatSupervisorStatus,
-    opts: { force?: boolean } = {},
-  ): Promise<void> {
+  private async setStatus(catId: string, status: CatSupervisorStatus, opts: { force?: boolean } = {}): Promise<void> {
     if (!opts.force && this.statuses.get(catId) === status) return;
     this.statuses.set(catId, status);
     await this.redis?.set(`cat:status:${catId}`, status);

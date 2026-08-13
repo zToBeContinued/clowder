@@ -22,7 +22,7 @@ import { ImagePreview } from './ImagePreview';
 import { AttachIcon } from './icons/AttachIcon';
 import { MobileInputToolbar } from './MobileInputToolbar';
 import { PathCompletionMenu } from './PathCompletionMenu';
-import { SlashCommandPicker, type SlashCommandItem } from './SlashCommandPicker';
+import { type SlashCommandItem, SlashCommandPicker } from './SlashCommandPicker';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 import { hasPendingThreadDraft, threadDrafts, threadFileDrafts, threadImageDrafts } from './thread-drafts';
 import { WhisperCatSelector, WhisperTargetChips } from './WhisperCatSelector';
@@ -69,8 +69,7 @@ const PROMPT_PREFIX_OPTIONS = [
     label: '方案规划',
     shortLabel: '规划',
     description: '输出目标、范围、步骤、风险和验收点',
-    prefix:
-      '[PLAN_MODE] 请先做方案规划：明确目标、边界、执行步骤、依赖、风险、验收标准。优先给可落地的最小方案。',
+    prefix: '[PLAN_MODE] 请先做方案规划：明确目标、边界、执行步骤、依赖、风险、验收标准。优先给可落地的最小方案。',
   },
   {
     id: 'review',
@@ -85,8 +84,7 @@ const PROMPT_PREFIX_OPTIONS = [
     label: '总结提炼',
     shortLabel: '总结',
     description: '提炼结论、关键点和下一步行动',
-    prefix:
-      '[SUMMARY_MODE] 请做结构化总结：先给一句核心结论，再提炼关键点、决策、待办和下一步行动。避免长篇复述。',
+    prefix: '[SUMMARY_MODE] 请做结构化总结：先给一句核心结论，再提炼关键点、决策、待办和下一步行动。避免长篇复述。',
   },
 ] as const;
 
@@ -151,7 +149,9 @@ export function ChatInput({
 }: ChatInputProps) {
   const { cats } = useCatData();
   const ime = useIMEGuard();
-  const currentThreadMembers = useChatStore((s) => s.threads.find((thread) => thread.id === threadId)?.participatingCats);
+  const currentThreadMembers = useChatStore(
+    (s) => s.threads.find((thread) => thread.id === threadId)?.participatingCats,
+  );
   const mentionCats = useMemo(() => {
     if (!currentThreadMembers?.length) return cats;
     const allowed = new Set(currentThreadMembers);
@@ -190,7 +190,9 @@ export function ChatInput({
   const [mentionStart, setMentionStart] = useState(-1);
   const [mentionFilter, setMentionFilter] = useState('');
   const [images, setImages] = useState<File[]>(() => (threadId ? (threadImageDrafts.get(threadId) ?? []) : []));
-  const [attachments, setAttachments] = useState<File[]>(() => (threadId ? (threadFileDrafts.get(threadId) ?? []) : []));
+  const [attachments, setAttachments] = useState<File[]>(() =>
+    threadId ? (threadFileDrafts.get(threadId) ?? []) : [],
+  );
   const [isPreparingImages, setIsPreparingImages] = useState(false);
   const [whisperMode] = useState(false);
   const [whisperTargets, setWhisperTargets] = useState<Set<string>>(new Set());
@@ -912,7 +914,6 @@ export function ChatInput({
 
   return (
     <div className="slock-composer-shell relative border-t border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] safe-area-bottom">
-
       {pathCompletion.isOpen && !activeMenu && !showSlashCommands && (
         <PathCompletionMenu
           entries={pathCompletion.entries}
@@ -1074,11 +1075,7 @@ export function ChatInput({
             onCompositionStart={ime.onCompositionStart}
             onCompositionEnd={ime.onCompositionEnd}
             onPaste={handlePaste}
-            placeholder={
-              whisperMode
-                ? '悄悄话...'
-                : '输入消息 #当前对话'
-            }
+            placeholder={whisperMode ? '悄悄话...' : '输入消息 #当前对话'}
             className="max-h-[260px] min-h-[2.75rem] flex-1 resize-none bg-transparent px-3 pt-2.5 pb-1 [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-body)] text-cafe-text placeholder:text-cafe-muted focus:outline-none"
             rows={1}
             disabled={disabled}
@@ -1223,7 +1220,6 @@ export function ChatInput({
             </div>
           )}
         </div>
-
       </div>
 
       {showHistorySearch && (

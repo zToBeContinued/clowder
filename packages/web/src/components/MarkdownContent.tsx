@@ -14,10 +14,10 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { useTaskThreadActions } from '@/contexts/TaskThreadActionsContext';
+import { getMentionRe } from '@/lib/mention-highlight';
 import { useChatStore } from '@/stores/chatStore';
 import { useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
-import { getMentionRe } from '@/lib/mention-highlight';
 import { apiFetch } from '@/utils/api-client';
 import { createWorkspaceImageComponent, createWorkspaceLinkComponent } from './workspace-md-components';
 

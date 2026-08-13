@@ -267,11 +267,7 @@ export const postProgressInputSchema = {
     .optional()
     .describe('Required only for persistent agent-key auth; invocation auth always uses the current thread'),
   replyTo: z.string().optional().describe('Optional message ID to reply to'),
-  clientMessageId: z
-    .string()
-    .min(1)
-    .max(200)
-    .describe('Required idempotency key, e.g. ack:<invocationId>:<catId>'),
+  clientMessageId: z.string().min(1).max(200).describe('Required idempotency key, e.g. ack:<invocationId>:<catId>'),
   agentKeyCatId: agentKeyCatIdSchema,
 };
 
@@ -736,13 +732,15 @@ export async function handleUpdateTask(input: {
   status?: string | undefined;
   why?: string | undefined;
   delegateActorId?: string | undefined;
-  evidence?: {
-    tests?: string | undefined;
-    build?: string | undefined;
-    screenshot?: string | undefined;
-    review?: string | undefined;
-    lesson?: string | undefined;
-  } | undefined;
+  evidence?:
+    | {
+        tests?: string | undefined;
+        build?: string | undefined;
+        screenshot?: string | undefined;
+        review?: string | undefined;
+        lesson?: string | undefined;
+      }
+    | undefined;
 }): Promise<ToolResult> {
   // F174 Phase E (AC-E2/E5): explicit kind:'none'. Task state lives in Redis;
   // local fallback would diverge from server truth. Surface `[degrade]` hint.

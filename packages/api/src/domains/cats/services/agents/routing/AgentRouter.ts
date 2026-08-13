@@ -662,7 +662,10 @@ export class AgentRouter {
    * Does NOT mutate thread participants.
    */
   private async peekTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats, routing_warnings: mentionWarnings } = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats, routing_warnings: mentionWarnings } = await this.parseAllMentions(
+      message,
+      threadId,
+    );
     if (mentionedCats.length > 0) return mentionedCats;
 
     if (this.threadStore) {
@@ -727,7 +730,10 @@ export class AgentRouter {
 
   /** Resolve target cats and persist new mentions as thread participants */
   private async resolveTargets(message: string, threadId: string): Promise<CatId[]> {
-    const { mentions: mentionedCats, routing_warnings: mentionWarnings } = await this.parseAllMentions(message, threadId);
+    const { mentions: mentionedCats, routing_warnings: mentionWarnings } = await this.parseAllMentions(
+      message,
+      threadId,
+    );
 
     if (mentionedCats.length > 0) {
       if (this.threadStore) {

@@ -1,5 +1,5 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { act } from 'react';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   addToastMock,
   createInLobby,
@@ -63,9 +63,9 @@ describe('ThreadSidebar create error feedback', () => {
 
     await openCreateDialog(harness.container, harness.flush);
 
-    const initProjectCheckbox = Array.from(harness.container.querySelectorAll('label')).find((label) =>
-      label.textContent?.includes('这是项目'),
-    )?.querySelector('input');
+    const initProjectCheckbox = Array.from(harness.container.querySelectorAll('label'))
+      .find((label) => label.textContent?.includes('这是项目'))
+      ?.querySelector('input');
     if (!initProjectCheckbox) throw new Error('这是项目 checkbox not found');
 
     await harness.flush();

@@ -115,15 +115,17 @@ export function buildQuickSwitchItems({
     (a, b) => b.score - a.score || b.lastActiveAt - a.lastActiveAt || a.label.localeCompare(b.label, 'zh-Hans-CN'),
   );
 
-  const items: QuickSwitchItem[] = candidates.slice(0, limit).map(({ id, type, label, detail, href, threadId, lastActiveAt }) => ({
-    id,
-    type,
-    label,
-    detail,
-    href,
-    ...(threadId ? { threadId } : {}),
-    lastActiveAt,
-  }));
+  const items: QuickSwitchItem[] = candidates
+    .slice(0, limit)
+    .map(({ id, type, label, detail, href, threadId, lastActiveAt }) => ({
+      id,
+      type,
+      label,
+      detail,
+      href,
+      ...(threadId ? { threadId } : {}),
+      lastActiveAt,
+    }));
   if (trimmed) {
     items.push({
       id: 'search:global',

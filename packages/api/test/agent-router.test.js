@@ -706,10 +706,7 @@ describe('AgentRouter', () => {
         }),
       );
 
-      const { targetCats } = await router.resolveTargetsAndIntent(
-        '@gemini 请做架构裁决',
-        'thread-unavailable-mention',
-      );
+      const { targetCats } = await router.resolveTargetsAndIntent('@gemini 请做架构裁决', 'thread-unavailable-mention');
       assert.deepEqual(targetCats, ['opus']);
     });
   });

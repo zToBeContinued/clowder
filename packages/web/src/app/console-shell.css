@@ -1153,8 +1153,7 @@
   color: var(--slock-ink);
 }
 
-:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
-  .slock-header-action--active {
+:is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"])) .slock-header-action--active {
   border-color: var(--slock-ink);
   background: color-mix(in srgb, var(--slock-pink-active) 18%, #ffffff);
   color: var(--slock-ink);
@@ -1413,7 +1412,8 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
-  .slock-thread-replies-divider > div {
+  .slock-thread-replies-divider
+  > div {
   position: relative;
   z-index: 1;
   margin-inline: auto;
@@ -1428,7 +1428,8 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
-  .slock-inline-thread-composer .slock-composer-frame {
+  .slock-inline-thread-composer
+  .slock-composer-frame {
   min-height: 96px;
   margin: 0;
 }
@@ -1443,7 +1444,9 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
-  .markdown-content pre > code.markdown-code-block-code {
+  .markdown-content
+  pre
+  > code.markdown-code-block-code {
   border: 0;
   background: transparent;
   box-shadow: none;
@@ -1452,9 +1455,11 @@
 }
 
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
-  .markdown-content code.markdown-file-code:not([class*="language-"]),
+  .markdown-content
+  code.markdown-file-code:not([class*="language-"]),
 :is([data-visual-theme="slock"], [data-visual-theme="slockv1"]:not([data-theme="dark"]))
-  .markdown-content .markdown-file-link {
+  .markdown-content
+  .markdown-file-link {
   display: inline-block;
   padding: 1px 5px;
   border: 1px solid color-mix(in srgb, var(--slock-ink) 35%, transparent);

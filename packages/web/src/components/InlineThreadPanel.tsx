@@ -160,10 +160,7 @@ export function getInlineThreadPanelShellClassName(): string {
   return 'thread-panel-motion fixed inset-0 z-[60] flex h-[100dvh] min-h-0 bg-[var(--console-overlay-medium)] lg:relative lg:inset-auto lg:z-auto lg:h-full lg:flex-shrink-0 lg:bg-transparent';
 }
 
-function findInlineThreadSourceCopyIndex(
-  messages: readonly ChatMessageData[],
-  sourceMessage: ChatMessageData,
-): number {
+function findInlineThreadSourceCopyIndex(messages: readonly ChatMessageData[], sourceMessage: ChatMessageData): number {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index];
     if (

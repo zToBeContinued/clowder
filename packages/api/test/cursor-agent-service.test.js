@@ -137,7 +137,10 @@ test('tool_call 事件转成 tool_use/tool_result（此前被完全忽略，UI �
   assert.ok(toolResult, 'tool_call/completed 必须产出 tool_result');
   assert.ok(toolResult.content.includes('[read] success'), `结果预览应含工具名与结果类别: ${toolResult.content}`);
   assert.equal(
-    messages.filter((m) => m.type === 'text').map((m) => m.content).join(''),
+    messages
+      .filter((m) => m.type === 'text')
+      .map((m) => m.content)
+      .join(''),
     '看完了。',
     '正文不受工具事件影响',
   );

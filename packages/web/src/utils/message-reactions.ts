@@ -9,7 +9,11 @@ export function getDefaultReactionEmojis(): string[] {
   return DEFAULT_EMOJIS;
 }
 
-export function hasUserReaction(reactions: readonly MessageReaction[] | undefined, emoji: string, userId: string): boolean {
+export function hasUserReaction(
+  reactions: readonly MessageReaction[] | undefined,
+  emoji: string,
+  userId: string,
+): boolean {
   return Boolean(reactions?.some((reaction) => reaction.emoji === emoji && reaction.users.includes(userId)));
 }
 
@@ -25,9 +29,7 @@ export async function toggleMessageReaction(input: {
   const res = await apiFetch(endpoint, {
     method: input.active ? 'DELETE' : 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(
-      input.active ? { userId: input.userId } : { userId: input.userId, emoji: input.emoji },
-    ),
+    body: JSON.stringify(input.active ? { userId: input.userId } : { userId: input.userId, emoji: input.emoji }),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {

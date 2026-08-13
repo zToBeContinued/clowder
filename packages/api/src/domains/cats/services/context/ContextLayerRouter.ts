@@ -18,9 +18,19 @@ const ENABLED_VALUES = new Set(['1', 'true', 'on', 'enabled', 'yes']);
 
 const PROJECT_CONTEXT_SIGNALS: readonly { name: string; pattern: RegExp }[] = [
   { name: 'explicit-project', pattern: /项目|工程|仓库|repo|repository|worktree|工作区|代码库/i },
-  { name: 'code-action', pattern: /修复|改造|实现|落地|推进|执行|验收|部署|重启|排查|调试|测试|构建|build|test|debug|fix|implement|deploy/i },
-  { name: 'code-surface', pattern: /代码|文件|目录|路径|接口|API|组件|页面|路由|服务|前端|后端|数据库|Redis|SQLite|PM2|Node|pnpm|TypeScript|React|Next/i },
-  { name: 'local-reference', pattern: /\/Users\/|localhost:\d+|\.md\b|\.tsx?\b|\.jsx?\b|\.json\b|\.css\b|packages\/|scripts\/|docs\//i },
+  {
+    name: 'code-action',
+    pattern: /修复|改造|实现|落地|推进|执行|验收|部署|重启|排查|调试|测试|构建|build|test|debug|fix|implement|deploy/i,
+  },
+  {
+    name: 'code-surface',
+    pattern:
+      /代码|文件|目录|路径|接口|API|组件|页面|路由|服务|前端|后端|数据库|Redis|SQLite|PM2|Node|pnpm|TypeScript|React|Next/i,
+  },
+  {
+    name: 'local-reference',
+    pattern: /\/Users\/|localhost:\d+|\.md\b|\.tsx?\b|\.jsx?\b|\.json\b|\.css\b|packages\/|scripts\/|docs\//i,
+  },
   { name: 'task-operation', pattern: /task\s*#?\d+|任务|认领|待验收|in_review|done|todo|blocked/i },
 ];
 

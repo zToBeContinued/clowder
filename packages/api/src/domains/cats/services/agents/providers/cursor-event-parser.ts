@@ -125,7 +125,9 @@ export function readToolCall(event: CursorStreamEvent): CursorToolCall | null {
   const inner = entryKey ? (container as Record<string, Record<string, unknown>>)[entryKey] : undefined;
   const toolName = entryKey ? entryKey.replace(/ToolCall$/, '') : 'tool';
   const args =
-    inner && typeof inner.args === 'object' && inner.args !== null ? (inner.args as Record<string, unknown>) : undefined;
+    inner && typeof inner.args === 'object' && inner.args !== null
+      ? (inner.args as Record<string, unknown>)
+      : undefined;
 
   let resultPreview: string | undefined;
   if (event.subtype === 'completed') {

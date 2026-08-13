@@ -158,13 +158,10 @@ description: Hidden route
 
       const raw = await readFile(result.indexPath, 'utf-8');
       const index = JSON.parse(raw);
-      assert.deepEqual(
-        index.skills.map((skill) => [skill.name, skill.visible]).sort(),
-        [
-          ['create-prd', true],
-          ['hidden-route', true],
-        ],
-      );
+      assert.deepEqual(index.skills.map((skill) => [skill.name, skill.visible]).sort(), [
+        ['create-prd', true],
+        ['hidden-route', true],
+      ]);
     } finally {
       await rm(home, { recursive: true, force: true });
       await rm(projectRoot, { recursive: true, force: true });

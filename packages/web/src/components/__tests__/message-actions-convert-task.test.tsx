@@ -7,9 +7,8 @@ const apiFetchMock = vi.hoisted(() => vi.fn());
 const addToastMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: (
-    selector: (state: { removeThreadMessage: () => void; patchMessage: () => void }) => unknown,
-  ) => selector({ removeThreadMessage: vi.fn(), patchMessage: vi.fn() }),
+  useChatStore: (selector: (state: { removeThreadMessage: () => void; patchMessage: () => void }) => unknown) =>
+    selector({ removeThreadMessage: vi.fn(), patchMessage: vi.fn() }),
 }));
 
 vi.mock('@/stores/toastStore', () => ({

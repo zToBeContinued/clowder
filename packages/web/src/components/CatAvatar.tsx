@@ -106,8 +106,7 @@ export function CatAvatar({
             bottom: -dotBorder,
             width: dotSize,
             height: dotSize,
-            backgroundColor:
-              activityStatus === 'active' ? 'var(--conn-amber-text)' : 'var(--conn-emerald-text)',
+            backgroundColor: activityStatus === 'active' ? 'var(--conn-amber-text)' : 'var(--conn-emerald-text)',
             border: `${dotBorder}px solid var(--slock-white, var(--cafe-surface))`,
           }}
         />

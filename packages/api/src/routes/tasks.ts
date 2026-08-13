@@ -335,7 +335,10 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
     return task;
   }
 
-  function requireUserId(request: import('fastify').FastifyRequest, reply: import('fastify').FastifyReply): string | null {
+  function requireUserId(
+    request: import('fastify').FastifyRequest,
+    reply: import('fastify').FastifyReply,
+  ): string | null {
     const userId = resolveUserId(request);
     if (!userId) {
       reply.status(401);
@@ -576,7 +579,11 @@ export const tasksRoutes: FastifyPluginAsync<TasksRoutesOptions> = async (app, o
       return { error: 'Task not found' };
     }
 
-    return ensureTaskDiscussionThread(task, { taskStore, threadStore, messageStore, socketManager }, { userId: body.data.userId });
+    return ensureTaskDiscussionThread(
+      task,
+      { taskStore, threadStore, messageStore, socketManager },
+      { userId: body.data.userId },
+    );
   });
 
   // PATCH /api/tasks/:id

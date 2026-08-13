@@ -110,7 +110,12 @@ export function mergeTokenUsage(existing: TokenUsage | undefined, incoming: Toke
     }
   }
   // Non-aggregating contextual fields should keep the most recent snapshot.
-  const latestKeys: LatestTokenUsageKey[] = ['contextWindowSize', 'lastTurnInputTokens', 'contextUsedTokens', 'contextResetsAtMs'];
+  const latestKeys: LatestTokenUsageKey[] = [
+    'contextWindowSize',
+    'lastTurnInputTokens',
+    'contextUsedTokens',
+    'contextResetsAtMs',
+  ];
   for (const key of latestKeys) {
     const val = incoming[key];
     if (val != null) {

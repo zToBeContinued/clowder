@@ -202,8 +202,12 @@ export function FilesPanel({
             </p>
           </div>
           <div className="flex gap-2 text-[11px] text-[var(--cafe-text-muted)]">
-            <span className="rounded-full border border-[var(--slock-border-color)] px-2 py-1">图片 {images.length}</span>
-            <span className="rounded-full border border-[var(--slock-border-color)] px-2 py-1">文件 {documents.length}</span>
+            <span className="rounded-full border border-[var(--slock-border-color)] px-2 py-1">
+              图片 {images.length}
+            </span>
+            <span className="rounded-full border border-[var(--slock-border-color)] px-2 py-1">
+              文件 {documents.length}
+            </span>
           </div>
         </div>
 
@@ -232,7 +236,9 @@ export function FilesPanel({
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={item.url} alt={item.caption ?? item.filename} className="h-36 w-full object-cover" />
                       <span className="block min-w-0 px-3 py-2">
-                        <span className="block truncate text-xs font-medium text-[var(--cafe-text)]">{item.filename}</span>
+                        <span className="block truncate text-xs font-medium text-[var(--cafe-text)]">
+                          {item.filename}
+                        </span>
                         <span className="mt-0.5 block truncate text-[11px] text-[var(--cafe-text-muted)]">
                           {item.author} · {formatFileTime(item.timestamp)}
                         </span>

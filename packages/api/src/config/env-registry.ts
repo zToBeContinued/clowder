@@ -561,7 +561,8 @@ export const ENV_VARS: EnvDefinition[] = [
   {
     name: 'CAT_CAFE_PER_CAT_MAX_PARALLEL',
     defaultValue: '0',
-    description: '同一只猫跨全部 channel 的自动执行并发上限（0=不限；仅约束队列自动执行，用户手动消息不拦），保护 provider 配额',
+    description:
+      '同一只猫跨全部 channel 的自动执行并发上限（0=不限；仅约束队列自动执行，用户手动消息不拦），保护 provider 配额',
     category: 'a2a',
     sensitive: false,
   },

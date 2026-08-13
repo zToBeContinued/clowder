@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect } from 'react';
-import { clearStaleBrowserShell, isRecoverableChunkLoadError, markChunkReloadAttempt } from '@/utils/chunk-load-recovery';
+import {
+  clearStaleBrowserShell,
+  isRecoverableChunkLoadError,
+  markChunkReloadAttempt,
+} from '@/utils/chunk-load-recovery';
 
 export function ChunkLoadRefreshGuard() {
   useEffect(() => {

@@ -1,11 +1,12 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BriefingCard } from '../BriefingCard';
 import type { RichCardBlock } from '@/stores/chat-types';
+import { BriefingCard } from '../BriefingCard';
 
 vi.mock('@/components/MarkdownContent', () => ({
-  MarkdownContent: ({ content }: { content: string }) => React.createElement('div', { 'data-testid': 'markdown' }, content),
+  MarkdownContent: ({ content }: { content: string }) =>
+    React.createElement('div', { 'data-testid': 'markdown' }, content),
 }));
 
 describe('BriefingCard', () => {

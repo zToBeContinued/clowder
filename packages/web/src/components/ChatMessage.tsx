@@ -556,6 +556,7 @@ export function ChatMessage({
                       onSaveEdit?.();
                     }
                   }}
+                  // biome-ignore lint/a11y/noAutofocus: 编辑框仅在用户主动点击「编辑」后渲染,聚焦正是用户的下一步预期
                   autoFocus
                   disabled={isSavingEdit}
                   className="min-h-[88px] w-full resize-y rounded-lg border border-[var(--slock-border-color)] bg-[var(--cafe-surface-elevated)] px-3 py-2 text-sm text-cafe outline-none transition-colors focus:border-[var(--cafe-accent)]"

@@ -38,7 +38,11 @@ async function collect(iterable) {
 
 /** Kiro CLI 的会话独占锁错误 —— 会被 classifyKiroError 归到 provider_transient。 */
 function sessionLockError(pid) {
-  return new AcpProtocolError(-32603, 'Internal error', `Failed to start session: Session is active in another process (PID ${pid})`);
+  return new AcpProtocolError(
+    -32603,
+    'Internal error',
+    `Failed to start session: Session is active in another process (PID ${pid})`,
+  );
 }
 
 /**
@@ -152,7 +156,11 @@ describe('ACP pool lease is released on every invoke-single-cat exit path', () =
       );
 
       const capacityErrors = messages.filter((m) => m.type === 'error' && /Pool at capacity/.test(m.error ?? ''));
-      assert.deepEqual(capacityErrors, [], 'retry must not hit "Pool at capacity" — the first attempt leaked its lease');
+      assert.deepEqual(
+        capacityErrors,
+        [],
+        'retry must not hit "Pool at capacity" — the first attempt leaked its lease',
+      );
       assert.equal(state.newSessionCount, 2, 'should retry the session once');
       assert.equal(state.spawnCount, 1, 'retry must reuse the pooled process (warm hit), not cold-start a new one');
       assert.ok(
@@ -167,7 +175,14 @@ describe('ACP pool lease is released on every invoke-single-cat exit path', () =
   });
 
   it('caller abort releases the lease even though the provider generator is mid-stream', async () => {
-    const state = { spawnCount: 0, newSessionCount: 0, promptCount: 0, closeCount: 0, failNewSessionTimes: 0, stallForever: true };
+    const state = {
+      spawnCount: 0,
+      newSessionCount: 0,
+      promptCount: 0,
+      closeCount: 0,
+      failNewSessionTimes: 0,
+      stallForever: true,
+    };
     const pool = createPool(state, 1);
     const service = new KiroAcpAdapter({
       catId: 'kiro-cat',
@@ -280,7 +295,11 @@ describe('ACP pool lease is released on every invoke-single-cat exit path', () =
       lease.release();
       const afterRelease = pool.getMetrics();
       assert.equal(afterRelease.activeLeaseCount, afterReap.activeLeaseCount, 'activeLeaseCount must not go negative');
-      assert.equal(afterRelease.idleProcessCount, afterReap.idleProcessCount, 'a dead process must not be counted as idle');
+      assert.equal(
+        afterRelease.idleProcessCount,
+        afterReap.idleProcessCount,
+        'a dead process must not be counted as idle',
+      );
       assert.ok(afterRelease.activeLeaseCount >= 0 && afterRelease.idleProcessCount >= 0, 'metrics stay non-negative');
     } finally {
       await pool.closeAll();

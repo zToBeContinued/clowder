@@ -67,9 +67,7 @@ export function createKiroAcpProfile(config: KiroAcpProfileInput): AcpProviderPr
   // This deployment explicitly opts every non-interactive Kiro ACP process into
   // trust-all. Normalize the short alias and duplicates to one auditable flag.
   // 同时剥离历史 --effort，改由配置的 cli.effort 统一控制（保证池指纹稳定、无重复）。
-  const extraArgs = stripEffortArgs(
-    withoutEntrypoint.filter((arg) => arg !== '--trust-all-tools' && arg !== '-a'),
-  );
+  const extraArgs = stripEffortArgs(withoutEntrypoint.filter((arg) => arg !== '--trust-all-tools' && arg !== '-a'));
   const model = config.defaultModel?.trim();
   const effort = config.cli?.effort?.trim();
 

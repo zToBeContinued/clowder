@@ -3,15 +3,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { CatData } from '@/hooks/useCatData';
 import { apiFetch } from '@/utils/api-client';
-import type { ConfigData } from './config-viewer-types';
-import type { TemplateCard } from './first-run-quest/TemplateStep';
-import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
 import { CliRuntimeProfileBindingSection } from './CliRuntimeProfileBindingSection';
 import {
   CLI_RUNTIME_PROFILES_CHANGED_EVENT,
   type CliRuntimeProfileSummary,
   parseCliRuntimeProfilesResponse,
 } from './cli-runtime-profiles';
+import type { ConfigData } from './config-viewer-types';
+import type { TemplateCard } from './first-run-quest/TemplateStep';
+import type { AccountsResponse, ProfileItem } from './hub-accounts.types';
 import { uploadAvatarAsset, uploadRefAudioAsset } from './hub-cat-editor.client';
 import {
   autoSlug,

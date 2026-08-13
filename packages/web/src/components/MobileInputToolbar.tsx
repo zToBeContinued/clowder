@@ -12,13 +12,7 @@ interface MobileInputToolbarProps {
  * Expandable toolbar for mobile input — compact attachment access.
  * Shown above the main input row when user taps the + button.
  */
-export function MobileInputToolbar({
-  onAttach,
-  onClose,
-  disabled,
-  sendDisabled,
-  maxImages,
-}: MobileInputToolbarProps) {
+export function MobileInputToolbar({ onAttach, onClose, disabled, sendDisabled, maxImages }: MobileInputToolbarProps) {
   const btnBase =
     'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border transition-colors disabled:opacity-30';
 

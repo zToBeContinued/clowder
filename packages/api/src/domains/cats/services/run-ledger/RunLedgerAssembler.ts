@@ -1,15 +1,15 @@
 import type { CatId, TaskEvent, TaskItem } from '@cat-cafe/shared';
 import { hmacId } from '../../../../infrastructure/telemetry/hmac.js';
 import type { LocalTraceStore, TraceSpanDTO } from '../../../../infrastructure/telemetry/local-trace-store.js';
-import type { TokenUsage } from '../types.js';
 import type {
+  IInvocationRecordStore,
   InvocationPhase,
   InvocationRecord,
   InvocationStatus,
-  IInvocationRecordStore,
 } from '../stores/ports/InvocationRecordStore.js';
 import type { IMessageStore, StoredMessage, StoredToolEvent } from '../stores/ports/MessageStore.js';
 import type { ITaskStore } from '../stores/ports/TaskStore.js';
+import type { TokenUsage } from '../types.js';
 
 export type RunLedgerEventType =
   | 'created'
@@ -147,7 +147,9 @@ export class RunLedgerAssembler {
 
     const threadMessages = await this.messageStore.getByThread(record.threadId, this.messageLimit, record.userId);
     const messages = threadMessages.filter((message) => isInvocationMessage(message, record));
-    const assistantMessages = messages.filter((message) => message.catId !== null && message.extra?.stream?.invocationId === record.id);
+    const assistantMessages = messages.filter(
+      (message) => message.catId !== null && message.extra?.stream?.invocationId === record.id,
+    );
     const tasks = await this.findAssociatedTasks(record, messages);
     const taskEvents = collectTaskEvents(tasks, record.id);
     const traceSpans = queryTraceSpans(this.traceStore, record.id);
@@ -266,7 +268,9 @@ export class RunLedgerAssembler {
         status: record.status,
         phase: record.phase,
         startedAt: record.createdAt,
-        ...(isTerminal(record.status) ? { endedAt: record.updatedAt, durationMs: Math.max(0, record.updatedAt - record.createdAt) } : {}),
+        ...(isTerminal(record.status)
+          ? { endedAt: record.updatedAt, durationMs: Math.max(0, record.updatedAt - record.createdAt) }
+          : {}),
         ...(record.status === 'failed' ? { failureClass: classifyFailure(record.error) } : {}),
         ...(usage ? { usage } : {}),
         artifactCount,
@@ -374,7 +378,9 @@ function isInvocationMessage(message: StoredMessage, record: InvocationRecord): 
 function isTaskAssociated(task: TaskItem, record: InvocationRecord, messageIds: Set<string>): boolean {
   if (task.sourceMessageId && messageIds.has(task.sourceMessageId)) return true;
   if (task.taskThreadId && task.taskThreadId === record.threadId) return true;
-  return (task.events ?? []).some((event) => event.invocationId === record.id || event.data?.invocationId === record.id);
+  return (task.events ?? []).some(
+    (event) => event.invocationId === record.id || event.data?.invocationId === record.id,
+  );
 }
 
 function collectTaskEvents(tasks: TaskItem[], invocationId: string): TaskEvent[] {

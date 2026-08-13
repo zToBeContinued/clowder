@@ -60,7 +60,10 @@ describe('agent output sanitizer', () => {
 
     const output = sanitize(input);
 
-    assert.equal(output, '结论：你的 skill 不是缺数量，而是缺触发和应用闭环。\n建议：先做 manifest + dashboard，再接入 Clowder router。');
+    assert.equal(
+      output,
+      '结论：你的 skill 不是缺数量，而是缺触发和应用闭环。\n建议：先做 manifest + dashboard，再接入 Clowder router。',
+    );
   });
 
   test('removes continuation and memory-hit implementation chatter', async () => {

@@ -66,9 +66,7 @@ function backfillSummaryState(db: Database.Database, allowlist: ReadonlySet<stri
          (thread_id, pending_message_count, pending_token_count, pending_signal_flags, summary_type)
          VALUES (?, 100, 5000, 7, 'concat')`,
       );
-      const hasEvidence = db.prepare(
-        `SELECT 1 FROM evidence_docs WHERE kind = 'thread' AND anchor = ? LIMIT 1`,
-      );
+      const hasEvidence = db.prepare(`SELECT 1 FROM evidence_docs WHERE kind = 'thread' AND anchor = ? LIMIT 1`);
       const tx = db.transaction(() => {
         for (const threadId of allowlist) {
           // Backfill old indexed threads only. Threads without evidence_docs can

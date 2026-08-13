@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, test, mock } from 'node:test';
+import { describe, mock, test } from 'node:test';
 
 const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 const { QueueProcessor } = await import('../dist/domains/cats/services/agents/invocation/QueueProcessor.js');

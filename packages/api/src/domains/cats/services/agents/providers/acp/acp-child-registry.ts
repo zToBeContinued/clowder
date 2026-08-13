@@ -136,7 +136,10 @@ async function readRecords(dir: string): Promise<AcpChildRecord[]> {
 
 /** 映像名是否与登记的命令一致（Windows 不区分大小写，且忽略 .exe/.cmd 后缀）。 */
 export function imageMatches(command: string, image: string): boolean {
-  const strip = (s: string) => basename(s).replace(/\.(exe|cmd|bat|com)$/i, '').toLowerCase();
+  const strip = (s: string) =>
+    basename(s)
+      .replace(/\.(exe|cmd|bat|com)$/i, '')
+      .toLowerCase();
   return strip(command) === strip(image);
 }
 

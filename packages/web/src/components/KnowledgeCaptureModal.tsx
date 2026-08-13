@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '@/utils/api-client';
 
 type KnowledgeType = 'feature' | 'lesson' | 'decision';
@@ -132,9 +132,7 @@ export function KnowledgeCaptureModal({
 
         <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
           <div>
-            <span className="text-[11px] font-semibold tracking-[0.14em] text-[var(--cafe-text-secondary)]">
-              类型
-            </span>
+            <span className="text-[11px] font-semibold tracking-[0.14em] text-[var(--cafe-text-secondary)]">类型</span>
             <div className="mt-2 grid gap-2 sm:grid-cols-3">
               {TYPE_OPTIONS.map((option) => (
                 <button
@@ -165,6 +163,7 @@ export function KnowledgeCaptureModal({
               onChange={(event) => setTitle(event.target.value)}
               maxLength={160}
               className="mt-1 w-full rounded-lg border border-[var(--slock-border-color)] bg-[var(--console-shell-bg)] px-3 py-2 text-sm text-[var(--cafe-text)] outline-none transition-colors focus:border-[var(--cafe-accent)]"
+              // biome-ignore lint/a11y/noAutofocus: 模态框由用户主动打开,聚焦首个必填字段是对话框焦点管理的标准做法
               autoFocus
             />
           </label>

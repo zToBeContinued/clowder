@@ -12,15 +12,21 @@ describe('POST /api/threads/:id/reset-context', () => {
   let resetCalls;
 
   beforeEach(async () => {
-    const [{ ThreadStore }, { MessageStore }, { DeliveryCursorStore }, { InvocationTracker }, { InvocationQueue }, { threadsRoutes }] =
-      await Promise.all([
-        import('../dist/domains/cats/services/stores/ports/ThreadStore.js'),
-        import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
-        import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'),
-        import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js'),
-        import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
-        import('../dist/routes/threads.js'),
-      ]);
+    const [
+      { ThreadStore },
+      { MessageStore },
+      { DeliveryCursorStore },
+      { InvocationTracker },
+      { InvocationQueue },
+      { threadsRoutes },
+    ] = await Promise.all([
+      import('../dist/domains/cats/services/stores/ports/ThreadStore.js'),
+      import('../dist/domains/cats/services/stores/ports/MessageStore.js'),
+      import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'),
+      import('../dist/domains/cats/services/agents/invocation/InvocationTracker.js'),
+      import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js'),
+      import('../dist/routes/threads.js'),
+    ]);
     threadStore = new ThreadStore();
     messageStore = new MessageStore();
     deliveryCursorStore = new DeliveryCursorStore();
@@ -73,7 +79,10 @@ describe('POST /api/threads/:id/reset-context', () => {
     assert.equal(body.boundary.contextEpoch, 1);
     assert.deepEqual(resetCalls, [{ userId: 'default-user', threadId: thread.id }]);
     assert.equal(threadStore.consumePendingContinuation(thread.id, 'codex', 'default-user'), null);
-    assert.equal(await deliveryCursorStore.getCursor('default-user', 'codex', thread.id), body.boundary.resetAtMessageId);
+    assert.equal(
+      await deliveryCursorStore.getCursor('default-user', 'codex', thread.id),
+      body.boundary.resetAtMessageId,
+    );
     assert.equal(
       await deliveryCursorStore.getMentionAckCursor('default-user', 'codex', thread.id),
       body.boundary.resetAtMessageId,

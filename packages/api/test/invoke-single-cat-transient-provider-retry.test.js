@@ -70,7 +70,13 @@ describe('provider_transient retry', () => {
         optionsSeen.push(opts);
         if (attempt === 1) {
           yield { type: 'session_init', catId: 'codex', sessionId: 'kiro-session-1', timestamp: Date.now() };
-          yield { type: 'error', catId: 'codex', error: TRANSIENT_ERROR, errorCode: 'provider_transient', timestamp: Date.now() };
+          yield {
+            type: 'error',
+            catId: 'codex',
+            error: TRANSIENT_ERROR,
+            errorCode: 'provider_transient',
+            timestamp: Date.now(),
+          };
           yield { type: 'done', catId: 'codex', timestamp: Date.now() };
         } else {
           yield { type: 'text', catId: 'codex', content: 'recovered after 500', timestamp: Date.now() };
@@ -102,7 +108,11 @@ describe('provider_transient retry', () => {
     );
 
     assert.equal(attempt, 2, 'should retry once after the provider 500');
-    assert.equal(optionsSeen[1].sessionId, 'kiro-session-1', 'transient retry must keep the session (not a session fault)');
+    assert.equal(
+      optionsSeen[1].sessionId,
+      'kiro-session-1',
+      'transient retry must keep the session (not a session fault)',
+    );
     assert.deepEqual(sessionDeletes, [], 'transient retry must not drop the session');
     assert.ok(
       msgs.some((m) => m.type === 'text' && m.content === 'recovered after 500'),
@@ -120,7 +130,13 @@ describe('provider_transient retry', () => {
     const service = {
       async *invoke() {
         attempt++;
-        yield { type: 'error', catId: 'codex', error: TRANSIENT_ERROR, errorCode: 'provider_transient', timestamp: Date.now() };
+        yield {
+          type: 'error',
+          catId: 'codex',
+          error: TRANSIENT_ERROR,
+          errorCode: 'provider_transient',
+          timestamp: Date.now(),
+        };
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       },
     };
@@ -147,7 +163,13 @@ describe('provider_transient retry', () => {
       async *invoke() {
         attempt++;
         yield { type: 'text', catId: 'codex', content: 'partial answer', timestamp: Date.now() };
-        yield { type: 'error', catId: 'codex', error: TRANSIENT_ERROR, errorCode: 'provider_transient', timestamp: Date.now() };
+        yield {
+          type: 'error',
+          catId: 'codex',
+          error: TRANSIENT_ERROR,
+          errorCode: 'provider_transient',
+          timestamp: Date.now(),
+        };
         yield { type: 'done', catId: 'codex', timestamp: Date.now() };
       },
     };

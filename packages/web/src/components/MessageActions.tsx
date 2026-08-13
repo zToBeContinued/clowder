@@ -6,8 +6,8 @@ import { useChatStore } from '@/stores/chatStore';
 import { type TaskItem, useTaskStore } from '@/stores/taskStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
-import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
 import { getDefaultReactionEmojis, hasUserReaction, toggleMessageReaction } from '@/utils/message-reactions';
+import { isMessageSaved, SAVED_MESSAGES_EVENT, toggleSavedMessage } from '@/utils/saved-messages';
 import { getUserId } from '@/utils/userId';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MessageContextMenu } from './MessageContextMenu';
@@ -327,7 +327,14 @@ export function MessageActions({
           className={`slock-message-toolbar opacity-0 group-hover:opacity-100 focus-within:opacity-100 absolute ${toolbarPositionClass} right-1 z-10 flex gap-0.5 rounded-[var(--slock-radius-md)] border border-[var(--slock-border-color)] bg-[var(--clowder-action-surface)] px-1 py-0.5 shadow-sm transition-opacity`}
         >
           <button type="button" onClick={handleReply} className="slock-message-action-button" title="引用回复">
-            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            >
               <path d="M6.5 5.25 3.75 8l2.75 2.75" />
               <path d="M4 8h5.25A3.75 3.75 0 0 1 13 11.75" />
             </svg>
@@ -340,7 +347,14 @@ export function MessageActions({
               className="slock-message-action-button"
               title="在 Thread 面板中查看"
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
                 <path d="M3.25 4.25h9.5v6.5h-5l-3 2v-2h-1.5z" />
               </svg>
               <span className="sr-only">Thread</span>
@@ -354,7 +368,14 @@ export function MessageActions({
               title="添加表情反应"
               aria-expanded={reactionPickerOpen}
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              >
                 <circle cx="8" cy="8" r="5.25" />
                 <path d="M5.75 9.5c.65.75 1.35 1.1 2.25 1.1s1.6-.35 2.25-1.1" />
                 <path d="M6.1 6.5h.1M9.8 6.5h.1" />
@@ -384,28 +405,65 @@ export function MessageActions({
             title={saved ? '取消收藏消息' : '收藏消息'}
             aria-pressed={saved}
           >
-            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill={saved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5"
+              fill={saved ? 'currentColor' : 'none'}
+              stroke="currentColor"
+              strokeWidth="1.8"
+            >
               <path d="M4.25 2.75h7.5v10.5L8 10.75l-3.75 2.5z" />
             </svg>
             <span className="sr-only">{saved ? '取消收藏消息' : '收藏消息'}</span>
           </button>
-          <button
-            type="button"
-            onClick={handleOpenMoreMenu}
-            className="slock-message-action-button"
-            title="更多操作"
-          >
-            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <button type="button" onClick={handleOpenMoreMenu} className="slock-message-action-button" title="更多操作">
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 16 16"
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+            >
               <path d="M3.5 8h.1M7.95 8h.1M12.4 8h.1" />
             </svg>
             <span className="sr-only">更多操作</span>
           </button>
-          <button type="button" onClick={handleSoftDelete} className="hidden" title="删除" aria-hidden="true" tabIndex={-1} />
-          <button type="button" onClick={handleBranchDirect} className="hidden" title="从这里分支" aria-hidden="true" tabIndex={-1} />
+          <button
+            type="button"
+            onClick={handleSoftDelete}
+            className="hidden"
+            title="删除"
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+          <button
+            type="button"
+            onClick={handleBranchDirect}
+            className="hidden"
+            title="从这里分支"
+            aria-hidden="true"
+            tabIndex={-1}
+          />
           {isUser && (
-            <button type="button" onClick={canInlineEdit ? handleInlineEdit : handleEdit} className="hidden" title="编辑消息" aria-hidden="true" tabIndex={-1} />
+            <button
+              type="button"
+              onClick={canInlineEdit ? handleInlineEdit : handleEdit}
+              className="hidden"
+              title="编辑消息"
+              aria-hidden="true"
+              tabIndex={-1}
+            />
           )}
-          <button type="button" onClick={handleHardDelete} className="hidden" title="永久删除" aria-hidden="true" tabIndex={-1} />
+          <button
+            type="button"
+            onClick={handleHardDelete}
+            className="hidden"
+            title="永久删除"
+            aria-hidden="true"
+            tabIndex={-1}
+          />
         </div>
       )}
       {ctxMenu && (

@@ -45,12 +45,8 @@ describe('Callback Routes', () => {
     const { ThreadStore } = await import('../dist/domains/cats/services/stores/ports/ThreadStore.js');
     const { TaskStore } = await import('../dist/domains/cats/services/stores/ports/TaskStore.js');
     const { BacklogStore } = await import('../dist/domains/cats/services/stores/ports/BacklogStore.js');
-    const { DeliveryCursorStore } = await import(
-      '../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js'
-    );
-    const { InvocationQueue } = await import(
-      '../dist/domains/cats/services/agents/invocation/InvocationQueue.js'
-    );
+    const { DeliveryCursorStore } = await import('../dist/domains/cats/services/stores/ports/DeliveryCursorStore.js');
+    const { InvocationQueue } = await import('../dist/domains/cats/services/agents/invocation/InvocationQueue.js');
 
     registry = new InvocationRegistry();
     messageStore = new MessageStore();
@@ -833,7 +829,10 @@ describe('Callback Routes', () => {
 
     const context = await app.inject({ method: 'GET', url: '/api/callbacks/thread-context', headers });
     assert.equal(context.statusCode, 200);
-    assert.deepEqual(JSON.parse(context.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(context.body).messages.map((message) => message.content),
+      ['RESET-CALLBACK-NEW'],
+    );
 
     const inbox = await app.inject({ method: 'GET', url: '/api/callbacks/check-inbox', headers });
     assert.equal(inbox.statusCode, 200);
@@ -841,7 +840,10 @@ describe('Callback Routes', () => {
 
     const recent = await app.inject({ method: 'GET', url: '/api/callbacks/fetch-thread-history', headers });
     assert.equal(recent.statusCode, 200);
-    assert.deepEqual(JSON.parse(recent.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(recent.body).messages.map((message) => message.content),
+      ['RESET-CALLBACK-NEW'],
+    );
 
     const explicitOld = await app.inject({
       method: 'GET',
@@ -856,7 +858,10 @@ describe('Callback Routes', () => {
       headers,
     });
     assert.equal(mentions.statusCode, 200);
-    assert.deepEqual(JSON.parse(mentions.body).mentions.map((mention) => mention.message), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(mentions.body).mentions.map((mention) => mention.message),
+      ['RESET-CALLBACK-NEW'],
+    );
 
     const search = await app.inject({
       method: 'GET',
@@ -864,7 +869,10 @@ describe('Callback Routes', () => {
       headers,
     });
     assert.equal(search.statusCode, 200);
-    assert.deepEqual(JSON.parse(search.body).messages.map((message) => message.content), ['RESET-CALLBACK-NEW']);
+    assert.deepEqual(
+      JSON.parse(search.body).messages.map((message) => message.content),
+      ['RESET-CALLBACK-NEW'],
+    );
   });
 
   test('GET thread-context respects limit parameter', async () => {

@@ -109,7 +109,10 @@ describe('Session Hooks Routes', () => {
 
         const index = await readFile(join(root, '.cat-cafe', 'projects', 'demo', 'handoff-index.md'), 'utf-8');
         assert.match(index, /## /);
-        assert.match(index, /- \*\*What\*\*: Session .* reached context handoff boundary for @opus in thread thread-handoff-write\./);
+        assert.match(
+          index,
+          /- \*\*What\*\*: Session .* reached context handoff boundary for @opus in thread thread-handoff-write\./,
+        );
         assert.match(index, /- \*\*Trust\*\*: trusted/);
         assert.match(index, new RegExp(`from-session: ${record.id}`));
       } finally {

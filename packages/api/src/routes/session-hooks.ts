@@ -16,13 +16,13 @@ import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { z } from 'zod';
 import { getSessionStrategy } from '../config/session-strategy.js';
 import {
-  inferResumeTrustForSessionHandoff,
-  writeContextHandoffForPromptProjects,
-} from '../domains/cats/services/agents/memory/ProjectProgressStore.js';
-import {
   completeCapsuleForCompact,
   isCollaborationContinuityCapsuleV1,
 } from '../domains/cats/services/agents/invocation/CollaborationContinuityCapsule.js';
+import {
+  inferResumeTrustForSessionHandoff,
+  writeContextHandoffForPromptProjects,
+} from '../domains/cats/services/agents/memory/ProjectProgressStore.js';
 import type { ISessionSealer } from '../domains/cats/services/session/SessionSealer.js';
 import type { TranscriptReader } from '../domains/cats/services/session/TranscriptReader.js';
 import type { ISessionChainStore } from '../domains/cats/services/stores/ports/SessionChainStore.js';

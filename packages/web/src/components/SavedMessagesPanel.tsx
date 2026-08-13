@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { type Thread, useChatStore } from '@/stores/chatStore';
 import {
+  clearSavedMessageScrollTarget,
   loadSavedMessages,
   SAVED_MESSAGES_EVENT,
-  clearSavedMessageScrollTarget,
+  type SavedMessageSnapshot,
   setSavedMessageScrollTarget,
   setSavedMessagesViewOpen,
-  type SavedMessageSnapshot,
 } from '@/utils/saved-messages';
 import { pushThreadRouteWithHistory } from './ThreadSidebar/thread-navigation';
 

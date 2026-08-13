@@ -47,7 +47,7 @@ function SkillInstallModal({
         const query = projectPath ? `?projectPath=${encodeURIComponent(projectPath)}` : '';
         const res = await apiFetch(`/api/skills${query}`);
         if (res.ok) {
-          const data = await res.json() as { skills: AvailableSkill[] };
+          const data = (await res.json()) as { skills: AvailableSkill[] };
           setAvailable(data.skills);
         }
       } catch {
@@ -216,9 +216,7 @@ export function SkillsContent() {
           安装 Skill
         </button>
         {cap.items.length > 0 && (
-          <span className="flex items-center text-xs text-cafe-muted">
-            已安装 {cap.items.length} 个
-          </span>
+          <span className="flex items-center text-xs text-cafe-muted">已安装 {cap.items.length} 个</span>
         )}
       </div>
 

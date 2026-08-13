@@ -30,18 +30,7 @@ try {
 
   const output = execFileSync(
     'node',
-    [
-      script,
-      '--target',
-      target,
-      '--reference',
-      reference,
-      '--repo',
-      linkRepo,
-      '--expected-total',
-      '505',
-      '--json',
-    ],
+    [script, '--target', target, '--reference', reference, '--repo', linkRepo, '--expected-total', '505', '--json'],
     { encoding: 'utf8' },
   );
   const result = JSON.parse(output);

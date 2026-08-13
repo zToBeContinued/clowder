@@ -127,7 +127,8 @@ function validSummaryStore(threadId = 'thread1') {
         fromMessageId: '0000000000000001-000001-aaaaaaaa',
         toMessageId: '0000000000000001-000001-aaaaaaaa',
         messageCount: 1,
-        summary: '范围：旧消息。当前状态：正常接手。已确认决策/约束：保留 degraded。下一步：继续验证。风险锚点：compact boundary。',
+        summary:
+          '范围：旧消息。当前状态：正常接手。已确认决策/约束：保留 degraded。下一步：继续验证。风险锚点：compact boundary。',
         generatedAt: '2026-07-03T12:00:00.000Z',
         modelId: 'cheap-summary-model',
         promptVersion: 'history-v1',
@@ -164,10 +165,7 @@ function withIncrementalHistory(deps, currentUserMessageId = '0000000000000002-0
   return currentUserMessageId;
 }
 
-function withObservationFailureThenIncrementalHistory(
-  deps,
-  currentUserMessageId = '0000000000000002-000001-bbbbbbbb',
-) {
+function withObservationFailureThenIncrementalHistory(deps, currentUserMessageId = '0000000000000002-000001-bbbbbbbb') {
   deps.deliveryCursorStore = {
     getCursor: async () => undefined,
     ackCursor: async () => {},

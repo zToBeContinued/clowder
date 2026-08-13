@@ -52,7 +52,10 @@ if (!existsSync(LOG_DIR)) {
 
 const stream = pino.multistream([
   { level: LOG_LEVEL as pino.Level, stream: pino.destination(1) }, // stdout
-  { level: LOG_LEVEL as pino.Level, stream: pino.destination({ dest: resolve(LOG_DIR, 'api.log'), mkdir: true, append: true, sync: false }) },
+  {
+    level: LOG_LEVEL as pino.Level,
+    stream: pino.destination({ dest: resolve(LOG_DIR, 'api.log'), mkdir: true, append: true, sync: false }),
+  },
 ]);
 
 export const logger = pino(

@@ -1,6 +1,6 @@
-import { createRequire } from 'node:module';
-import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { access } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 

@@ -5,7 +5,11 @@ import { resolveUserId } from './request-identity.js';
 
 export type DangerousActionSeverity = 'medium' | 'high' | 'critical';
 export type DangerousActionResult = 'attempted' | 'succeeded' | 'failed' | 'blocked';
-export type DangerousActionConfirmation = 'not_required' | 'ui_confirmed' | 'header_confirmed' | 'existing_confirm_field';
+export type DangerousActionConfirmation =
+  | 'not_required'
+  | 'ui_confirmed'
+  | 'header_confirmed'
+  | 'existing_confirm_field';
 
 export const DANGEROUS_ACTION_CONFIRMATION_HEADER = 'x-clowder-dangerous-action-confirmed';
 

@@ -94,7 +94,9 @@ describe('SettingsNav search filtering', () => {
 
   it('search can find advanced sections while they are collapsed by default', () => {
     act(() => {
-      root.render(React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'MCP' }));
+      root.render(
+        React.createElement(SettingsNav, { activeSection: 'members', onSelect: vi.fn(), searchQuery: 'MCP' }),
+      );
     });
     const buttons = Array.from(container.querySelectorAll('[data-active]'));
     expect(buttons).toHaveLength(1);

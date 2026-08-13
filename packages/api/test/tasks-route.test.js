@@ -120,7 +120,10 @@ describe('Tasks Routes', () => {
     assert.ok(event);
     assert.equal(event.data.capabilityId, 'opencli');
     assert.equal(event.data.authorizedBy, 'alice');
-    assert.equal(socketManager.getEvents().some((event) => event.event === 'task_updated'), true);
+    assert.equal(
+      socketManager.getEvents().some((event) => event.event === 'task_updated'),
+      true,
+    );
   });
 
   test('POST task capability authorization requires identity', async () => {
@@ -1021,7 +1024,10 @@ describe('Tasks Routes', () => {
     const delRes = await app.inject({ method: 'DELETE', url: `/api/tasks/${taskId}` });
     assert.equal(delRes.statusCode, 204);
 
-    const deletedEvent = socketManager.getEvents().slice(before).find((e) => e.event === 'task_deleted');
+    const deletedEvent = socketManager
+      .getEvents()
+      .slice(before)
+      .find((e) => e.event === 'task_deleted');
     assert.ok(deletedEvent, 'DELETE must broadcast task_deleted');
     assert.equal(deletedEvent.data.id, taskId);
     assert.equal(deletedEvent.data.threadId, 'thread-del');

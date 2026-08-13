@@ -132,7 +132,13 @@ describe('run ledger route', () => {
   test('returns a succeeded invocation timeline without leaking message content', async () => {
     const records = [makeInvocation()];
     const messages = [
-      makeMessage({ id: 'msg-user', catId: null, content: '用户原文不应该泄漏', extra: undefined, timestamp: NOW - 10 }),
+      makeMessage({
+        id: 'msg-user',
+        catId: null,
+        content: '用户原文不应该泄漏',
+        extra: undefined,
+        timestamp: NOW - 10,
+      }),
       makeMessage({
         toolEvents: [
           {
@@ -223,7 +229,9 @@ describe('run ledger route', () => {
         updatedAt: NOW + 2_100,
       }),
     ];
-    const messages = [makeMessage({ id: 'msg-user', catId: null, content: 'continue after compact', extra: undefined })];
+    const messages = [
+      makeMessage({ id: 'msg-user', catId: null, content: 'continue after compact', extra: undefined }),
+    ];
     const tasks = [
       makeTask({
         events: [

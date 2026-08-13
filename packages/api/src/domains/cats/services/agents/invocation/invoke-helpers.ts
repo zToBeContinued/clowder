@@ -107,7 +107,7 @@ export const TRANSIENT_PROVIDER_ERROR_CODE = 'provider_transient';
  */
 export function getTransientProviderRetryDelayMs(): number {
   const raw = Number(process.env.CAT_CAFE_TRANSIENT_PROVIDER_RETRY_DELAY_MS);
-  return (Number.isFinite(raw) && raw > 0) ? raw : 30_000;
+  return Number.isFinite(raw) && raw > 0 ? raw : 30_000;
 }
 /** @deprecated 保留兼容引用，实际使用 getTransientProviderRetryDelayMs() */
 export const TRANSIENT_PROVIDER_RETRY_DELAY_MS = 30_000;

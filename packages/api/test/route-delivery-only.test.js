@@ -298,7 +298,9 @@ describe('routeSerial deliveryOnly boundary', () => {
         assert.ok(
           !emitted.some(
             (message) =>
-              message.type === 'system_info' && typeof message.content === 'string' && message.content.includes('deliveryOnly 已降级'),
+              message.type === 'system_info' &&
+              typeof message.content === 'string' &&
+              message.content.includes('deliveryOnly 已降级'),
           ),
           'deliveryOnly 降级不得生成频道 warning bubble',
         );
@@ -309,10 +311,7 @@ describe('routeSerial deliveryOnly boundary', () => {
           expectedIssue,
         );
         assert.equal(systemInfoPayloads(emitted, 'invocation_usage')[0].usage.deliveryOnlyMode, 'degraded');
-        assert.equal(
-          systemInfoPayloads(emitted, 'invocation_usage')[0].usage.deliveryOnlyDegradedIssue,
-          expectedIssue,
-        );
+        assert.equal(systemInfoPayloads(emitted, 'invocation_usage')[0].usage.deliveryOnlyDegradedIssue, expectedIssue);
       });
     });
   }

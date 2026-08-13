@@ -30,9 +30,7 @@ export function BriefingCard({ block: raw }: { block: RichBlock; messageId?: str
         </span>
         <span className="mx-1.5 text-[var(--color-cafe-accent)]/40">·</span>
         <span className="text-sm text-cafe-secondary dark:text-cafe-muted truncate flex-1">{block.title}</span>
-        {!expanded && (
-          <span className="hidden sm:inline text-[11px] text-cafe-muted shrink-0">点开看详情</span>
-        )}
+        {!expanded && <span className="hidden sm:inline text-[11px] text-cafe-muted shrink-0">点开看详情</span>}
         <svg
           className={`w-3.5 h-3.5 text-[var(--color-cafe-accent)]/60 shrink-0 transition-transform duration-150 ${expanded ? 'rotate-180' : ''}`}
           viewBox="0 0 24 24"

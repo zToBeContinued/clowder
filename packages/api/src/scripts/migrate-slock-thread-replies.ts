@@ -15,14 +15,13 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ConnectorSource } from '@cat-cafe/shared';
 import { createRedisClient } from '@cat-cafe/shared/utils';
+import { generateSortableId } from '../domains/cats/services/stores/ports/MessageStore.js';
 import { MessageKeys } from '../domains/cats/services/stores/redis-keys/message-keys.js';
 import { ThreadKeys } from '../domains/cats/services/stores/redis-keys/thread-keys.js';
-import { generateSortableId } from '../domains/cats/services/stores/ports/MessageStore.js';
 
 const MESSAGE_START_RE = /^\[seq=\d+ msg=/;
-const MESSAGE_HEADER_RE =
-  /^\[seq=(\d+) msg=([0-9a-f-]+) time=([^\]]+?) type=(\w+)(?: [^\]]*)?\] @([^:]+): ?(.*)$/u;
-const MENTION_RE = /(^|[^\[])(@[\p{L}\p{N}_-]+)/gu;
+const MESSAGE_HEADER_RE = /^\[seq=(\d+) msg=([0-9a-f-]+) time=([^\]]+?) type=(\w+)(?: [^\]]*)?\] @([^:]+): ?(.*)$/u;
+const MENTION_RE = /(^|[^[])(@[\p{L}\p{N}_-]+)/gu;
 const BATCH_SIZE = 50;
 
 interface ImportResult {
@@ -232,7 +231,10 @@ function formatReplyContent(channelName: string, parentShortId: string, reply: P
     .trimEnd();
 }
 
-async function buildBatchGroups(args: Args, importResult: ImportResult): Promise<{
+async function buildBatchGroups(
+  args: Args,
+  importResult: ImportResult,
+): Promise<{
   groups: BatchGroup[];
   threadFiles: number;
   replyMessages: number;
@@ -294,7 +296,11 @@ async function buildBatchGroups(args: Args, importResult: ImportResult): Promise
   };
 }
 
-async function createBranchThread(redis: ReturnType<typeof createRedisClient>, group: BatchGroup, batchMessage: Record<string, string>) {
+async function createBranchThread(
+  redis: ReturnType<typeof createRedisClient>,
+  group: BatchGroup,
+  batchMessage: Record<string, string>,
+) {
   const branchThreadId = branchThreadIdFor(group.batchMessageId);
   const userId = batchMessage.userId || 'default-user';
   const sourceTimestamp = Number.parseInt(batchMessage.timestamp ?? `${Date.now()}`, 10);
@@ -424,7 +430,8 @@ export async function runMigrateSlockThreadRepliesCli(argv: string[] = process.a
         continue;
       }
 
-      const branchThreadId = state.messages[group.batchMessageId]?.branchThreadId ?? branchThreadIdFor(group.batchMessageId);
+      const branchThreadId =
+        state.messages[group.batchMessageId]?.branchThreadId ?? branchThreadIdFor(group.batchMessageId);
       const branchExists = await redis.exists(ThreadKeys.detail(branchThreadId));
       if (!args.apply) continue;
 

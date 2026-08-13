@@ -7,9 +7,6 @@ import { type Thread, useChatStore } from '@/stores/chatStore';
 import { useToastStore } from '@/stores/toastStore';
 import { apiFetch } from '@/utils/api-client';
 import { loadThreads as loadCachedThreads } from '@/utils/offline-store';
-import { emptyTrash, purgeThread, softDeleteThreadWithUndo } from '@/utils/thread-delete';
-import { useConfirm } from '../useConfirm';
-import { scrollToMessage } from '@/utils/scrollToMessage';
 import {
   isSavedMessagesViewOpen,
   loadSavedMessages,
@@ -18,8 +15,10 @@ import {
   type SavedMessageSnapshot,
   setSavedMessagesViewOpen,
 } from '@/utils/saved-messages';
-
+import { scrollToMessage } from '@/utils/scrollToMessage';
+import { emptyTrash, purgeThread, softDeleteThreadWithUndo } from '@/utils/thread-delete';
 import { CatAvatar } from '../CatAvatar';
+import { useConfirm } from '../useConfirm';
 import { DirectoryPickerModal, type NewThreadOptions } from './DirectoryPickerModal';
 import { CHAT_THREAD_ROUTE_EVENT, getThreadHref, pushThreadRouteWithHistory } from './thread-navigation';
 import {
@@ -740,8 +739,7 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
     return ids;
   }, [currentThreadId, sidebarThreads]);
   const existingProjects = useMemo(() => getProjectPaths(sidebarThreads), [sidebarThreads]);
-  const showDefaultThread =
-    !showUnreadOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
+  const showDefaultThread = !showUnreadOnly && (normalizedQuery.length === 0 || '大厅'.includes(normalizedQuery));
   const channelsCollapsed = normalizedQuery.length === 0 && collapsedSections.has('channels');
   const directMessagesCollapsed = collapsedSections.has('direct-messages');
 
@@ -808,7 +806,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
 
   const renderMessageSearchResult = (message: MessageSearchResult) => {
     const threadTitle =
-      message.threadTitle ?? threadTitleById.get(message.threadId) ?? getThreadDisplayTitle(undefined, message.threadId);
+      message.threadTitle ??
+      threadTitleById.get(message.threadId) ??
+      getThreadDisplayTitle(undefined, message.threadId);
     return (
       <button
         key={message.id}
@@ -817,8 +817,12 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         className="slock-sidebar-search-result mx-2 flex w-[calc(100%-1rem)] flex-col rounded-md px-3 py-2 text-left transition-colors hover:bg-[var(--console-hover-bg)]"
         title={message.content}
       >
-        <span className="mb-0.5 max-w-full truncate text-[10px] font-semibold text-[var(--clowder-sidebar-row-muted)]">{threadTitle}</span>
-        <span className="line-clamp-2 text-xs leading-[1.5] text-[var(--clowder-sidebar-row-text)]">{formatMessageExcerpt(message.content)}</span>
+        <span className="mb-0.5 max-w-full truncate text-[10px] font-semibold text-[var(--clowder-sidebar-row-muted)]">
+          {threadTitle}
+        </span>
+        <span className="line-clamp-2 text-xs leading-[1.5] text-[var(--clowder-sidebar-row-text)]">
+          {formatMessageExcerpt(message.content)}
+        </span>
       </button>
     );
   };
@@ -830,7 +834,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
         style={{ boxShadow: 'inset -1px 0 0 var(--clowder-sidebar-border)' }}
       >
         <div className="slock-thread-sidebar-header p-3 flex items-center justify-between gap-2">
-          <span className="slock-thread-sidebar-title [font-size:var(--clowder-type-panel-title)] font-medium [line-height:var(--clowder-leading-tight)] text-[var(--clowder-sidebar-title)]">对话</span>
+          <span className="slock-thread-sidebar-title [font-size:var(--clowder-type-panel-title)] font-medium [line-height:var(--clowder-leading-tight)] text-[var(--clowder-sidebar-title)]">
+            对话
+          </span>
           <div className="flex items-center gap-1.5">
             <button
               type="button"
@@ -942,35 +948,41 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                       title="排序方式"
                     >
                       CHANNELS
-                      <span className="slock-sidebar-section-count">{sortedChannelThreads.length + (showDefaultThread ? 1 : 0)}</span>
+                      <span className="slock-sidebar-section-count">
+                        {sortedChannelThreads.length + (showDefaultThread ? 1 : 0)}
+                      </span>
                       <svg className="h-3 w-3 opacity-60" viewBox="0 0 16 16" fill="currentColor">
                         <path d="M4 5h8a.5.5 0 010 1H4a.5.5 0 010-1zm1 2h6a.5.5 0 010 1H5a.5.5 0 010-1zm1 2h4a.5.5 0 010 1H6a.5.5 0 010-1z" />
                       </svg>
                     </button>
-                  {showSortMenu && (
-                    <div className="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-[var(--clowder-sidebar-border)] bg-[var(--cafe-surface)] shadow-md">
-                      {(['recent', 'az'] as const).map((opt) => (
-                        <button
-                          key={opt}
-                          type="button"
-                          onClick={() => handleSetSortOrder(opt)}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
-                            sortOrder === opt
-                              ? 'bg-[var(--clowder-sidebar-active-bg)] font-semibold text-[var(--cafe-accent)]'
-                              : 'text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)]'
-                          }`}
-                        >
-                          {sortOrder === opt && (
-                            <svg className="h-3 w-3 flex-shrink-0 text-[var(--cafe-accent)]" viewBox="0 0 16 16" fill="currentColor">
-                              <path d="M13.354 4.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3-3a.5.5 0 01.708-.708L6 11.293l6.646-6.647a.5.5 0 01.708 0z" />
-                            </svg>
-                          )}
-                          {sortOrder !== opt && <span className="h-3 w-3 flex-shrink-0" />}
-                          <span className="uppercase tracking-wide">{opt === 'recent' ? 'RECENT' : 'A-Z'}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                    {showSortMenu && (
+                      <div className="absolute left-0 top-full z-50 mt-1 w-32 overflow-hidden rounded-md border border-[var(--clowder-sidebar-border)] bg-[var(--cafe-surface)] shadow-md">
+                        {(['recent', 'az'] as const).map((opt) => (
+                          <button
+                            key={opt}
+                            type="button"
+                            onClick={() => handleSetSortOrder(opt)}
+                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                              sortOrder === opt
+                                ? 'bg-[var(--clowder-sidebar-active-bg)] font-semibold text-[var(--cafe-accent)]'
+                                : 'text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)]'
+                            }`}
+                          >
+                            {sortOrder === opt && (
+                              <svg
+                                className="h-3 w-3 flex-shrink-0 text-[var(--cafe-accent)]"
+                                viewBox="0 0 16 16"
+                                fill="currentColor"
+                              >
+                                <path d="M13.354 4.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3-3a.5.5 0 01.708-.708L6 11.293l6.646-6.647a.5.5 0 01.708 0z" />
+                              </svg>
+                            )}
+                            {sortOrder !== opt && <span className="h-3 w-3 flex-shrink-0" />}
+                            <span className="uppercase tracking-wide">{opt === 'recent' ? 'RECENT' : 'A-Z'}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <button
@@ -986,20 +998,20 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
             </div>
 
             {!channelsCollapsed && (
-            <>
-              {showDefaultThread && renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })}
+              <>
+                {showDefaultThread && renderChannelRow({ id: 'default', title: '大厅', lastActiveAt: Date.now() })}
 
-              {sortedChannelThreads.map(renderChannelRow)}
-            </>
+                {sortedChannelThreads.map(renderChannelRow)}
+              </>
             )}
           </div>
 
           {normalizedQuery.length > 0 && (
             <div className="slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2">
-            <div className="px-3 pb-1 pt-1">
-              <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
-                MESSAGES
-              </span>
+              <div className="px-3 pb-1 pt-1">
+                <span className="font-semibold uppercase tracking-[var(--clowder-section-tracking)] [font-size:var(--clowder-type-section)] [line-height:var(--clowder-leading-tight)] text-[var(--clowder-muted-soft)]">
+                  MESSAGES
+                </span>
               </div>
               <div className="space-y-0.5">
                 {isSearchingMessages ? (
@@ -1014,7 +1026,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           )}
 
           {/* Hide the normal DM section in Inbox mode — unread DMs are shown inline above */}
-          <div className={`slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2 ${showUnreadOnly ? 'hidden' : ''}`}>
+          <div
+            className={`slock-sidebar-section mt-3 border-t border-[var(--clowder-sidebar-border)] pt-2 ${showUnreadOnly ? 'hidden' : ''}`}
+          >
             <div className="px-3 pb-1 pt-1">
               <div className="flex items-center gap-1">
                 <SectionCollapseButton
@@ -1028,60 +1042,65 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
                 <span className="slock-sidebar-section-count">{cats.length}</span>
               </div>
             </div>
-            {!directMessagesCollapsed && <div className="space-y-0.5 px-2">
-              {cats.length === 0 ? (
-                <div className="px-2 py-1.5 text-xs text-[var(--clowder-sidebar-row-muted)]">暂无 Agent</div>
-              ) : (
-                cats.map((cat) => {
-                  const status = catStatusMap.get(cat.id) ?? 'online';
-                  const isActiveDm = activeDmCatIds.has(cat.id);
-                  const dmThread = dmThreadByCatId.get(cat.id);
-                  const unreadCount = dmThread ? (getThreadState(dmThread.id)?.unreadCount ?? 0) : 0;
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => void openDirectMessage(cat.id)}
-                      disabled={isCreating}
-                      data-active={isActiveDm ? 'true' : 'false'}
-                      className={`slock-sidebar-row flex h-9 w-full items-center gap-2 rounded-md border-l-2 px-2 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors disabled:opacity-40 ${
-                        isActiveDm
-                          ? 'border-[var(--clowder-sidebar-active-border)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
-                          : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
-                      }`}
-                      title={`打开与 ${formatCatName(cat)} 的私信`}
-                    >
-                      <span className="relative flex-shrink-0">
-                        <CatAvatar catId={cat.id} size={24} tone={status === 'streaming' || isActiveDm ? 'default' : 'quiet'} />
-                        <span
-                          aria-label={status === 'streaming' ? '工作中' : status === 'offline' ? '离线' : '在线空闲'}
-                          className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[var(--clowder-sidebar-bg)]"
-                          style={{
-                            backgroundColor:
-                              status === 'streaming'
-                                ? '#eab308'
-                                : status === 'offline'
-                                  ? 'var(--clowder-sidebar-row-muted)'
-                                : 'var(--console-status-connected)',
-                          }}
-                        />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate">{formatCatName(cat)}</span>
-                      <UnreadBadge count={unreadCount} />
-                    </button>
-                  );
-                })
-              )}
-            </div>}
-          </div>
-
-          {(normalizedQuery.length > 0 || showUnreadOnly) &&
-            threadGroups.length === 0 &&
-            !showDefaultThread && (
-              <div className="px-3 py-4 text-xs text-[var(--clowder-sidebar-row-muted)]">
-                {showUnreadOnly ? '暂无未读对话' : '没有匹配的对话'}
+            {!directMessagesCollapsed && (
+              <div className="space-y-0.5 px-2">
+                {cats.length === 0 ? (
+                  <div className="px-2 py-1.5 text-xs text-[var(--clowder-sidebar-row-muted)]">暂无 Agent</div>
+                ) : (
+                  cats.map((cat) => {
+                    const status = catStatusMap.get(cat.id) ?? 'online';
+                    const isActiveDm = activeDmCatIds.has(cat.id);
+                    const dmThread = dmThreadByCatId.get(cat.id);
+                    const unreadCount = dmThread ? (getThreadState(dmThread.id)?.unreadCount ?? 0) : 0;
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => void openDirectMessage(cat.id)}
+                        disabled={isCreating}
+                        data-active={isActiveDm ? 'true' : 'false'}
+                        className={`slock-sidebar-row flex h-9 w-full items-center gap-2 rounded-md border-l-2 px-2 text-left [font-size:var(--clowder-type-body)] [line-height:var(--clowder-leading-tight)] transition-colors disabled:opacity-40 ${
+                          isActiveDm
+                            ? 'border-[var(--clowder-sidebar-active-border)] bg-[var(--clowder-sidebar-active-bg)] text-[var(--clowder-sidebar-row-active-text)]'
+                            : 'border-transparent text-[var(--clowder-sidebar-row-text)] hover:bg-[var(--clowder-sidebar-hover-bg)] hover:text-[var(--clowder-sidebar-row-active-text)]'
+                        }`}
+                        title={`打开与 ${formatCatName(cat)} 的私信`}
+                      >
+                        <span className="relative flex-shrink-0">
+                          <CatAvatar
+                            catId={cat.id}
+                            size={24}
+                            tone={status === 'streaming' || isActiveDm ? 'default' : 'quiet'}
+                          />
+                          <span
+                            role="img"
+                            aria-label={status === 'streaming' ? '工作中' : status === 'offline' ? '离线' : '在线空闲'}
+                            className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-[var(--clowder-sidebar-bg)]"
+                            style={{
+                              backgroundColor:
+                                status === 'streaming'
+                                  ? '#eab308'
+                                  : status === 'offline'
+                                    ? 'var(--clowder-sidebar-row-muted)'
+                                    : 'var(--console-status-connected)',
+                            }}
+                          />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate">{formatCatName(cat)}</span>
+                        <UnreadBadge count={unreadCount} />
+                      </button>
+                    );
+                  })
+                )}
               </div>
             )}
+          </div>
+
+          {(normalizedQuery.length > 0 || showUnreadOnly) && threadGroups.length === 0 && !showDefaultThread && (
+            <div className="px-3 py-4 text-xs text-[var(--clowder-sidebar-row-muted)]">
+              {showUnreadOnly ? '暂无未读对话' : '没有匹配的对话'}
+            </div>
+          )}
         </div>
 
         {/* F095 Phase D: Trash bin section — styled as Pencil Sidebar Utility Row */}
@@ -1116,7 +1135,9 @@ export function ThreadSidebar({ onClose, className }: ThreadSidebarProps) {
           </button>
           {showTrash && (
             <div className="max-h-48 overflow-y-auto">
-              {isLoadingTrash && <div className="px-3 py-2 text-[10px] text-[var(--clowder-sidebar-row-muted)]">加载中...</div>}
+              {isLoadingTrash && (
+                <div className="px-3 py-2 text-[10px] text-[var(--clowder-sidebar-row-muted)]">加载中...</div>
+              )}
               {!isLoadingTrash && trashedThreads.length === 0 && (
                 <div className="px-3 py-2 text-[10px] text-[var(--clowder-sidebar-row-muted)]">回收站是空的</div>
               )}

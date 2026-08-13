@@ -25,8 +25,8 @@ import { MaterializationService } from './MaterializationService.js';
 import { loadObsidianReadonlyCollections } from './obsidian-readonly-collections.js';
 import { ReflectionService } from './ReflectionService.js';
 import { SqliteEvidenceStore } from './SqliteEvidenceStore.js';
-import { SqliteThreadHistorySummaryStore, type IThreadHistorySummaryStore } from './ThreadHistorySummaryStore.js';
 import { ensureVectorTable } from './schema.js';
+import { type IThreadHistorySummaryStore, SqliteThreadHistorySummaryStore } from './ThreadHistorySummaryStore.js';
 import { VectorStore } from './VectorStore.js';
 
 export interface MemoryServices {

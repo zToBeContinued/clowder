@@ -118,10 +118,14 @@ export function CatTokenUsage({ catId, usage, contextHealth }: CatTokenUsageProp
       {/* Cost + duration row */}
       <div className="flex items-center gap-2 text-[10px]">
         {showCostPanel && usage.cacheReadTokens != null && (
-          <span className="text-conn-emerald-text tabular-nums">cacheRead {formatTokenCount(usage.cacheReadTokens)}</span>
+          <span className="text-conn-emerald-text tabular-nums">
+            cacheRead {formatTokenCount(usage.cacheReadTokens)}
+          </span>
         )}
         {showCostPanel && usage.cacheCreationTokens != null && (
-          <span className="text-cafe-muted tabular-nums">cacheCreate {formatTokenCount(usage.cacheCreationTokens)}</span>
+          <span className="text-cafe-muted tabular-nums">
+            cacheCreate {formatTokenCount(usage.cacheCreationTokens)}
+          </span>
         )}
         {usage.costUsd != null && (
           <span className="text-conn-amber-text font-medium tabular-nums animate-cost-glow">

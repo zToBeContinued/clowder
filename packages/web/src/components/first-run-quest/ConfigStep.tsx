@@ -231,8 +231,7 @@ export function ConfigStep({ client, clientId, onComplete }: ConfigStepProps) {
         </p>
 
         <div className="mb-3 rounded-lg border border-conn-amber-ring bg-conn-amber-bg p-4 text-sm text-conn-amber-text">
-          认证由本机 {cliLabel} CLI 管理。安全检查仅执行 <code>{versionCmd}</code>，不会启动
-          chat 或发送模型请求。
+          认证由本机 {cliLabel} CLI 管理。安全检查仅执行 <code>{versionCmd}</code>，不会启动 chat 或发送模型请求。
           {isCursor
             ? '模型可选（cursor 的思考强度已编码在模型名后缀里，如 -high/-xhigh/-max）。'
             : '模型与思考强度可选，留空则用 Kiro CLI 默认。'}

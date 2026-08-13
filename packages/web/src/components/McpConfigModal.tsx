@@ -144,7 +144,8 @@ export function McpConfigModal({
             )}
             {!readOnly && isHttpEdit && (
               <p className="text-xs text-cafe-secondary">
-                HTTP Stream 服务类型已固定；如需切换 MCP 服务器类型，请先卸载当前配置。Clowder 的开关和审计是安全网，不是远端权限沙箱。
+                HTTP Stream 服务类型已固定；如需切换 MCP 服务器类型，请先卸载当前配置。Clowder
+                的开关和审计是安全网，不是远端权限沙箱。
               </p>
             )}
             {readOnly && (

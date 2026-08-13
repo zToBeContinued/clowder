@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -56,7 +56,10 @@ async function nextNumberFromFiles(dir: string, pattern: RegExp): Promise<number
   return max + 1;
 }
 
-export async function createKnowledgeDoc(input: CreateKnowledgeInput, root = findMonorepoRoot()): Promise<CreateKnowledgeResult> {
+export async function createKnowledgeDoc(
+  input: CreateKnowledgeInput,
+  root = findMonorepoRoot(),
+): Promise<CreateKnowledgeResult> {
   const created = new Date().toISOString().slice(0, 10);
   const sourceLine = input.sourceThreadId ? `source_refs: [${yamlString(`thread:${input.sourceThreadId}`)}]\n` : '';
 

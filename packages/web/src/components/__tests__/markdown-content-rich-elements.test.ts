@@ -1,8 +1,8 @@
+import type { TaskItem } from '@cat-cafe/shared';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { MarkdownContent } from '@/components/MarkdownContent';
-import type { TaskItem } from '@cat-cafe/shared';
 import { useTaskStore } from '@/stores/taskStore';
 
 Object.assign(globalThis as Record<string, unknown>, { React });

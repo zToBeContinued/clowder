@@ -39,11 +39,7 @@ function createFormState(): ProfileFormState {
     id: '',
     displayName: '',
     command: '',
-    envRows: [
-      envRow('HTTP_PROXY'),
-      envRow('HTTPS_PROXY'),
-      envRow('NO_PROXY', 'localhost,127.0.0.1,::1'),
-    ],
+    envRows: [envRow('HTTP_PROXY'), envRow('HTTPS_PROXY'), envRow('NO_PROXY', 'localhost,127.0.0.1,::1')],
   };
 }
 
@@ -119,9 +115,7 @@ export function CliRuntimeProfilesContent() {
     }
 
     const envSet = Object.fromEntries(
-      activeRows
-        .filter((row) => row.value.length > 0)
-        .map((row) => [row.key.trim(), row.value]),
+      activeRows.filter((row) => row.value.length > 0).map((row) => [row.key.trim(), row.value]),
     ) as Record<string, string>;
     const envRemove = form.envRows.filter((row) => row.existing && row.remove).map((row) => row.key.trim());
     const command = form.command.trim();
@@ -129,9 +123,7 @@ export function CliRuntimeProfilesContent() {
     const payload: Record<string, unknown> = editing
       ? {
           displayName,
-          ...(command !== (form.original?.command ?? '')
-            ? { command: command.length > 0 ? command : null }
-            : {}),
+          ...(command !== (form.original?.command ?? '') ? { command: command.length > 0 ? command : null } : {}),
           ...(Object.keys(envSet).length > 0 ? { envSet } : {}),
           ...(envRemove.length > 0 ? { envRemove } : {}),
         }
@@ -145,10 +137,14 @@ export function CliRuntimeProfilesContent() {
     setBusyId(id);
     setError(null);
     try {
-      await mutate(editing ? `/api/cli-runtime-profiles/${encodeURIComponent(id)}` : '/api/cli-runtime-profiles', {
-        method: editing ? 'PATCH' : 'POST',
-        body: JSON.stringify(payload),
-      }, editing ? 'CLI 运行环境保存失败' : 'CLI 运行环境创建失败');
+      await mutate(
+        editing ? `/api/cli-runtime-profiles/${encodeURIComponent(id)}` : '/api/cli-runtime-profiles',
+        {
+          method: editing ? 'PATCH' : 'POST',
+          body: JSON.stringify(payload),
+        },
+        editing ? 'CLI 运行环境保存失败' : 'CLI 运行环境创建失败',
+      );
       setForm(null);
       await fetchProfiles();
       window.dispatchEvent(new CustomEvent(CLI_RUNTIME_PROFILES_CHANGED_EVENT));
@@ -277,13 +273,14 @@ export function CliRuntimeProfilesContent() {
                     value={row.key}
                     disabled={row.existing}
                     onChange={(event) =>
-                      setForm((current) =>
-                        current && {
-                          ...current,
-                          envRows: current.envRows.map((candidate) =>
-                            candidate.rowId === row.rowId ? { ...candidate, key: event.target.value } : candidate,
-                          ),
-                        },
+                      setForm(
+                        (current) =>
+                          current && {
+                            ...current,
+                            envRows: current.envRows.map((candidate) =>
+                              candidate.rowId === row.rowId ? { ...candidate, key: event.target.value } : candidate,
+                            ),
+                          },
                       )
                     }
                     className="h-9 w-full rounded-lg bg-[var(--console-field-bg)] px-3 font-mono text-sm text-cafe outline-none disabled:opacity-70"
@@ -300,19 +297,22 @@ export function CliRuntimeProfilesContent() {
                     value={row.value}
                     disabled={row.remove}
                     onChange={(event) =>
-                      setForm((current) =>
-                        current && {
-                          ...current,
-                          envRows: current.envRows.map((candidate) =>
-                            candidate.rowId === row.rowId ? { ...candidate, value: event.target.value } : candidate,
-                          ),
-                        },
+                      setForm(
+                        (current) =>
+                          current && {
+                            ...current,
+                            envRows: current.envRows.map((candidate) =>
+                              candidate.rowId === row.rowId ? { ...candidate, value: event.target.value } : candidate,
+                            ),
+                          },
                       )
                     }
                     className="h-9 w-full rounded-lg bg-[var(--console-field-bg)] px-3 font-mono text-sm text-cafe outline-none disabled:opacity-50"
                     placeholder={row.existing ? '••••••（已设置）' : '输入变量值'}
                   />
-                  {row.existing ? <span className="block text-[11px] text-conn-green-text">已设置（值不回显）</span> : null}
+                  {row.existing ? (
+                    <span className="block text-[11px] text-conn-green-text">已设置（值不回显）</span>
+                  ) : null}
                 </label>
                 <button
                   type="button"
@@ -321,7 +321,10 @@ export function CliRuntimeProfilesContent() {
                     setForm((current) => {
                       if (!current) return current;
                       if (!row.existing) {
-                        return { ...current, envRows: current.envRows.filter((candidate) => candidate.rowId !== row.rowId) };
+                        return {
+                          ...current,
+                          envRows: current.envRows.filter((candidate) => candidate.rowId !== row.rowId),
+                        };
                       }
                       return {
                         ...current,
@@ -341,9 +344,7 @@ export function CliRuntimeProfilesContent() {
             ))}
             <button
               type="button"
-              onClick={() =>
-                setForm((current) => current && { ...current, envRows: [...current.envRows, envRow('')] })
-              }
+              onClick={() => setForm((current) => current && { ...current, envRows: [...current.envRows, envRow('')] })}
               className="rounded-lg px-3 py-2 text-xs font-semibold text-[var(--cafe-accent)] hover:bg-[var(--console-hover-bg)]"
             >
               + 添加环境变量
@@ -374,7 +375,11 @@ export function CliRuntimeProfilesContent() {
         {(data?.profiles ?? []).map((profile) => {
           const keys = getCliRuntimeProfileEnvKeys(profile);
           return (
-            <article key={profile.id} role="listitem" className="rounded-[20px] bg-[var(--console-card-bg)] p-4 shadow-[var(--console-shadow-soft)]">
+            <article
+              key={profile.id}
+              role="listitem"
+              className="rounded-[20px] bg-[var(--console-card-bg)] p-4 shadow-[var(--console-shadow-soft)]"
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-sm font-extrabold text-cafe">{profile.displayName}</h3>
@@ -385,7 +390,10 @@ export function CliRuntimeProfilesContent() {
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {keys.length > 0 ? (
                       keys.map((key) => (
-                        <span key={key} className="rounded-full bg-[var(--console-card-soft-bg)] px-2 py-1 font-mono text-[11px] text-cafe-secondary">
+                        <span
+                          key={key}
+                          className="rounded-full bg-[var(--console-card-soft-bg)] px-2 py-1 font-mono text-[11px] text-cafe-secondary"
+                        >
                           {key} · 已设置
                         </span>
                       ))

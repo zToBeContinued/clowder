@@ -166,10 +166,7 @@ export async function buildUnixStatus({
   }
 
   const { apiPort, webPort } = resolveStatusPorts({ projectRoot, env });
-  const [apiRunning, webRunning] = await Promise.all([
-    checkPort({ port: apiPort }),
-    checkPort({ port: webPort }),
-  ]);
+  const [apiRunning, webRunning] = await Promise.all([checkPort({ port: apiPort }), checkPort({ port: webPort })]);
   const ready = apiRunning ? await checkReady({ apiPort }) : { ok: false, detail: 'port closed' };
 
   lines.push(`  api-${apiPort}: ${apiRunning ? 'running' : 'not running'} (${ready.detail})`);

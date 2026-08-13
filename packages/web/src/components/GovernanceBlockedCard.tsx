@@ -91,8 +91,8 @@ export function GovernanceBlockedCard({ projectPath, reasonKind, invocationId }:
             <div className="mt-3">
               {isPermissionDenied ? (
                 <div className="text-xs text-conn-amber-text leading-relaxed">
-                  处理方式：打开「系统设置 → 隐私与安全性 → 完全磁盘访问权限」，给运行 Clowder 的终端、
-                  PM2/Node 所在 App 或 Clowder 桌面 App 授权；然后完全重启 Clowder 再重试。
+                  处理方式：打开「系统设置 → 隐私与安全性 → 完全磁盘访问权限」，给运行 Clowder 的终端、 PM2/Node 所在
+                  App 或 Clowder 桌面 App 授权；然后完全重启 Clowder 再重试。
                 </div>
               ) : state === 'idle' ? (
                 <button

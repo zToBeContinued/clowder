@@ -153,8 +153,11 @@ export function ChatInputMenus({
                   <div className="min-w-0 flex-1">
                     <div className="flex min-w-0 items-center gap-1.5">
                       <span
+                        role="img"
                         className="h-2 w-2 flex-shrink-0 rounded-full"
-                        style={{ backgroundColor: isWorking ? '#eab308' : (opt.color ?? 'var(--console-status-connected)') }}
+                        style={{
+                          backgroundColor: isWorking ? '#eab308' : (opt.color ?? 'var(--console-status-connected)'),
+                        }}
                         aria-label={isWorking ? '工作中' : '在线'}
                       />
                       <span

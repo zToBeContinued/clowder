@@ -500,110 +500,116 @@ export function useChatHistory(threadId: string) {
         const data = await res.json();
         const historyMsgs = (data.messages ?? [])
           .map(
-          (m: {
-            id: string;
-            threadId?: string;
-            type: string;
-            catId?: string;
-            content: string;
-            contentBlocks?: unknown[];
-            toolEvents?: unknown[];
-            metadata?: ChatMessageData['metadata'];
-            origin?: 'stream' | 'callback' | 'briefing' | 'progress';
-            thinking?: string;
-            extra?: {
-              rich?: { v: number; blocks: unknown[] };
-              crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
-              stream?: { invocationId?: string };
-              scheduler?: SchedulerMessageExtra['scheduler'];
-              systemKind?: 'a2a_routing' | 'progress_heartbeat';
-              agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
-              slockThread?: {
-                branchThreadId: string;
-                replyCount: number;
-                latestReply?: { id: string; catId: string | null; content: string; timestamp: number };
+            (m: {
+              id: string;
+              threadId?: string;
+              type: string;
+              catId?: string;
+              content: string;
+              contentBlocks?: unknown[];
+              toolEvents?: unknown[];
+              metadata?: ChatMessageData['metadata'];
+              origin?: 'stream' | 'callback' | 'briefing' | 'progress';
+              thinking?: string;
+              extra?: {
+                rich?: { v: number; blocks: unknown[] };
+                crossPost?: { sourceThreadId: string; sourceInvocationId?: string };
+                stream?: { invocationId?: string };
+                scheduler?: SchedulerMessageExtra['scheduler'];
+                systemKind?: 'a2a_routing' | 'progress_heartbeat';
+                agentCommunication?: { kind: 'ack' | 'heartbeat'; invocationId?: string };
+                slockThread?: {
+                  branchThreadId: string;
+                  replyCount: number;
+                  latestReply?: { id: string; catId: string | null; content: string; timestamp: number };
+                };
               };
-            };
-            timestamp: number;
-            editedAt?: number;
-            summary?: { id: string; topic: string; conclusions: string[]; openQuestions: string[]; createdBy: string };
-            visibility?: 'public' | 'whisper';
-            whisperTo?: string[];
-            revealedAt?: number;
-            isDraft?: boolean;
-            source?: ChatMessageData['source'];
-            mentionsUser?: boolean;
-            deliveredAt?: number;
-            replyTo?: string;
-            replyPreview?: ReplyPreview;
-          }) => {
-            if (m.source) {
-              const runtimeEvent = classifyRuntimeSystemEvent({
-                id: m.id,
-                content: m.content,
-                source: m.source,
-                threadId: m.threadId ?? fetchForThread,
-                timestamp: m.timestamp,
-              });
-              if (runtimeEvent) {
-                useRuntimeEventsStore.getState().addEvent(runtimeEvent);
-                return null;
+              timestamp: number;
+              editedAt?: number;
+              summary?: {
+                id: string;
+                topic: string;
+                conclusions: string[];
+                openQuestions: string[];
+                createdBy: string;
+              };
+              visibility?: 'public' | 'whisper';
+              whisperTo?: string[];
+              revealedAt?: number;
+              isDraft?: boolean;
+              source?: ChatMessageData['source'];
+              mentionsUser?: boolean;
+              deliveredAt?: number;
+              replyTo?: string;
+              replyPreview?: ReplyPreview;
+            }) => {
+              if (m.source) {
+                const runtimeEvent = classifyRuntimeSystemEvent({
+                  id: m.id,
+                  content: m.content,
+                  source: m.source,
+                  threadId: m.threadId ?? fetchForThread,
+                  timestamp: m.timestamp,
+                });
+                if (runtimeEvent) {
+                  useRuntimeEventsStore.getState().addEvent(runtimeEvent);
+                  return null;
+                }
               }
-            }
-            return {
-              id: m.id,
-              ...(m.threadId ? { threadId: m.threadId } : {}),
-              type: (m.type === 'system'
-                ? 'system'
-                : m.summary
-                  ? 'summary'
-                  : m.source
-                    ? 'connector'
-                    : m.catId
-                      ? 'assistant'
-                      : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
-              catId: m.catId,
-              content: m.content,
-              ...(m.editedAt ? { editedAt: m.editedAt } : {}),
-              ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
-              ...(m.toolEvents ? { toolEvents: m.toolEvents as import('../stores/chat-types').ToolEvent[] } : {}),
-              ...(m.metadata ? { metadata: m.metadata } : {}),
-              ...(m.origin ? { origin: m.origin } : {}),
-              ...(m.thinking ? { thinking: m.thinking } : {}),
-              ...(m.extra?.rich ||
-              m.extra?.crossPost ||
-              m.extra?.stream ||
-              m.extra?.scheduler ||
-              m.extra?.systemKind ||
-              m.extra?.agentCommunication ||
-              m.extra?.slockThread
-                ? {
-                    extra: {
-                      ...(m.extra.rich ? { rich: m.extra.rich } : {}),
-                      ...(m.extra.crossPost ? { crossPost: m.extra.crossPost } : {}),
-                      ...(m.extra.stream ? { stream: m.extra.stream } : {}),
-                      ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
-                      ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
-                      ...(m.extra.agentCommunication ? { agentCommunication: m.extra.agentCommunication } : {}),
-                      ...(m.extra.slockThread ? { slockThread: m.extra.slockThread } : {}),
-                    },
-                  }
-                : {}),
-              ...(m.summary ? { summary: m.summary } : {}),
-              ...(m.visibility ? { visibility: m.visibility } : {}),
-              ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
-              ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
-              ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
-              ...(m.source ? { source: m.source } : {}),
-              ...(m.mentionsUser ? { mentionsUser: true } : {}),
-              ...(m.replyTo ? { replyTo: m.replyTo } : {}),
-              ...(m.replyPreview ? { replyPreview: m.replyPreview } : {}),
-              // #80: Restore streaming indicator for draft messages recovered from Redis
-              ...(m.isDraft ? { isStreaming: true } : {}),
-              timestamp: m.timestamp,
-            } as ChatMessageData;
-          },
-        )
+              return {
+                id: m.id,
+                ...(m.threadId ? { threadId: m.threadId } : {}),
+                type: (m.type === 'system'
+                  ? 'system'
+                  : m.summary
+                    ? 'summary'
+                    : m.source
+                      ? 'connector'
+                      : m.catId
+                        ? 'assistant'
+                        : 'user') as 'user' | 'assistant' | 'system' | 'summary' | 'connector',
+                catId: m.catId,
+                content: m.content,
+                ...(m.editedAt ? { editedAt: m.editedAt } : {}),
+                ...(m.contentBlocks ? { contentBlocks: m.contentBlocks } : {}),
+                ...(m.toolEvents ? { toolEvents: m.toolEvents as import('../stores/chat-types').ToolEvent[] } : {}),
+                ...(m.metadata ? { metadata: m.metadata } : {}),
+                ...(m.origin ? { origin: m.origin } : {}),
+                ...(m.thinking ? { thinking: m.thinking } : {}),
+                ...(m.extra?.rich ||
+                m.extra?.crossPost ||
+                m.extra?.stream ||
+                m.extra?.scheduler ||
+                m.extra?.systemKind ||
+                m.extra?.agentCommunication ||
+                m.extra?.slockThread
+                  ? {
+                      extra: {
+                        ...(m.extra.rich ? { rich: m.extra.rich } : {}),
+                        ...(m.extra.crossPost ? { crossPost: m.extra.crossPost } : {}),
+                        ...(m.extra.stream ? { stream: m.extra.stream } : {}),
+                        ...(m.extra.scheduler ? { scheduler: m.extra.scheduler } : {}),
+                        ...(m.extra.systemKind ? { systemKind: m.extra.systemKind } : {}),
+                        ...(m.extra.agentCommunication ? { agentCommunication: m.extra.agentCommunication } : {}),
+                        ...(m.extra.slockThread ? { slockThread: m.extra.slockThread } : {}),
+                      },
+                    }
+                  : {}),
+                ...(m.summary ? { summary: m.summary } : {}),
+                ...(m.visibility ? { visibility: m.visibility } : {}),
+                ...(m.whisperTo ? { whisperTo: m.whisperTo } : {}),
+                ...(m.revealedAt ? { revealedAt: m.revealedAt } : {}),
+                ...(m.deliveredAt ? { deliveredAt: m.deliveredAt } : {}),
+                ...(m.source ? { source: m.source } : {}),
+                ...(m.mentionsUser ? { mentionsUser: true } : {}),
+                ...(m.replyTo ? { replyTo: m.replyTo } : {}),
+                ...(m.replyPreview ? { replyPreview: m.replyPreview } : {}),
+                // #80: Restore streaming indicator for draft messages recovered from Redis
+                ...(m.isDraft ? { isStreaming: true } : {}),
+                timestamp: m.timestamp,
+              } as ChatMessageData;
+            },
+          )
           .filter((m: ChatMessageData | null): m is ChatMessageData => Boolean(m));
         if (options?.replace) {
           // Replace mode now does a non-destructive merge first, then resets the thread

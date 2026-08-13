@@ -155,12 +155,6 @@ export type {
   ProbeState,
   SkillHealthSummary,
 } from './capability.js';
-// Machine-local CLI runtime profile API types (environment values are never exposed)
-export type {
-  CliRuntimeProfileView,
-  CreateCliRuntimeProfileInput,
-  PatchCliRuntimeProfileInput,
-} from './cli-runtime-profile.js';
 // Cat types
 export type {
   CatCapabilityContract,
@@ -198,6 +192,12 @@ export type {
 } from './cat-breed.js';
 // F182: Cat routing error types
 export type { CatAlternative, CatRoutingError } from './cat-routing.js';
+// Machine-local CLI runtime profile API types (environment values are never exposed)
+export type {
+  CliRuntimeProfileView,
+  CreateCliRuntimeProfileInput,
+  PatchCliRuntimeProfileInput,
+} from './cli-runtime-profile.js';
 export type { BuiltinAccountClient } from './client-routing.js';
 export {
   builtinAccountFamilyForClient,

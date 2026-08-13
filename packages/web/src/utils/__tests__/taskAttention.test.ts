@@ -40,7 +40,10 @@ describe('taskAttention', () => {
   });
 
   it('formats toast for review, blocked, and failed tasks', () => {
-    expect(getTaskAttentionToast(task({ status: 'in_review' }))).toMatchObject({ type: 'success', title: '任务待验收' });
+    expect(getTaskAttentionToast(task({ status: 'in_review' }))).toMatchObject({
+      type: 'success',
+      title: '任务待验收',
+    });
     expect(getTaskAttentionToast(task({ status: 'blocked' }))).toMatchObject({ type: 'error', title: '任务阻塞' });
     expect(getTaskAttentionToast(task({ status: 'failed' }))).toMatchObject({ type: 'error', title: '任务失败' });
     expect(getTaskAttentionToast(task({ status: 'doing' }))).toBeNull();

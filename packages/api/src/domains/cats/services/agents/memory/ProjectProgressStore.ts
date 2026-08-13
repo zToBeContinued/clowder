@@ -119,7 +119,12 @@ export async function readProjectHandoffIndexesForBootstrap(
   if (projectIds.length === 0) return null;
   const records = await Promise.all(
     projectIds.map((id) =>
-      readProjectFile(id, getProjectHandoffIndexPath(id, projectRoot), PROJECT_BOOTSTRAP_HANDOFF_INDEX_MAX_CHARS, '交接索引'),
+      readProjectFile(
+        id,
+        getProjectHandoffIndexPath(id, projectRoot),
+        PROJECT_BOOTSTRAP_HANDOFF_INDEX_MAX_CHARS,
+        '交接索引',
+      ),
     ),
   );
   const blocks = records
@@ -241,7 +246,10 @@ export interface ContextHandoffWriteResult {
 }
 
 function singleLine(value: string | undefined): string {
-  return (value ?? '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return (value ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function multilineValue(value: string | undefined, fallback: string): string {
@@ -269,7 +277,9 @@ function formatHealth(health: ContextHealth | undefined): string {
   return `${pct}% (${health.usedTokens}/${health.windowTokens}, ${health.source})`;
 }
 
-function formatContextHandoffIndexEntry(entry: Required<Pick<ContextHandoffEntry, 'timestamp'>> & ContextHandoffEntry): string {
+function formatContextHandoffIndexEntry(
+  entry: Required<Pick<ContextHandoffEntry, 'timestamp'>> & ContextHandoffEntry,
+): string {
   const what = multilineValue(
     entry.what,
     `Session ${entry.fromSessionId} reached context handoff boundary for @${entry.catId} in thread ${entry.threadId}.`,
@@ -314,7 +324,9 @@ function formatContextHandoffIndexEntry(entry: Required<Pick<ContextHandoffEntry
   ].join('\n');
 }
 
-function formatContextHandoffLogEntry(entry: Required<Pick<ContextHandoffEntry, 'timestamp'>> & ContextHandoffEntry): string {
+function formatContextHandoffLogEntry(
+  entry: Required<Pick<ContextHandoffEntry, 'timestamp'>> & ContextHandoffEntry,
+): string {
   return [
     '',
     '---',

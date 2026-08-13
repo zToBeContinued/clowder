@@ -3,8 +3,8 @@ import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
-import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -65,9 +65,7 @@ test('clowder message progress posts a non-terminal callback payload', async () 
     assert.equal(capturedAuthorization, 'Bearer cli-global-secret');
     assert.match(stdout, /Progress sent to thread-cli: progress-1/);
   } finally {
-    await new Promise((resolveClose, reject) =>
-      server.close((error) => (error ? reject(error) : resolveClose())),
-    );
+    await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())));
   }
 });
 
@@ -107,8 +105,6 @@ test('clowder message progress exits non-zero when the invocation is stale', asy
       /superseded/,
     );
   } finally {
-    await new Promise((resolveClose, reject) =>
-      server.close((error) => (error ? reject(error) : resolveClose())),
-    );
+    await new Promise((resolveClose, reject) => server.close((error) => (error ? reject(error) : resolveClose())));
   }
 });

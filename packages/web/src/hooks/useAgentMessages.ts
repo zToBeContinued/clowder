@@ -14,8 +14,8 @@ import type {
   ChatMessage,
   ChatMessageMetadata,
   ChatMessagePatch,
-  RuntimeWarning,
   RichBlock,
+  RuntimeWarning,
   TaskProgressItem,
   ThreadState,
   TokenUsage,
@@ -246,8 +246,12 @@ function parseContextBudget(value: unknown): CatInvocationInfo['contextBudget'] 
     mode: parsed.mode === 'parallel' ? 'parallel' : 'serial',
     estimatedTokens: Number(parsed.estimatedTokens) || 0,
     historyMessages: Number(parsed.historyMessages) || 0,
-    loadedBlocks: Array.isArray(parsed.loadedBlocks) ? parsed.loadedBlocks.filter((item): item is string => typeof item === 'string') : [],
-    skippedBlocks: Array.isArray(parsed.skippedBlocks) ? parsed.skippedBlocks.filter((item): item is string => typeof item === 'string') : [],
+    loadedBlocks: Array.isArray(parsed.loadedBlocks)
+      ? parsed.loadedBlocks.filter((item): item is string => typeof item === 'string')
+      : [],
+    skippedBlocks: Array.isArray(parsed.skippedBlocks)
+      ? parsed.skippedBlocks.filter((item): item is string => typeof item === 'string')
+      : [],
     governanceTier: parsed.governanceTier === 'operational' ? 'operational' : 'core',
     governanceEstimatedTokens: Number(parsed.governanceEstimatedTokens) || 0,
     governanceSourceInjected: Boolean(parsed.governanceSourceInjected),
@@ -494,307 +498,155 @@ export function consumeBackgroundSystemInfo(
     if (runtimeWarning) {
       const targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
       if (targetId) {
-        options.store.appendThreadMessageRuntimeWarning(msg.threadId, targetId, makeRuntimeWarning(runtimeWarning, msg));
+        options.store.appendThreadMessageRuntimeWarning(
+          msg.threadId,
+          targetId,
+          makeRuntimeWarning(runtimeWarning, msg),
+        );
       }
       consumed = true;
     } else {
-    const visible = formatVisibleSystemInfo(parsed);
-    if (visible) {
-      sysContent = visible.content;
-      sysVariant = visible.variant;
-    } else if (isSilentSystemInfo(parsed)) {
-      consumed = true;
-    } else if (parsed?.type === 'invocation_created') {
-      const targetCatId = parsed.catId ?? msg.catId;
-      // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper invocationId
-      // is the user-turn parent; parsed JSON content invocationId is inner auth child.
-      // Prefer outer to keep bubble identity stable across stream/callback/done events
-      // (otherwise active path gets `msg-outer-cat` and bg path gets `msg-inner-cat` →
-      // dup bubble). thread_mogj6kvwp3l80x56 case.
-      const invocationId =
-        msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
-      // #586: Clear stale finalizedBgRef so previous invocation's finalized bubble
-      // can't be overwritten by the next invocation's callback.
-      const bgStreamKey = `${msg.threadId}::${targetCatId}`;
-      options.finalizedBgRefs.delete(bgStreamKey);
-      if (targetCatId && invocationId) {
+      const visible = formatVisibleSystemInfo(parsed);
+      if (visible) {
+        sysContent = visible.content;
+        sysVariant = visible.variant;
+      } else if (isSilentSystemInfo(parsed)) {
+        consumed = true;
+      } else if (parsed?.type === 'invocation_created') {
+        const targetCatId = parsed.catId ?? msg.catId;
+        // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper invocationId
+        // is the user-turn parent; parsed JSON content invocationId is inner auth child.
+        // Prefer outer to keep bubble identity stable across stream/callback/done events
+        // (otherwise active path gets `msg-outer-cat` and bg path gets `msg-inner-cat` →
+        // dup bubble). thread_mogj6kvwp3l80x56 case.
+        const invocationId =
+          msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
+        // #586: Clear stale finalizedBgRef so previous invocation's finalized bubble
+        // can't be overwritten by the next invocation's callback.
+        const bgStreamKey = `${msg.threadId}::${targetCatId}`;
+        options.finalizedBgRefs.delete(bgStreamKey);
+        if (targetCatId && invocationId) {
+          options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
+            invocationId,
+            toolPolicy:
+              parsed.toolPolicy === 'minimal' || parsed.toolPolicy === 'standard' || parsed.toolPolicy === 'full'
+                ? parsed.toolPolicy
+                : undefined,
+            toolPolicySource:
+              parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
+                ? parsed.toolPolicySource
+                : undefined,
+            contextBudget: parseContextBudget(parsed.contextBudget),
+            startedAt: Date.now(),
+            taskProgress: {
+              tasks: [],
+              lastUpdate: Date.now(),
+              snapshotStatus: 'running',
+              lastInvocationId: invocationId,
+            },
+          });
+          const targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
+          if (targetId) {
+            options.store.setThreadMessageStreamInvocation(msg.threadId, targetId, invocationId);
+          }
+          consumed = true;
+        }
+      } else if (parsed?.type === 'invocation_metrics') {
+        if (parsed.kind === 'session_started') {
+          // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first to keep
+          // catInvocations[catId].invocationId aligned with bubble identity.
+          const sessionInvocationId =
+            msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
+          options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
+            sessionId: parsed.sessionId,
+            invocationId: sessionInvocationId,
+            startedAt: Date.now(),
+            taskProgress: { tasks: [], lastUpdate: 0 },
+            ...(parsed.sessionSeq !== undefined ? { sessionSeq: parsed.sessionSeq, sessionSealed: false } : {}),
+          });
+        } else if (parsed.kind === 'invocation_complete') {
+          options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
+            durationMs: parsed.durationMs,
+            sessionId: parsed.sessionId,
+          });
+        }
+        consumed = true;
+      } else if (parsed?.type === 'invocation_usage') {
+        options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
+          usage: parsed.usage,
+        });
+        if (existingRef?.id) {
+          options.store.setThreadMessageUsage(msg.threadId, existingRef.id, parsed.usage);
+        }
+        consumed = true;
+      } else if (parsed?.type === 'context_briefing') {
+        const storedMessage = parsed.storedMessage as
+          | { id: string; content: string; origin: string; timestamp: number; extra?: Record<string, unknown> }
+          | undefined;
+        if (storedMessage?.id) {
+          options.store.addMessageToThread(msg.threadId, {
+            id: storedMessage.id,
+            type: 'system',
+            content: storedMessage.content ?? '',
+            origin: (storedMessage.origin as 'briefing') ?? 'briefing',
+            timestamp: storedMessage.timestamp ?? Date.now(),
+            ...(storedMessage.extra ? { extra: storedMessage.extra } : {}),
+          });
+          consumed = true;
+        }
+      } else if (parsed?.type === 'context_health') {
+        const targetCatId = parsed.catId ?? msg.catId;
         options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
-          invocationId,
-          toolPolicy:
-            parsed.toolPolicy === 'minimal' || parsed.toolPolicy === 'standard' || parsed.toolPolicy === 'full'
-              ? parsed.toolPolicy
-              : undefined,
-          toolPolicySource:
-            parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
-              ? parsed.toolPolicySource
-              : undefined,
-          contextBudget: parseContextBudget(parsed.contextBudget),
-          startedAt: Date.now(),
+          contextHealth: parsed.health,
+        });
+        consumed = true;
+      } else if (parsed?.type === 'rate_limit') {
+        const targetCatId = parsed.catId ?? msg.catId;
+        options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
+          rateLimit: {
+            ...(typeof parsed.utilization === 'number' ? { utilization: parsed.utilization } : {}),
+            ...(typeof parsed.resetsAt === 'string' ? { resetsAt: parsed.resetsAt } : {}),
+          },
+        });
+        consumed = true;
+      } else if (parsed?.type === 'compact_boundary') {
+        const targetCatId = parsed.catId ?? msg.catId;
+        options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
+          compactBoundary: {
+            ...(typeof parsed.preTokens === 'number' ? { preTokens: parsed.preTokens } : {}),
+          },
+        });
+        consumed = true;
+      } else if (parsed?.type === 'task_progress') {
+        const targetCatId = parsed.catId ?? msg.catId;
+        // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first so
+        // taskProgress.lastInvocationId stays consistent with bubble identity.
+        const currentInvocationId =
+          msg.invocationId ??
+          (typeof parsed.invocationId === 'string'
+            ? parsed.invocationId
+            : options.store.getThreadState(msg.threadId).catInvocations[targetCatId]?.invocationId);
+        const tasks = (parsed.tasks ?? []) as TaskProgressItem[];
+        options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
           taskProgress: {
-            tasks: [],
+            tasks,
             lastUpdate: Date.now(),
             snapshotStatus: 'running',
-            lastInvocationId: invocationId,
+            ...(currentInvocationId ? { lastInvocationId: currentInvocationId } : {}),
           },
         });
-        const targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
-        if (targetId) {
-          options.store.setThreadMessageStreamInvocation(msg.threadId, targetId, invocationId);
-        }
         consumed = true;
-      }
-    } else if (parsed?.type === 'invocation_metrics') {
-      if (parsed.kind === 'session_started') {
-        // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first to keep
-        // catInvocations[catId].invocationId aligned with bubble identity.
-        const sessionInvocationId =
-          msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
-        options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
-          sessionId: parsed.sessionId,
-          invocationId: sessionInvocationId,
-          startedAt: Date.now(),
-          taskProgress: { tasks: [], lastUpdate: 0 },
-          ...(parsed.sessionSeq !== undefined ? { sessionSeq: parsed.sessionSeq, sessionSealed: false } : {}),
-        });
-      } else if (parsed.kind === 'invocation_complete') {
-        options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
-          durationMs: parsed.durationMs,
-          sessionId: parsed.sessionId,
-        });
-      }
-      consumed = true;
-    } else if (parsed?.type === 'invocation_usage') {
-      options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
-        usage: parsed.usage,
-      });
-      if (existingRef?.id) {
-        options.store.setThreadMessageUsage(msg.threadId, existingRef.id, parsed.usage);
-      }
-      consumed = true;
-    } else if (parsed?.type === 'context_briefing') {
-      const storedMessage = parsed.storedMessage as
-        | { id: string; content: string; origin: string; timestamp: number; extra?: Record<string, unknown> }
-        | undefined;
-      if (storedMessage?.id) {
-        options.store.addMessageToThread(msg.threadId, {
-          id: storedMessage.id,
-          type: 'system',
-          content: storedMessage.content ?? '',
-          origin: (storedMessage.origin as 'briefing') ?? 'briefing',
-          timestamp: storedMessage.timestamp ?? Date.now(),
-          ...(storedMessage.extra ? { extra: storedMessage.extra } : {}),
-        });
-        consumed = true;
-      }
-    } else if (parsed?.type === 'context_health') {
-      const targetCatId = parsed.catId ?? msg.catId;
-      options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
-        contextHealth: parsed.health,
-      });
-      consumed = true;
-    } else if (parsed?.type === 'rate_limit') {
-      const targetCatId = parsed.catId ?? msg.catId;
-      options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
-        rateLimit: {
-          ...(typeof parsed.utilization === 'number' ? { utilization: parsed.utilization } : {}),
-          ...(typeof parsed.resetsAt === 'string' ? { resetsAt: parsed.resetsAt } : {}),
-        },
-      });
-      consumed = true;
-    } else if (parsed?.type === 'compact_boundary') {
-      const targetCatId = parsed.catId ?? msg.catId;
-      options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
-        compactBoundary: {
-          ...(typeof parsed.preTokens === 'number' ? { preTokens: parsed.preTokens } : {}),
-        },
-      });
-      consumed = true;
-    } else if (parsed?.type === 'task_progress') {
-      const targetCatId = parsed.catId ?? msg.catId;
-      // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first so
-      // taskProgress.lastInvocationId stays consistent with bubble identity.
-      const currentInvocationId =
-        msg.invocationId ??
-        (typeof parsed.invocationId === 'string'
-          ? parsed.invocationId
-          : options.store.getThreadState(msg.threadId).catInvocations[targetCatId]?.invocationId);
-      const tasks = (parsed.tasks ?? []) as TaskProgressItem[];
-      options.store.setThreadCatInvocation(msg.threadId, targetCatId, {
-        taskProgress: {
-          tasks,
-          lastUpdate: Date.now(),
-          snapshotStatus: 'running',
-          ...(currentInvocationId ? { lastInvocationId: currentInvocationId } : {}),
-        },
-      });
-      consumed = true;
-    } else if (parsed?.type === 'web_search') {
-      // F045: web_search tool event (privacy: no query, count only) — render as ToolEvent, not raw JSON
-      const count = typeof parsed.count === 'number' ? parsed.count : 1;
-      let targetId = existingRef?.id;
-      if (!targetId) {
-        targetId = recoverBackgroundStreamingMessage(msg, options);
-      }
-      if (!targetId) {
-        // Create placeholder assistant bubble if needed (mirrors thinking path)
-        const streamKey = `${msg.threadId}::${msg.catId}`;
-        targetId = `bg-web-${Date.now()}-${msg.catId}-${options.nextBgSeq()}`;
-        const invocationId = options.store.getThreadState(msg.threadId).catInvocations[msg.catId]?.invocationId;
-        options.bgStreamRefs.set(streamKey, { id: targetId, threadId: msg.threadId, catId: msg.catId });
-        options.store.addMessageToThread(msg.threadId, {
-          id: targetId,
-          type: 'assistant',
-          catId: msg.catId,
-          content: '',
-          ...(msg.metadata ? { metadata: msg.metadata } : {}),
-          ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
-          timestamp: msg.timestamp,
-          isStreaming: true,
-          origin: 'stream',
-        });
-      }
-
-      options.store.appendToolEventToThread(msg.threadId, targetId, {
-        id: `bg-web-search-${msg.timestamp}-${options.nextBgSeq()}`,
-        type: 'tool_use',
-        label: `${msg.catId} → web_search${count > 1 ? ` x${count}` : ''}`,
-        timestamp: msg.timestamp,
-      });
-      consumed = true;
-    } else if (parsed?.type === 'rich_block') {
-      // F22: Append rich block — mirror foreground path (useAgentMessages.ts)
-      let targetId: string | undefined;
-
-      // Prefer messageId correlation from callback post-message path
-      if (parsed.messageId) {
-        const found = options.store
-          .getThreadState(msg.threadId)
-          .messages.find((m: { id: string }) => m.id === parsed.messageId);
-        if (found) targetId = found.id;
-      }
-
-      // Fallback: most recent callback message from this cat
-      if (!targetId) {
-        const threadMessages = options.store.getThreadState(msg.threadId).messages;
-        for (let i = threadMessages.length - 1; i >= 0; i--) {
-          const m = threadMessages[i];
-          if (m.type !== 'assistant' || m.catId !== msg.catId) continue;
-          if (m.origin === 'stream' && m.isStreaming) break;
-          if (m.origin === 'callback') {
-            targetId = m.id;
-            break;
-          }
-        }
-      }
-
-      // Final fallback: recover active stream bubble or create placeholder
-      if (!targetId) {
-        targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
-      }
-      if (!targetId) {
-        // No existing bubble — create placeholder (mirrors foreground ensureActiveAssistantMessage)
-        const streamKey = `${msg.threadId}::${msg.catId}`;
-        targetId = `bg-rich-${Date.now()}-${msg.catId}-${options.nextBgSeq()}`;
-        const invocationId = options.store.getThreadState(msg.threadId).catInvocations[msg.catId]?.invocationId;
-        options.bgStreamRefs.set(streamKey, { id: targetId, threadId: msg.threadId, catId: msg.catId });
-        options.store.addMessageToThread(msg.threadId, {
-          id: targetId,
-          type: 'assistant',
-          catId: msg.catId,
-          content: '',
-          ...(msg.metadata ? { metadata: msg.metadata } : {}),
-          ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
-          timestamp: msg.timestamp,
-          isStreaming: true,
-          origin: 'stream',
-        });
-      }
-
-      if (parsed.block) {
-        options.store.appendRichBlockToThread(msg.threadId, targetId, parsed.block);
-      }
-      consumed = true;
-    } else if (parsed?.type === 'liveness_warning') {
-      // F118 Phase C: Liveness warning — update cat status + invocation snapshot (mirror foreground)
-      const level = parsed.level as 'alive_but_silent' | 'suspected_stall';
-      options.store.updateThreadCatStatus(msg.threadId, msg.catId, level);
-      options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
-        livenessWarning: {
-          level,
-          state: parsed.state as 'active' | 'busy-silent' | 'idle-silent' | 'dead',
-          silenceDurationMs: parsed.silenceDurationMs as number,
-          cpuTimeMs: typeof parsed.cpuTimeMs === 'number' ? parsed.cpuTimeMs : undefined,
-          processAlive: parsed.processAlive as boolean,
-          receivedAt: Date.now(),
-        },
-      });
-      consumed = true;
-    } else if (parsed?.type === 'timeout_diagnostics') {
-      // F118 AC-C3: Timeout diagnostics — consume silently in background threads.
-      // Foreground uses pendingTimeoutDiagRef (React ref) to attach to error messages;
-      // background threads don't have that mechanism, so we just suppress the raw JSON.
-      consumed = true;
-    } else if (parsed?.type === 'governance_blocked') {
-      const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
-      const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';
-      const invId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
-      const threadMessages = options.store.getThreadState(msg.threadId).messages;
-      const existing = threadMessages.find(
-        (m: { variant?: string; extra?: { governanceBlocked?: { projectPath?: string } } }) =>
-          m.variant === 'governance_blocked' && m.extra?.governanceBlocked?.projectPath === projectPath,
-      );
-      if (existing) {
-        options.store.removeThreadMessage(msg.threadId, existing.id);
-      }
-      options.store.addMessageToThread(msg.threadId, {
-        id: `gov-blocked-${msg.timestamp}-${options.nextBgSeq()}`,
-        type: 'system',
-        variant: 'governance_blocked',
-        content: `项目 ${projectPath} ${reasonKind === 'needs_bootstrap' ? '尚未初始化治理' : '治理状态异常'}`,
-        timestamp: msg.timestamp,
-        extra: {
-          governanceBlocked: {
-            projectPath,
-            reasonKind: reasonKind as 'needs_bootstrap' | 'needs_confirmation' | 'files_missing' | 'permission_denied',
-            invocationId: invId,
-          },
-        },
-      });
-      consumed = true;
-    } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
-      // Internal telemetry — suppress to avoid raw JSON bubbles in background threads
-      consumed = true;
-    } else if (parsed?.type === 'session_seal_requested') {
-      if (parsed.catId) {
-        options.store.setThreadCatInvocation(msg.threadId, parsed.catId, {
-          sessionSeq: parsed.sessionSeq,
-          sessionSealed: true,
-        });
-        const pct = parsed.healthSnapshot?.fillRatio ? Math.round(parsed.healthSnapshot.fillRatio * 100) : '?';
-        sysContent = `${parsed.catId} 的会话 #${parsed.sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`;
-      }
-    } else if (parsed?.type === 'mode_switch_proposal') {
-      const by = parsed.proposedBy ?? '猫猫';
-      sysContent = `${by} 提议切换到 ${parsed.proposedMode} 模式。`;
-    } else if (parsed?.type === 'silent_completion') {
-      // Bugfix: silent-exit — cat ran tools but produced no text response
-      const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
-      sysContent = detail || `${msg.catId} completed without a text response.`;
-    } else if (parsed?.type === 'invocation_preempted') {
-      // Bugfix: silent-exit — invocation was superseded by a newer request
-      sysContent = 'This response was superseded by a newer request.';
-    } else if (parsed?.type === 'thinking') {
-      // F045: Embed thinking into the assistant bubble (matches foreground path)
-      const thinkingText = parsed.text ?? '';
-      if (thinkingText) {
+      } else if (parsed?.type === 'web_search') {
+        // F045: web_search tool event (privacy: no query, count only) — render as ToolEvent, not raw JSON
+        const count = typeof parsed.count === 'number' ? parsed.count : 1;
         let targetId = existingRef?.id;
         if (!targetId) {
           targetId = recoverBackgroundStreamingMessage(msg, options);
         }
         if (!targetId) {
-          // Thinking arrived before any text/tool chunk — create placeholder assistant bubble
+          // Create placeholder assistant bubble if needed (mirrors thinking path)
           const streamKey = `${msg.threadId}::${msg.catId}`;
-          targetId = `bg-think-${Date.now()}-${msg.catId}-${options.nextBgSeq()}`;
+          targetId = `bg-web-${Date.now()}-${msg.catId}-${options.nextBgSeq()}`;
           const invocationId = options.store.getThreadState(msg.threadId).catInvocations[msg.catId]?.invocationId;
           options.bgStreamRefs.set(streamKey, { id: targetId, threadId: msg.threadId, catId: msg.catId });
           options.store.addMessageToThread(msg.threadId, {
@@ -809,17 +661,181 @@ export function consumeBackgroundSystemInfo(
             origin: 'stream',
           });
         }
-        options.store.setThreadMessageThinking(msg.threadId, targetId, thinkingText);
+
+        options.store.appendToolEventToThread(msg.threadId, targetId, {
+          id: `bg-web-search-${msg.timestamp}-${options.nextBgSeq()}`,
+          type: 'tool_use',
+          label: `${msg.catId} → web_search${count > 1 ? ` x${count}` : ''}`,
+          timestamp: msg.timestamp,
+        });
+        consumed = true;
+      } else if (parsed?.type === 'rich_block') {
+        // F22: Append rich block — mirror foreground path (useAgentMessages.ts)
+        let targetId: string | undefined;
+
+        // Prefer messageId correlation from callback post-message path
+        if (parsed.messageId) {
+          const found = options.store
+            .getThreadState(msg.threadId)
+            .messages.find((m: { id: string }) => m.id === parsed.messageId);
+          if (found) targetId = found.id;
+        }
+
+        // Fallback: most recent callback message from this cat
+        if (!targetId) {
+          const threadMessages = options.store.getThreadState(msg.threadId).messages;
+          for (let i = threadMessages.length - 1; i >= 0; i--) {
+            const m = threadMessages[i];
+            if (m.type !== 'assistant' || m.catId !== msg.catId) continue;
+            if (m.origin === 'stream' && m.isStreaming) break;
+            if (m.origin === 'callback') {
+              targetId = m.id;
+              break;
+            }
+          }
+        }
+
+        // Final fallback: recover active stream bubble or create placeholder
+        if (!targetId) {
+          targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
+        }
+        if (!targetId) {
+          // No existing bubble — create placeholder (mirrors foreground ensureActiveAssistantMessage)
+          const streamKey = `${msg.threadId}::${msg.catId}`;
+          targetId = `bg-rich-${Date.now()}-${msg.catId}-${options.nextBgSeq()}`;
+          const invocationId = options.store.getThreadState(msg.threadId).catInvocations[msg.catId]?.invocationId;
+          options.bgStreamRefs.set(streamKey, { id: targetId, threadId: msg.threadId, catId: msg.catId });
+          options.store.addMessageToThread(msg.threadId, {
+            id: targetId,
+            type: 'assistant',
+            catId: msg.catId,
+            content: '',
+            ...(msg.metadata ? { metadata: msg.metadata } : {}),
+            ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
+            timestamp: msg.timestamp,
+            isStreaming: true,
+            origin: 'stream',
+          });
+        }
+
+        if (parsed.block) {
+          options.store.appendRichBlockToThread(msg.threadId, targetId, parsed.block);
+        }
+        consumed = true;
+      } else if (parsed?.type === 'liveness_warning') {
+        // F118 Phase C: Liveness warning — update cat status + invocation snapshot (mirror foreground)
+        const level = parsed.level as 'alive_but_silent' | 'suspected_stall';
+        options.store.updateThreadCatStatus(msg.threadId, msg.catId, level);
+        options.store.setThreadCatInvocation(msg.threadId, msg.catId, {
+          livenessWarning: {
+            level,
+            state: parsed.state as 'active' | 'busy-silent' | 'idle-silent' | 'dead',
+            silenceDurationMs: parsed.silenceDurationMs as number,
+            cpuTimeMs: typeof parsed.cpuTimeMs === 'number' ? parsed.cpuTimeMs : undefined,
+            processAlive: parsed.processAlive as boolean,
+            receivedAt: Date.now(),
+          },
+        });
+        consumed = true;
+      } else if (parsed?.type === 'timeout_diagnostics') {
+        // F118 AC-C3: Timeout diagnostics — consume silently in background threads.
+        // Foreground uses pendingTimeoutDiagRef (React ref) to attach to error messages;
+        // background threads don't have that mechanism, so we just suppress the raw JSON.
+        consumed = true;
+      } else if (parsed?.type === 'governance_blocked') {
+        const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
+        const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';
+        const invId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+        const threadMessages = options.store.getThreadState(msg.threadId).messages;
+        const existing = threadMessages.find(
+          (m: { variant?: string; extra?: { governanceBlocked?: { projectPath?: string } } }) =>
+            m.variant === 'governance_blocked' && m.extra?.governanceBlocked?.projectPath === projectPath,
+        );
+        if (existing) {
+          options.store.removeThreadMessage(msg.threadId, existing.id);
+        }
+        options.store.addMessageToThread(msg.threadId, {
+          id: `gov-blocked-${msg.timestamp}-${options.nextBgSeq()}`,
+          type: 'system',
+          variant: 'governance_blocked',
+          content: `项目 ${projectPath} ${reasonKind === 'needs_bootstrap' ? '尚未初始化治理' : '治理状态异常'}`,
+          timestamp: msg.timestamp,
+          extra: {
+            governanceBlocked: {
+              projectPath,
+              reasonKind: reasonKind as
+                | 'needs_bootstrap'
+                | 'needs_confirmation'
+                | 'files_missing'
+                | 'permission_denied',
+              invocationId: invId,
+            },
+          },
+        });
+        consumed = true;
+      } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
+        // Internal telemetry — suppress to avoid raw JSON bubbles in background threads
+        consumed = true;
+      } else if (parsed?.type === 'session_seal_requested') {
+        if (parsed.catId) {
+          options.store.setThreadCatInvocation(msg.threadId, parsed.catId, {
+            sessionSeq: parsed.sessionSeq,
+            sessionSealed: true,
+          });
+          const pct = parsed.healthSnapshot?.fillRatio ? Math.round(parsed.healthSnapshot.fillRatio * 100) : '?';
+          sysContent = `${parsed.catId} 的会话 #${parsed.sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`;
+        }
+      } else if (parsed?.type === 'mode_switch_proposal') {
+        const by = parsed.proposedBy ?? '猫猫';
+        sysContent = `${by} 提议切换到 ${parsed.proposedMode} 模式。`;
+      } else if (parsed?.type === 'silent_completion') {
+        // Bugfix: silent-exit — cat ran tools but produced no text response
+        const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
+        sysContent = detail || `${msg.catId} completed without a text response.`;
+      } else if (parsed?.type === 'invocation_preempted') {
+        // Bugfix: silent-exit — invocation was superseded by a newer request
+        sysContent = 'This response was superseded by a newer request.';
+      } else if (parsed?.type === 'thinking') {
+        // F045: Embed thinking into the assistant bubble (matches foreground path)
+        const thinkingText = parsed.text ?? '';
+        if (thinkingText) {
+          let targetId = existingRef?.id;
+          if (!targetId) {
+            targetId = recoverBackgroundStreamingMessage(msg, options);
+          }
+          if (!targetId) {
+            // Thinking arrived before any text/tool chunk — create placeholder assistant bubble
+            const streamKey = `${msg.threadId}::${msg.catId}`;
+            targetId = `bg-think-${Date.now()}-${msg.catId}-${options.nextBgSeq()}`;
+            const invocationId = options.store.getThreadState(msg.threadId).catInvocations[msg.catId]?.invocationId;
+            options.bgStreamRefs.set(streamKey, { id: targetId, threadId: msg.threadId, catId: msg.catId });
+            options.store.addMessageToThread(msg.threadId, {
+              id: targetId,
+              type: 'assistant',
+              catId: msg.catId,
+              content: '',
+              ...(msg.metadata ? { metadata: msg.metadata } : {}),
+              ...(invocationId ? { extra: { stream: { invocationId } } } : {}),
+              timestamp: msg.timestamp,
+              isStreaming: true,
+              origin: 'stream',
+            });
+          }
+          options.store.setThreadMessageThinking(msg.threadId, targetId, thinkingText);
+        }
+        consumed = true;
       }
-      consumed = true;
-    }
     }
   } catch {
     const runtimeWarning = classifyRuntimeWarning(sysContent);
     if (runtimeWarning) {
       const targetId = existingRef?.id ?? recoverBackgroundStreamingMessage(msg, options);
       if (targetId) {
-        options.store.appendThreadMessageRuntimeWarning(msg.threadId, targetId, makeRuntimeWarning(runtimeWarning, msg));
+        options.store.appendThreadMessageRuntimeWarning(
+          msg.threadId,
+          targetId,
+          makeRuntimeWarning(runtimeWarning, msg),
+        );
       }
       consumed = true;
     }
@@ -1368,9 +1384,7 @@ export function handleBackgroundAgentMessage(
             content: msg.content,
             origin: 'progress',
             extra: {
-              ...(msg.extra?.agentCommunication
-                ? { agentCommunication: msg.extra.agentCommunication }
-                : {}),
+              ...(msg.extra?.agentCommunication ? { agentCommunication: msg.extra.agentCommunication } : {}),
             },
             ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
             ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
@@ -3143,9 +3157,7 @@ export function useAgentMessages() {
               content: msg.content,
               origin: 'progress',
               extra: {
-                ...(msg.extra?.agentCommunication
-                  ? { agentCommunication: msg.extra.agentCommunication }
-                  : {}),
+                ...(msg.extra?.agentCommunication ? { agentCommunication: msg.extra.agentCommunication } : {}),
               },
               ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
               ...(msg.replyPreview ? { replyPreview: msg.replyPreview } : {}),
@@ -3875,400 +3887,401 @@ export function useAgentMessages() {
             }
             consumed = true;
           } else {
-          const visible = formatVisibleSystemInfo(parsed);
-          if (visible) {
-            sysContent = visible.content;
-            sysVariant = visible.variant;
-          } else if (isSilentSystemInfo(parsed)) {
-            consumed = true;
-          } else if (parsed?.type === 'invocation_created') {
-            // New invocation boundary: clear stale task snapshot + finalized ref for this cat.
-            // #586: Without clearing finalizedStreamRef here, a stale ref from the
-            // previous invocation could cause the next callback to overwrite the old message.
-            const targetCatId = parsed.catId ?? msg.catId;
-            clearFinalized(targetCatId);
-            // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper
-            // invocationId is the user-turn parent; parsed JSON content invocationId
-            // is inner auth child. Prefer outer to keep bubble identity stable across
-            // active vs background streams (otherwise active path gets `msg-outer-cat`
-            // and bg path gets `msg-inner-cat` → dup bubble). thread_mogj6kvwp3l80x56 case.
-            const invocationId =
-              msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
-            if (targetCatId && invocationId) {
+            const visible = formatVisibleSystemInfo(parsed);
+            if (visible) {
+              sysContent = visible.content;
+              sysVariant = visible.variant;
+            } else if (isSilentSystemInfo(parsed)) {
+              consumed = true;
+            } else if (parsed?.type === 'invocation_created') {
+              // New invocation boundary: clear stale task snapshot + finalized ref for this cat.
+              // #586: Without clearing finalizedStreamRef here, a stale ref from the
+              // previous invocation could cause the next callback to overwrite the old message.
+              const targetCatId = parsed.catId ?? msg.catId;
+              clearFinalized(targetCatId);
+              // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper
+              // invocationId is the user-turn parent; parsed JSON content invocationId
+              // is inner auth child. Prefer outer to keep bubble identity stable across
+              // active vs background streams (otherwise active path gets `msg-outer-cat`
+              // and bg path gets `msg-inner-cat` → dup bubble). thread_mogj6kvwp3l80x56 case.
+              const invocationId =
+                msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
+              if (targetCatId && invocationId) {
+                setCatInvocation(targetCatId, {
+                  invocationId,
+                  toolPolicy:
+                    parsed.toolPolicy === 'minimal' || parsed.toolPolicy === 'standard' || parsed.toolPolicy === 'full'
+                      ? parsed.toolPolicy
+                      : undefined,
+                  toolPolicySource:
+                    parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
+                      ? parsed.toolPolicySource
+                      : undefined,
+                  contextBudget: parseContextBudget(parsed.contextBudget),
+                  startedAt: Date.now(),
+                  taskProgress: {
+                    tasks: [],
+                    lastUpdate: Date.now(),
+                    snapshotStatus: 'running',
+                    lastInvocationId: invocationId,
+                  },
+                });
+
+                // F173 hotfix (砚砚 4 件套 #3) — invocation_created is a REBIND BOUNDARY for this cat:
+                // (a) Finalize any same-cat streaming bubble bound to a DIFFERENT invocationId,
+                //     so findRecoverableAssistantMessage no longer picks it up. This prevents
+                //     the ghost-bubble race where a previous invocation's done event was lost
+                //     and its streaming=true bubble got reused by the new invocation's chunks.
+                // (b) Pick the rebind target: prefer activeRef if it points to an unbound
+                //     streaming bubble (the live one we just created); otherwise take the
+                //     MOST RECENT (newest-to-oldest) unbound streaming bubble. Cloud Codex P1
+                //     on PR#1352 — the old oldest-to-newest loop would bind a stale historical
+                //     bubble when reconnect/hydration left multiple unbound ones, leaving the
+                //     live bubble unbound and reintroducing ghost/split behavior.
+                const messagesSnapshot = useChatStore.getState().messages;
+                // Pass (a): finalize any bubble bound to a different invocation.
+                // Cloud P1#5 (PR#1352): also markReplacedInvocation(oldInv) so subsequent
+                // late text/tool events for the closed invocation get suppressed via
+                // shouldSuppressLateStreamChunk (otherwise Loop 1 non-streaming fallback
+                // would resurrect the boundary-finalized bubble via ensureStreaming).
+                const boundaryReplacedInvs = new Set<string>();
+                for (const m of messagesSnapshot) {
+                  if (m.type !== 'assistant' || m.catId !== targetCatId || m.origin !== 'stream') continue;
+                  if (!m.isStreaming) continue;
+                  const boundInv = m.extra?.stream?.invocationId;
+                  if (boundInv && boundInv !== invocationId) {
+                    setStreaming(m.id, false);
+                    boundaryReplacedInvs.add(boundInv);
+                  }
+                }
+                const tidForBoundary = useChatStore.getState().currentThreadId;
+                for (const oldInv of boundaryReplacedInvs) {
+                  markReplacedInvocation(tidForBoundary, targetCatId, oldInv);
+                }
+                // Pass (b): pick rebind target.
+                let unboundPlaceholderId: string | undefined;
+                const activeRefId = getActive(targetCatId)?.id;
+                if (activeRefId) {
+                  const activeMsg = messagesSnapshot.find((m) => m.id === activeRefId);
+                  if (
+                    activeMsg?.type === 'assistant' &&
+                    activeMsg.catId === targetCatId &&
+                    activeMsg.origin === 'stream' &&
+                    activeMsg.isStreaming &&
+                    !activeMsg.extra?.stream?.invocationId
+                  ) {
+                    unboundPlaceholderId = activeMsg.id;
+                  }
+                }
+                if (!unboundPlaceholderId) {
+                  // Newest-to-oldest scan so historical unbound bubbles (e.g. hydrated) lose.
+                  for (let i = messagesSnapshot.length - 1; i >= 0; i -= 1) {
+                    const m = messagesSnapshot[i];
+                    if (!m || m.type !== 'assistant' || m.catId !== targetCatId || m.origin !== 'stream') continue;
+                    if (!m.isStreaming) continue;
+                    if (m.extra?.stream?.invocationId) continue;
+                    unboundPlaceholderId = m.id;
+                    break;
+                  }
+                }
+                if (unboundPlaceholderId) {
+                  const deterministicId = deriveBubbleId(invocationId, targetCatId, () => unboundPlaceholderId!);
+                  if (deterministicId !== unboundPlaceholderId) {
+                    replaceMessageId(unboundPlaceholderId, deterministicId);
+                    setMessageStreamInvocation(deterministicId, invocationId);
+                  } else {
+                    setMessageStreamInvocation(unboundPlaceholderId, invocationId);
+                  }
+                  // Cloud P1#9 (PR#1352): unconditionally point activeRefs at the rebound
+                  // bubble (even when it wasn't the prior activeRef target). Newest→oldest
+                  // scan picked the LIVE bubble for inv-new — leaving activeRefs on a stale
+                  // older bubble would let later invocationless chunks reuse it via
+                  // ensureStreaming and append into the previous invocation's bubble.
+                  const reboundId = deterministicId !== unboundPlaceholderId ? deterministicId : unboundPlaceholderId;
+                  setActive(targetCatId, reboundId);
+                } else {
+                  // Legacy path: no unbound placeholder but there's some existing message we can
+                  // bind invocationId onto (preserves behavior for messages already matching newInv).
+                  const targetId = getOrRecoverActiveAssistantMessageId(targetCatId, undefined, { invocationId });
+                  if (targetId) {
+                    setMessageStreamInvocation(targetId, invocationId);
+                  }
+                }
+
+                maybeMigrateSequentialInvocationOwnership(targetCatId, invocationId);
+                consumed = true;
+              }
+            } else if (parsed?.type === 'invocation_metrics') {
+              // Store metrics silently — don't show as system message
+              if (parsed.kind === 'session_started') {
+                // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first to keep
+                // catInvocations[catId].invocationId aligned with bubble identity.
+                const sessionInvocationId =
+                  msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
+                setCatInvocation(msg.catId, {
+                  sessionId: parsed.sessionId,
+                  invocationId: sessionInvocationId,
+                  startedAt: Date.now(),
+                  taskProgress: { tasks: [], lastUpdate: 0 },
+                  ...(parsed.sessionSeq !== undefined ? { sessionSeq: parsed.sessionSeq, sessionSealed: false } : {}),
+                });
+              } else if (parsed.kind === 'invocation_complete') {
+                setCatInvocation(msg.catId, {
+                  durationMs: parsed.durationMs,
+                  sessionId: parsed.sessionId,
+                });
+              }
+              consumed = true;
+            } else if (parsed?.type === 'invocation_usage') {
+              // F8: Store token usage silently — don't show as system message
+              setCatInvocation(msg.catId, {
+                usage: parsed.usage,
+              });
+              // Also persist usage on the cat's last assistant message (message-scoped)
+              const ref = getActive(msg.catId);
+              if (ref) {
+                setMessageUsage(ref.id, parsed.usage);
+              }
+              consumed = true;
+            } else if (parsed?.type === 'context_briefing') {
+              // F148 Phase E: Insert briefing card into chat store for immediate display
+              const sm = parsed.storedMessage as
+                | { id: string; content: string; origin: string; timestamp: number; extra?: Record<string, unknown> }
+                | undefined;
+              if (sm?.id) {
+                addMessage({
+                  id: sm.id,
+                  type: 'system',
+                  content: sm.content ?? '',
+                  origin: (sm.origin as 'briefing') ?? 'briefing',
+                  timestamp: sm.timestamp ?? Date.now(),
+                  ...(sm.extra ? { extra: sm.extra } : {}),
+                });
+              }
+              consumed = true;
+            } else if (parsed?.type === 'context_health') {
+              // F24: Store context health silently
+              const targetCatId = parsed.catId ?? msg.catId;
+              if (targetCatId) {
+                setCatInvocation(targetCatId, {
+                  contextHealth: parsed.health,
+                });
+                consumed = true;
+              }
+            } else if (parsed?.type === 'rate_limit') {
+              // F045: Telemetry only — don't show as chat bubble
+              const targetCatId = parsed.catId ?? msg.catId;
+              if (targetCatId) {
+                setCatInvocation(targetCatId, {
+                  rateLimit: {
+                    ...(typeof parsed.utilization === 'number' ? { utilization: parsed.utilization } : {}),
+                    ...(typeof parsed.resetsAt === 'string' ? { resetsAt: parsed.resetsAt } : {}),
+                  },
+                });
+              }
+              consumed = true;
+            } else if (parsed?.type === 'compact_boundary') {
+              // F045: Telemetry only — don't show as chat bubble
+              const targetCatId = parsed.catId ?? msg.catId;
+              if (targetCatId) {
+                setCatInvocation(targetCatId, {
+                  compactBoundary: {
+                    ...(typeof parsed.preTokens === 'number' ? { preTokens: parsed.preTokens } : {}),
+                  },
+                });
+              }
+              consumed = true;
+            } else if (parsed?.type === 'task_progress') {
+              // F26: Store task progress silently
+              const targetCatId = parsed.catId ?? msg.catId;
+              // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first so
+              // taskProgress.lastInvocationId stays consistent with bubble identity.
+              const currentInvocationId =
+                msg.invocationId ??
+                (typeof parsed.invocationId === 'string'
+                  ? parsed.invocationId
+                  : useChatStore.getState().catInvocations?.[targetCatId]?.invocationId);
+              const tasks = (parsed.tasks ?? []) as import('../stores/chat-types').TaskProgressItem[];
               setCatInvocation(targetCatId, {
-                invocationId,
-                toolPolicy:
-                  parsed.toolPolicy === 'minimal' || parsed.toolPolicy === 'standard' || parsed.toolPolicy === 'full'
-                    ? parsed.toolPolicy
-                    : undefined,
-                toolPolicySource:
-                  parsed.toolPolicySource === 'user-override' || parsed.toolPolicySource === 'agent-default'
-                    ? parsed.toolPolicySource
-                    : undefined,
-                contextBudget: parseContextBudget(parsed.contextBudget),
-                startedAt: Date.now(),
                 taskProgress: {
-                  tasks: [],
+                  tasks,
                   lastUpdate: Date.now(),
                   snapshotStatus: 'running',
-                  lastInvocationId: invocationId,
+                  ...(currentInvocationId ? { lastInvocationId: currentInvocationId } : {}),
                 },
-              });
-
-              // F173 hotfix (砚砚 4 件套 #3) — invocation_created is a REBIND BOUNDARY for this cat:
-              // (a) Finalize any same-cat streaming bubble bound to a DIFFERENT invocationId,
-              //     so findRecoverableAssistantMessage no longer picks it up. This prevents
-              //     the ghost-bubble race where a previous invocation's done event was lost
-              //     and its streaming=true bubble got reused by the new invocation's chunks.
-              // (b) Pick the rebind target: prefer activeRef if it points to an unbound
-              //     streaming bubble (the live one we just created); otherwise take the
-              //     MOST RECENT (newest-to-oldest) unbound streaming bubble. Cloud Codex P1
-              //     on PR#1352 — the old oldest-to-newest loop would bind a stale historical
-              //     bubble when reconnect/hydration left multiple unbound ones, leaving the
-              //     live bubble unbound and reintroducing ghost/split behavior.
-              const messagesSnapshot = useChatStore.getState().messages;
-              // Pass (a): finalize any bubble bound to a different invocation.
-              // Cloud P1#5 (PR#1352): also markReplacedInvocation(oldInv) so subsequent
-              // late text/tool events for the closed invocation get suppressed via
-              // shouldSuppressLateStreamChunk (otherwise Loop 1 non-streaming fallback
-              // would resurrect the boundary-finalized bubble via ensureStreaming).
-              const boundaryReplacedInvs = new Set<string>();
-              for (const m of messagesSnapshot) {
-                if (m.type !== 'assistant' || m.catId !== targetCatId || m.origin !== 'stream') continue;
-                if (!m.isStreaming) continue;
-                const boundInv = m.extra?.stream?.invocationId;
-                if (boundInv && boundInv !== invocationId) {
-                  setStreaming(m.id, false);
-                  boundaryReplacedInvs.add(boundInv);
-                }
-              }
-              const tidForBoundary = useChatStore.getState().currentThreadId;
-              for (const oldInv of boundaryReplacedInvs) {
-                markReplacedInvocation(tidForBoundary, targetCatId, oldInv);
-              }
-              // Pass (b): pick rebind target.
-              let unboundPlaceholderId: string | undefined;
-              const activeRefId = getActive(targetCatId)?.id;
-              if (activeRefId) {
-                const activeMsg = messagesSnapshot.find((m) => m.id === activeRefId);
-                if (
-                  activeMsg?.type === 'assistant' &&
-                  activeMsg.catId === targetCatId &&
-                  activeMsg.origin === 'stream' &&
-                  activeMsg.isStreaming &&
-                  !activeMsg.extra?.stream?.invocationId
-                ) {
-                  unboundPlaceholderId = activeMsg.id;
-                }
-              }
-              if (!unboundPlaceholderId) {
-                // Newest-to-oldest scan so historical unbound bubbles (e.g. hydrated) lose.
-                for (let i = messagesSnapshot.length - 1; i >= 0; i -= 1) {
-                  const m = messagesSnapshot[i];
-                  if (!m || m.type !== 'assistant' || m.catId !== targetCatId || m.origin !== 'stream') continue;
-                  if (!m.isStreaming) continue;
-                  if (m.extra?.stream?.invocationId) continue;
-                  unboundPlaceholderId = m.id;
-                  break;
-                }
-              }
-              if (unboundPlaceholderId) {
-                const deterministicId = deriveBubbleId(invocationId, targetCatId, () => unboundPlaceholderId!);
-                if (deterministicId !== unboundPlaceholderId) {
-                  replaceMessageId(unboundPlaceholderId, deterministicId);
-                  setMessageStreamInvocation(deterministicId, invocationId);
-                } else {
-                  setMessageStreamInvocation(unboundPlaceholderId, invocationId);
-                }
-                // Cloud P1#9 (PR#1352): unconditionally point activeRefs at the rebound
-                // bubble (even when it wasn't the prior activeRef target). Newest→oldest
-                // scan picked the LIVE bubble for inv-new — leaving activeRefs on a stale
-                // older bubble would let later invocationless chunks reuse it via
-                // ensureStreaming and append into the previous invocation's bubble.
-                const reboundId = deterministicId !== unboundPlaceholderId ? deterministicId : unboundPlaceholderId;
-                setActive(targetCatId, reboundId);
-              } else {
-                // Legacy path: no unbound placeholder but there's some existing message we can
-                // bind invocationId onto (preserves behavior for messages already matching newInv).
-                const targetId = getOrRecoverActiveAssistantMessageId(targetCatId, undefined, { invocationId });
-                if (targetId) {
-                  setMessageStreamInvocation(targetId, invocationId);
-                }
-              }
-
-              maybeMigrateSequentialInvocationOwnership(targetCatId, invocationId);
-              consumed = true;
-            }
-          } else if (parsed?.type === 'invocation_metrics') {
-            // Store metrics silently — don't show as system message
-            if (parsed.kind === 'session_started') {
-              // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first to keep
-              // catInvocations[catId].invocationId aligned with bubble identity.
-              const sessionInvocationId =
-                msg.invocationId ?? (typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined);
-              setCatInvocation(msg.catId, {
-                sessionId: parsed.sessionId,
-                invocationId: sessionInvocationId,
-                startedAt: Date.now(),
-                taskProgress: { tasks: [], lastUpdate: 0 },
-                ...(parsed.sessionSeq !== undefined ? { sessionSeq: parsed.sessionSeq, sessionSealed: false } : {}),
-              });
-            } else if (parsed.kind === 'invocation_complete') {
-              setCatInvocation(msg.catId, {
-                durationMs: parsed.durationMs,
-                sessionId: parsed.sessionId,
-              });
-            }
-            consumed = true;
-          } else if (parsed?.type === 'invocation_usage') {
-            // F8: Store token usage silently — don't show as system message
-            setCatInvocation(msg.catId, {
-              usage: parsed.usage,
-            });
-            // Also persist usage on the cat's last assistant message (message-scoped)
-            const ref = getActive(msg.catId);
-            if (ref) {
-              setMessageUsage(ref.id, parsed.usage);
-            }
-            consumed = true;
-          } else if (parsed?.type === 'context_briefing') {
-            // F148 Phase E: Insert briefing card into chat store for immediate display
-            const sm = parsed.storedMessage as
-              | { id: string; content: string; origin: string; timestamp: number; extra?: Record<string, unknown> }
-              | undefined;
-            if (sm?.id) {
-              addMessage({
-                id: sm.id,
-                type: 'system',
-                content: sm.content ?? '',
-                origin: (sm.origin as 'briefing') ?? 'briefing',
-                timestamp: sm.timestamp ?? Date.now(),
-                ...(sm.extra ? { extra: sm.extra } : {}),
-              });
-            }
-            consumed = true;
-          } else if (parsed?.type === 'context_health') {
-            // F24: Store context health silently
-            const targetCatId = parsed.catId ?? msg.catId;
-            if (targetCatId) {
-              setCatInvocation(targetCatId, {
-                contextHealth: parsed.health,
               });
               consumed = true;
-            }
-          } else if (parsed?.type === 'rate_limit') {
-            // F045: Telemetry only — don't show as chat bubble
-            const targetCatId = parsed.catId ?? msg.catId;
-            if (targetCatId) {
-              setCatInvocation(targetCatId, {
-                rateLimit: {
-                  ...(typeof parsed.utilization === 'number' ? { utilization: parsed.utilization } : {}),
-                  ...(typeof parsed.resetsAt === 'string' ? { resetsAt: parsed.resetsAt } : {}),
-                },
-              });
-            }
-            consumed = true;
-          } else if (parsed?.type === 'compact_boundary') {
-            // F045: Telemetry only — don't show as chat bubble
-            const targetCatId = parsed.catId ?? msg.catId;
-            if (targetCatId) {
-              setCatInvocation(targetCatId, {
-                compactBoundary: {
-                  ...(typeof parsed.preTokens === 'number' ? { preTokens: parsed.preTokens } : {}),
-                },
-              });
-            }
-            consumed = true;
-          } else if (parsed?.type === 'task_progress') {
-            // F26: Store task progress silently
-            const targetCatId = parsed.catId ?? msg.catId;
-            // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer first so
-            // taskProgress.lastInvocationId stays consistent with bubble identity.
-            const currentInvocationId =
-              msg.invocationId ??
-              (typeof parsed.invocationId === 'string'
-                ? parsed.invocationId
-                : useChatStore.getState().catInvocations?.[targetCatId]?.invocationId);
-            const tasks = (parsed.tasks ?? []) as import('../stores/chat-types').TaskProgressItem[];
-            setCatInvocation(targetCatId, {
-              taskProgress: {
-                tasks,
-                lastUpdate: Date.now(),
-                snapshotStatus: 'running',
-                ...(currentInvocationId ? { lastInvocationId: currentInvocationId } : {}),
-              },
-            });
-            consumed = true;
-          } else if (parsed?.type === 'web_search') {
-            // F045: web_search tool event (privacy: no query, count only) — render as ToolEvent, not raw JSON
-            // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper first
-            // so tool event reuses the same bubble created by active path under outer id.
-            const parsedInv = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
-            const effectiveInv = msg.invocationId ?? parsedInv;
-            // Cloud P1#3 (PR#1352): suppress stale web_search for completed invocation.
-            if (!shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
-              setCatStatus(msg.catId, 'streaming');
-              const count = typeof parsed.count === 'number' ? parsed.count : 1;
-              setCatInvocation(msg.catId, {
-                currentActivity: {
-                  kind: 'tool',
-                  label: `web_search${count > 1 ? ` x${count}` : ''}`,
-                  at: Date.now(),
-                },
-              });
-              const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
-                ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
-              });
-
-              if (messageId) {
-                appendToolEvent(messageId, {
-                  id: `toolws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                  type: 'tool_use',
-                  label: `${msg.catId} → web_search${count > 1 ? ` x${count}` : ''}`,
-                  timestamp: Date.now(),
-                });
-              }
-            }
-            consumed = true;
-          } else if (parsed?.type === 'thinking') {
-            // F045: Embed thinking into the current assistant bubble (like Claude Code)
-            // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper first
-            // so thinking attaches to the active-path bubble under outer id.
-            const thinkingText = parsed.text ?? '';
-            const parsedInv = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
-            const effectiveInv = msg.invocationId ?? parsedInv;
-            // Cloud P1#3 (PR#1352): suppress stale thinking for completed invocation.
-            if (thinkingText && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
-              // thinking delta 高频，仅在活动类型切换时更新指示器，避免每个 delta 重渲染
-              const prevActivity = useChatStore.getState().catInvocations[msg.catId]?.currentActivity;
-              if (prevActivity?.kind !== 'thinking') {
+            } else if (parsed?.type === 'web_search') {
+              // F045: web_search tool event (privacy: no query, count only) — render as ToolEvent, not raw JSON
+              // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper first
+              // so tool event reuses the same bubble created by active path under outer id.
+              const parsedInv = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+              const effectiveInv = msg.invocationId ?? parsedInv;
+              // Cloud P1#3 (PR#1352): suppress stale web_search for completed invocation.
+              if (!shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
+                setCatStatus(msg.catId, 'streaming');
+                const count = typeof parsed.count === 'number' ? parsed.count : 1;
                 setCatInvocation(msg.catId, {
-                  currentActivity: { kind: 'thinking', label: '深度思考中', at: Date.now() },
+                  currentActivity: {
+                    kind: 'tool',
+                    label: `web_search${count > 1 ? ` x${count}` : ''}`,
+                    at: Date.now(),
+                  },
                 });
-              }
-              const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
-                ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
-              });
-              if (messageId) setMessageThinking(messageId, thinkingText);
-            }
-            consumed = true;
-          } else if (parsed?.type === 'liveness_warning') {
-            // F118 Phase C: Liveness warning — update cat status + invocation snapshot
-            const level = parsed.level as 'alive_but_silent' | 'suspected_stall';
-            setCatStatus(msg.catId, level);
-            setCatInvocation(msg.catId, {
-              livenessWarning: {
-                level,
-                state: parsed.state as 'active' | 'busy-silent' | 'idle-silent' | 'dead',
-                silenceDurationMs: parsed.silenceDurationMs as number,
-                cpuTimeMs: typeof parsed.cpuTimeMs === 'number' ? parsed.cpuTimeMs : undefined,
-                processAlive: parsed.processAlive as boolean,
-                receivedAt: Date.now(),
-              },
-            });
-            consumed = true;
-          } else if (parsed?.type === 'timeout_diagnostics') {
-            // F118 AC-C3: Store diagnostics keyed by catId to prevent cross-cat mismatch
-            if (msg.catId) {
-              setPendingTimeoutDiag(msg.catId, parsed as Record<string, unknown>);
-            }
-            consumed = true;
-          } else if (parsed?.type === 'governance_blocked') {
-            const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
-            const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';
-            const invId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
-            const existingBlocked = useChatStore
-              .getState()
-              .messages.find(
-                (m) => m.variant === 'governance_blocked' && m.extra?.governanceBlocked?.projectPath === projectPath,
-              );
-            if (existingBlocked) {
-              removeMessage(existingBlocked.id);
-            }
-            addMessage({
-              id: `gov-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              type: 'system',
-              variant: 'governance_blocked',
-              content: `项目 ${projectPath} ${reasonKind === 'needs_bootstrap' ? '尚未初始化治理' : '治理状态异常'}`,
-              timestamp: Date.now(),
-              extra: {
-                governanceBlocked: {
-                  projectPath,
-                  reasonKind: reasonKind as
-                    | 'needs_bootstrap'
-                    | 'needs_confirmation'
-                    | 'files_missing'
-                    | 'permission_denied',
-                  invocationId: invId,
-                },
-              },
-            });
-            consumed = true;
-          } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
-            // Internal telemetry — suppress to avoid raw JSON bubbles
-            consumed = true;
-          } else if (parsed?.type === 'silent_completion') {
-            // Bugfix: silent-exit — cat ran tools but produced no text response
-            const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
-            sysContent = detail || `${msg.catId} completed without a text response.`;
-          } else if (parsed?.type === 'invocation_preempted') {
-            // Bugfix: silent-exit — invocation was superseded by a newer request
-            sysContent = 'This response was superseded by a newer request.';
-          } else if (parsed?.type === 'rich_block') {
-            // F22: Append rich block — prefer messageId correlation (#83 P2), fallback to activeRefs
-            // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper first
-            // so rich_block bubble fallback aligns with active-path identity.
-            const parsedInv = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
-            const effectiveInv = msg.invocationId ?? parsedInv;
-            // Cloud P1#3 (PR#1352): suppress stale rich_block for completed invocation —
-            // explicit messageId correlation still wins (callback may be a re-emission
-            // of a known message), so only the bubble-creation fallback path is gated.
-            let targetId: string | undefined;
+                const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
+                  ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
+                });
 
-            // P2 fix: use messageId from callback post-message path for precise correlation
-            if (parsed.messageId) {
-              const found = useChatStore.getState().messages.find((m) => m.id === parsed.messageId);
-              if (found) targetId = found.id;
-            }
-
-            // Bugfix: standalone create_rich_block (no messageId) — prefer most recent
-            // callback message from this cat over the active streaming message.
-            if (!targetId) {
-              const currentMessages = useChatStore.getState().messages;
-              for (let i = currentMessages.length - 1; i >= 0; i--) {
-                const m = currentMessages[i];
-                if (m.type !== 'assistant' || m.catId !== msg.catId) continue;
-                if (m.origin === 'stream' && m.isStreaming) break;
-                if (m.origin === 'callback') {
-                  targetId = m.id;
-                  break;
+                if (messageId) {
+                  appendToolEvent(messageId, {
+                    id: `toolws-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                    type: 'tool_use',
+                    label: `${msg.catId} → web_search${count > 1 ? ` x${count}` : ''}`,
+                    timestamp: Date.now(),
+                  });
                 }
               }
-            }
+              consumed = true;
+            } else if (parsed?.type === 'thinking') {
+              // F045: Embed thinking into the current assistant bubble (like Claude Code)
+              // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper first
+              // so thinking attaches to the active-path bubble under outer id.
+              const thinkingText = parsed.text ?? '';
+              const parsedInv = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+              const effectiveInv = msg.invocationId ?? parsedInv;
+              // Cloud P1#3 (PR#1352): suppress stale thinking for completed invocation.
+              if (thinkingText && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
+                // thinking delta 高频，仅在活动类型切换时更新指示器，避免每个 delta 重渲染
+                const prevActivity = useChatStore.getState().catInvocations[msg.catId]?.currentActivity;
+                if (prevActivity?.kind !== 'thinking') {
+                  setCatInvocation(msg.catId, {
+                    currentActivity: { kind: 'thinking', label: '深度思考中', at: Date.now() },
+                  });
+                }
+                const messageId = getNonTextAssistantMessageId(msg.catId, msg.metadata, {
+                  ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
+                });
+                if (messageId) setMessageThinking(messageId, thinkingText);
+              }
+              consumed = true;
+            } else if (parsed?.type === 'liveness_warning') {
+              // F118 Phase C: Liveness warning — update cat status + invocation snapshot
+              const level = parsed.level as 'alive_but_silent' | 'suspected_stall';
+              setCatStatus(msg.catId, level);
+              setCatInvocation(msg.catId, {
+                livenessWarning: {
+                  level,
+                  state: parsed.state as 'active' | 'busy-silent' | 'idle-silent' | 'dead',
+                  silenceDurationMs: parsed.silenceDurationMs as number,
+                  cpuTimeMs: typeof parsed.cpuTimeMs === 'number' ? parsed.cpuTimeMs : undefined,
+                  processAlive: parsed.processAlive as boolean,
+                  receivedAt: Date.now(),
+                },
+              });
+              consumed = true;
+            } else if (parsed?.type === 'timeout_diagnostics') {
+              // F118 AC-C3: Store diagnostics keyed by catId to prevent cross-cat mismatch
+              if (msg.catId) {
+                setPendingTimeoutDiag(msg.catId, parsed as Record<string, unknown>);
+              }
+              consumed = true;
+            } else if (parsed?.type === 'governance_blocked') {
+              const projectPath = typeof parsed.projectPath === 'string' ? parsed.projectPath : '';
+              const reasonKind = (parsed.reasonKind as string) ?? 'needs_bootstrap';
+              const invId = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+              const existingBlocked = useChatStore
+                .getState()
+                .messages.find(
+                  (m) => m.variant === 'governance_blocked' && m.extra?.governanceBlocked?.projectPath === projectPath,
+                );
+              if (existingBlocked) {
+                removeMessage(existingBlocked.id);
+              }
+              addMessage({
+                id: `gov-blocked-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                type: 'system',
+                variant: 'governance_blocked',
+                content: `项目 ${projectPath} ${reasonKind === 'needs_bootstrap' ? '尚未初始化治理' : '治理状态异常'}`,
+                timestamp: Date.now(),
+                extra: {
+                  governanceBlocked: {
+                    projectPath,
+                    reasonKind: reasonKind as
+                      | 'needs_bootstrap'
+                      | 'needs_confirmation'
+                      | 'files_missing'
+                      | 'permission_denied',
+                    invocationId: invId,
+                  },
+                },
+              });
+              consumed = true;
+            } else if (parsed?.type === 'strategy_allow_compress' || parsed?.type === 'resume_failure_stats') {
+              // Internal telemetry — suppress to avoid raw JSON bubbles
+              consumed = true;
+            } else if (parsed?.type === 'silent_completion') {
+              // Bugfix: silent-exit — cat ran tools but produced no text response
+              const detail = typeof parsed.detail === 'string' ? parsed.detail : '';
+              sysContent = detail || `${msg.catId} completed without a text response.`;
+            } else if (parsed?.type === 'invocation_preempted') {
+              // Bugfix: silent-exit — invocation was superseded by a newer request
+              sysContent = 'This response was superseded by a newer request.';
+            } else if (parsed?.type === 'rich_block') {
+              // F22: Append rich block — prefer messageId correlation (#83 P2), fallback to activeRefs
+              // Identity canonicalization (砚砚 GPT-5.5 2026-04-26): outer wrapper first
+              // so rich_block bubble fallback aligns with active-path identity.
+              const parsedInv = typeof parsed.invocationId === 'string' ? parsed.invocationId : undefined;
+              const effectiveInv = msg.invocationId ?? parsedInv;
+              // Cloud P1#3 (PR#1352): suppress stale rich_block for completed invocation —
+              // explicit messageId correlation still wins (callback may be a re-emission
+              // of a known message), so only the bubble-creation fallback path is gated.
+              let targetId: string | undefined;
 
-            if (!targetId && parsed.block && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
-              // Final fallback: recover the active stream bubble before creating a placeholder.
-              // A rich block is user-visible reply content, so it must not be dropped when
-              // generic reply placeholders are disabled. Keep web_search/thinking/tool_use
-              // on getNonTextAssistantMessageId's feature-flagged path.
-              targetId = ensureActiveAssistantMessage(msg.catId, msg.metadata, {
-                ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
-              }) ?? undefined;
-            }
+              // P2 fix: use messageId from callback post-message path for precise correlation
+              if (parsed.messageId) {
+                const found = useChatStore.getState().messages.find((m) => m.id === parsed.messageId);
+                if (found) targetId = found.id;
+              }
 
-            if (targetId && parsed.block) {
-              appendRichBlock(targetId, parsed.block);
+              // Bugfix: standalone create_rich_block (no messageId) — prefer most recent
+              // callback message from this cat over the active streaming message.
+              if (!targetId) {
+                const currentMessages = useChatStore.getState().messages;
+                for (let i = currentMessages.length - 1; i >= 0; i--) {
+                  const m = currentMessages[i];
+                  if (m.type !== 'assistant' || m.catId !== msg.catId) continue;
+                  if (m.origin === 'stream' && m.isStreaming) break;
+                  if (m.origin === 'callback') {
+                    targetId = m.id;
+                    break;
+                  }
+                }
+              }
+
+              if (!targetId && parsed.block && !shouldSuppressLateStreamChunk(msg.catId, effectiveInv)) {
+                // Final fallback: recover the active stream bubble before creating a placeholder.
+                // A rich block is user-visible reply content, so it must not be dropped when
+                // generic reply placeholders are disabled. Keep web_search/thinking/tool_use
+                // on getNonTextAssistantMessageId's feature-flagged path.
+                targetId =
+                  ensureActiveAssistantMessage(msg.catId, msg.metadata, {
+                    ...(effectiveInv ? { invocationId: effectiveInv as string } : {}),
+                  }) ?? undefined;
+              }
+
+              if (targetId && parsed.block) {
+                appendRichBlock(targetId, parsed.block);
+              }
+              consumed = true;
+            } else if (parsed?.type === 'session_seal_requested') {
+              // F24 Phase B: Session sealed — update session info + show notification
+              setCatInvocation(parsed.catId, {
+                sessionSeq: parsed.sessionSeq,
+                sessionSealed: true,
+              });
+              const pct = parsed.healthSnapshot?.fillRatio ? Math.round(parsed.healthSnapshot.fillRatio * 100) : '?';
+              sysContent = `${parsed.catId} 的会话 #${parsed.sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`;
             }
-            consumed = true;
-          } else if (parsed?.type === 'session_seal_requested') {
-            // F24 Phase B: Session sealed — update session info + show notification
-            setCatInvocation(parsed.catId, {
-              sessionSeq: parsed.sessionSeq,
-              sessionSealed: true,
-            });
-            const pct = parsed.healthSnapshot?.fillRatio ? Math.round(parsed.healthSnapshot.fillRatio * 100) : '?';
-            sysContent = `${parsed.catId} 的会话 #${parsed.sessionSeq} 已封存（上下文 ${pct}%），下次调用将自动创建新会话`;
-          }
           }
         } catch {
           const runtimeWarning = classifyRuntimeWarning(sysContent);

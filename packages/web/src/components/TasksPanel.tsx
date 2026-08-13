@@ -206,7 +206,9 @@ function TaskCardView({
   const emptyFields = EVIDENCE_FIELDS.filter((field) => !evidence?.[field.key]?.trim());
 
   return (
-    <article
+    // 卡片整体可点但内部嵌有原生按钮(保存证据等),不能用 <button> 包裹;
+    // <article> 等语义元素不允许再赋 button 角色(a11y 语义冲突),用中性 <div>。
+    <div
       className="rounded-[14px] border-2 border-[var(--task-ink)] bg-[var(--task-card)] p-3 text-[var(--task-ink)] shadow-[5px_5px_0_#111] transition-transform hover:-translate-y-0.5"
       role="button"
       tabIndex={0}
@@ -221,7 +223,9 @@ function TaskCardView({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           {/* id 以创建时间戳开头，前缀在同一时段全相同——取尾部随机段才有区分度 */}
-          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--task-subtle)]">#{task.id.slice(-6)}</div>
+          <div className="text-[11px] font-black uppercase tracking-[0.12em] text-[var(--task-subtle)]">
+            #{task.id.slice(-6)}
+          </div>
           <h3 className="mt-1 line-clamp-2 text-sm font-black leading-snug text-[var(--task-ink)]" title={task.title}>
             {task.title}
           </h3>
@@ -300,7 +304,9 @@ function TaskCardView({
         >
           {task.why && (
             <div className="mb-3 rounded-lg border border-[var(--task-ink)]/20 bg-[var(--task-card)] px-3 py-2">
-              <div className="text-[10px] font-black uppercase tracking-[0.08em] text-[var(--task-subtle)]">Why · 任务背景</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.08em] text-[var(--task-subtle)]">
+                Why · 任务背景
+              </div>
               <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-[var(--task-ink)]">{task.why}</p>
             </div>
           )}
@@ -332,7 +338,10 @@ function TaskCardView({
                 </p>
               )}
               {filledFields.map((field) => (
-                <div key={field.key} className="rounded-lg border border-[var(--task-ink)]/25 bg-[var(--task-card)] px-3 py-2">
+                <div
+                  key={field.key}
+                  className="rounded-lg border border-[var(--task-ink)]/25 bg-[var(--task-card)] px-3 py-2"
+                >
                   <div className="text-[10px] font-black uppercase tracking-[0.08em] text-[var(--task-subtle)]">
                     {field.label}
                   </div>
@@ -394,7 +403,7 @@ function TaskCardView({
           )}
         </div>
       )}
-    </article>
+    </div>
   );
 }
 

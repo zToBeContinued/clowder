@@ -6,8 +6,8 @@
  * Clowder uploads/, and patch only the imported archive message hashes.
  */
 
-import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, resolve } from 'node:path';
@@ -173,7 +173,10 @@ function inferMimeType(filename: string): string {
 
 function safeDownloadName(hit: AttachmentHit): string {
   const ext = extname(hit.filename);
-  const stem = basename(hit.filename, ext).replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 80) || 'attachment';
+  const stem =
+    basename(hit.filename, ext)
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .slice(0, 80) || 'attachment';
   return `${hit.slockId}-${stem}${ext}`;
 }
 
@@ -318,7 +321,10 @@ export async function runMigrateSlockAttachmentsCli(argv: string[] = process.arg
           contentBlocks: JSON.stringify(contentBlocks),
           editedAt: String(Date.now()),
         });
-        state.messages[messageId] = { updatedAt: new Date().toISOString(), attachmentIds: hits.map((hit) => hit.slockId) };
+        state.messages[messageId] = {
+          updatedAt: new Date().toISOString(),
+          attachmentIds: hits.map((hit) => hit.slockId),
+        };
         patchedMessages++;
       }
     }

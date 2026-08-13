@@ -2,15 +2,15 @@
 
 import type { TaskEvent, TaskItem, TaskStatus } from '@cat-cafe/shared';
 import { useEffect, useMemo, useState } from 'react';
+import type { PromptSource, PromptSourceBreakdown } from '@/stores/chat-types';
+import { apiFetch } from '@/utils/api-client';
 import {
+  type InvocationUsageSummary,
   isInvocationCostPanelEnabled,
   readTaskUsageSummaries,
   summarizeTaskUsage,
-  type InvocationUsageSummary,
 } from '@/utils/invocationCostPanel';
-import { apiFetch } from '@/utils/api-client';
 import { getUsageRisk } from '@/utils/usageRisk';
-import type { PromptSource, PromptSourceBreakdown } from '@/stores/chat-types';
 import { CatAvatar } from './CatAvatar';
 import { formatCost, formatDuration, formatTokenCount } from './status-helpers';
 
@@ -147,7 +147,10 @@ function UsageDetailRow({ usage }: { usage: InvocationUsageSummary }) {
         <span className="font-semibold text-cafe-secondary">{label || usage.catId}</span>
         {usage.provider && <span>· {usage.provider}</span>}
         {usageRisk && (
-          <span className="rounded-full bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text" title={usageRisk.reason}>
+          <span
+            className="rounded-full bg-conn-red-bg px-1.5 py-0.5 font-semibold text-conn-red-text"
+            title={usageRisk.reason}
+          >
             {usageRisk.label}
           </span>
         )}
@@ -227,7 +230,10 @@ function isControlledExternalTool(item: {
   return /opencli|figma/.test(haystack);
 }
 
-function readCapabilityEvents(events: readonly TaskEvent[] | undefined, type: 'capability_authorized' | 'capability_usage') {
+function readCapabilityEvents(
+  events: readonly TaskEvent[] | undefined,
+  type: 'capability_authorized' | 'capability_usage',
+) {
   return (events ?? []).filter((event) => event.type === type);
 }
 
@@ -388,8 +394,7 @@ export function TaskCard({
   const style = STATUS_STYLES[status] ?? STATUS_STYLES.todo;
   const showCostPanel = isInvocationCostPanelEnabled();
   const allUsageEvents = readTaskUsageSummaries(task);
-  const showUsagePanel =
-    showCostPanel || allUsageEvents.some((usage) => usage.deliveryOnlyMode === 'degraded');
+  const showUsagePanel = showCostPanel || allUsageEvents.some((usage) => usage.deliveryOnlyMode === 'degraded');
   const usageEvents = showUsagePanel ? allUsageEvents : [];
   const usageTotal = summarizeTaskUsage(usageEvents);
 

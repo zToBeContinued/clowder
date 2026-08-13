@@ -74,7 +74,10 @@ export function selectThreadMessages(state: ChatState, threadId: string | null):
   if (threadId === state.currentThreadId || !state.currentThreadId) {
     return filterMessagesForThread(state.messages ?? (EMPTY_MESSAGES as ChatMessage[]), threadId);
   }
-  return filterMessagesForThread(state.threadStates?.[threadId]?.messages ?? (EMPTY_MESSAGES as ChatMessage[]), threadId);
+  return filterMessagesForThread(
+    state.threadStates?.[threadId]?.messages ?? (EMPTY_MESSAGES as ChatMessage[]),
+    threadId,
+  );
 }
 
 /** Pure selector — returns liveness fields for a thread. Defensively

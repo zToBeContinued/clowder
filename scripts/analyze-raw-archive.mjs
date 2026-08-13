@@ -1,7 +1,8 @@
 // 诊断：分析 cursor 原始事件归档中目标句子的出现情况。
 // 用法: node scripts/analyze-raw-archive.mjs <ndjson文件> <目标子串>
-import { createInterface } from 'node:readline';
+
 import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 
 const [file, needle] = [process.argv[2], process.argv[3] ?? 're-prove the hardened'];
 const rl = createInterface({ input: createReadStream(file, 'utf8') });

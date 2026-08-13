@@ -83,11 +83,10 @@ export async function ensureTaskDiscussionThread(
   return {
     threadId: taskThread.id,
     sourceMessage: toTaskThreadMessage(sourceMessage),
-    task:
-      updated ?? {
-        ...task,
-        taskThreadId: taskThread.id,
-        ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
-      },
+    task: updated ?? {
+      ...task,
+      taskThreadId: taskThread.id,
+      ...(task.sourceMessageId ? {} : { sourceMessageId: sourceMessage.id }),
+    },
   };
 }

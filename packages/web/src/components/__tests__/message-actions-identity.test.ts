@@ -15,7 +15,10 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/stores/chatStore', () => ({
   useChatStore: (
-    selector: (state: { removeThreadMessage: typeof removeThreadMessageMock; patchMessage: typeof patchMessageMock }) => unknown,
+    selector: (state: {
+      removeThreadMessage: typeof removeThreadMessageMock;
+      patchMessage: typeof patchMessageMock;
+    }) => unknown,
   ) => selector({ removeThreadMessage: removeThreadMessageMock, patchMessage: patchMessageMock }),
 }));
 

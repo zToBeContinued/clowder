@@ -11,10 +11,10 @@
 
 import type { FastifyPluginAsync } from 'fastify';
 import {
-  AuditEventTypes,
-  getEventAuditLog,
   type AuditEvent,
+  AuditEventTypes,
   type EventAuditLog,
+  getEventAuditLog,
 } from '../domains/cats/services/orchestration/EventAuditLog.js';
 import type { IThreadStore } from '../domains/cats/services/stores/ports/ThreadStore.js';
 import { resolveUserId } from '../utils/request-identity.js';
@@ -54,9 +54,7 @@ export const auditRoutes: FastifyPluginAsync<AuditRoutesOptions> = async (app, o
       return { error: 'date must be YYYY-MM-DD' };
     }
 
-    const sourceEvents = date
-      ? await auditLog.readByDate(date)
-      : await readRecentAuditEvents(auditLog, days);
+    const sourceEvents = date ? await auditLog.readByDate(date) : await readRecentAuditEvents(auditLog, days);
     const filtered = sourceEvents
       .filter((event) => event.type === AuditEventTypes.DANGEROUS_ACTION)
       .filter((event) => !action || String(event.data['action'] ?? '') === action)

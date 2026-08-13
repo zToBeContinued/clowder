@@ -15,13 +15,9 @@ import { resolveHeaderUserId } from '../utils/request-identity.js';
 
 const log = createModuleLogger('routes/votes');
 
-import {
-  buildVoteTally,
-  checkVoteCompletion,
-  VOTE_RESULT_SOURCE,
-} from '../domains/votes/vote-utils.js';
 import type { IMessageStore } from '../domains/cats/services/stores/ports/MessageStore.js';
 import type { IThreadStore, VotingStateV1 } from '../domains/cats/services/stores/ports/ThreadStore.js';
+import { buildVoteTally, checkVoteCompletion, VOTE_RESULT_SOURCE } from '../domains/votes/vote-utils.js';
 import type { SocketManager } from '../infrastructure/websocket/index.js';
 
 export interface VoteRoutesOptions {

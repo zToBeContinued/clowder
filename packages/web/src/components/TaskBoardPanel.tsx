@@ -197,7 +197,9 @@ export function TaskBoardPanel() {
     const updated = await updateTaskStatus(taskId, newStatus);
     if (!updated) return;
     updateStoreTask(updated);
-    setGlobalTasks((current) => (current ? sortTasks(current.map((task) => (task.id === updated.id ? updated : task))) : current));
+    setGlobalTasks((current) =>
+      current ? sortTasks(current.map((task) => (task.id === updated.id ? updated : task))) : current,
+    );
   }
 
   return (

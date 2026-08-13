@@ -76,7 +76,13 @@ export class InvocationLogger {
     });
   }
 
-  logEvent(type: InvocationLogEntry['type'], catId: string, invocationId: string, threadId: string, data?: unknown): void {
+  logEvent(
+    type: InvocationLogEntry['type'],
+    catId: string,
+    invocationId: string,
+    threadId: string,
+    data?: unknown,
+  ): void {
     this.write({ type, catId, invocationId, threadId, timestamp: Date.now(), data });
   }
 
