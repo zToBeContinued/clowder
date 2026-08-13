@@ -52,7 +52,9 @@ describe('resolvePluginStatuses', () => {
     }
   });
 
-  it('service plugins show active when their features are running', () => {
+  // ce118afe(prune-w5d)摘除语音全链后,插件目录不再包含任何 service 插件;
+  // 即使 service 注册表报告语音服务在跑,也不能再冒出 voice-companion 条目。
+  it('voice-chain prune: no service plugins appear even when voice services are running', () => {
     const services = [
       {
         manifest: { id: 'whisper-stt', enablesFeatures: ['voice-input', 'connector-stt'] },
@@ -64,32 +66,10 @@ describe('resolvePluginStatuses', () => {
       },
     ];
     const result = resolvePluginStatuses(services, true);
-    const voice = result.find((p) => p.id === 'voice-companion');
 
-    expect(voice?.status).toBe('active');
-    expect(voice?.statusLabel).toBe('已连接');
-  });
-
-  it('service plugins show configured when features known but not running', () => {
-    const services = [
-      {
-        manifest: { id: 'whisper-stt', enablesFeatures: ['voice-input', 'connector-stt'] },
-        status: 'stopped' as const,
-      },
-    ];
-    const result = resolvePluginStatuses(services, true);
-    const voice = result.find((p) => p.id === 'voice-companion');
-
-    expect(voice?.status).toBe('configured');
-    expect(voice?.statusLabel).toBe('已配置');
-  });
-
-  it('service plugins show available when no matching features exist', () => {
-    const result = resolvePluginStatuses([], true);
-    const voice = result.find((p) => p.id === 'voice-companion');
-
-    expect(voice?.status).toBe('available');
-    expect(voice?.statusLabel).toBe('未连接');
+    expect(result.find((p) => p.id === 'voice-companion')).toBeUndefined();
+    expect(result.filter((p) => p.source === 'service')).toEqual([]);
+    expect(result.map((p) => p.id)).toEqual(['github']);
   });
 
   it('platform status is independent of service registry contents', () => {

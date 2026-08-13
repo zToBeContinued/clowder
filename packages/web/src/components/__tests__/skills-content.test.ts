@@ -3,7 +3,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mockHandleDisableSkill = vi.fn();
+const mockUnmountSkills = vi.fn();
 
 const MOCK_ITEMS_WITH_EXTERNAL = [
   {
@@ -57,7 +57,8 @@ vi.mock('@/components/settings/useCapabilityState', () => ({
     projectPath: '/test/project',
     switchProject: vi.fn(),
     handleToggle: vi.fn(),
-    handleDisableSkill: mockHandleDisableSkill,
+    unmountSkills: mockUnmountSkills,
+    refetch: vi.fn(),
   }),
 }));
 
@@ -87,7 +88,7 @@ describe('SkillsContent', () => {
       container = document.createElement('div');
       document.body.appendChild(container);
       root = createRoot(container);
-      mockHandleDisableSkill.mockReset();
+      mockUnmountSkills.mockReset();
     });
 
     afterEach(() => {
@@ -95,41 +96,51 @@ describe('SkillsContent', () => {
       container.remove();
     });
 
-    it('shows uninstall button only for external skills', async () => {
+    // 07627ba4 起 skill 按需安装:所有已装 skill(含 cat-cafe 管理的)都可通过 unmount 卸载
+    it('shows uninstall button on every installed skill', async () => {
       await act(async () => {
         root.render(React.createElement(SkillsContent));
       });
 
       const uninstallButtons = container.querySelectorAll('button[aria-label="卸载 Skill"]');
-      expect(uninstallButtons).toHaveLength(1);
-
-      const card = uninstallButtons[0].closest('[class*="settings-resource-card"]');
-      expect(card?.textContent).toContain('ext-plugin');
+      expect(uninstallButtons).toHaveLength(MOCK_ITEMS_WITH_EXTERNAL.length);
     });
 
-    it('calls handleDisableSkill when uninstall button is clicked', async () => {
+    it('calls unmountSkills with the skill id when uninstall button is clicked', async () => {
       await act(async () => {
         root.render(React.createElement(SkillsContent));
       });
 
-      const uninstallBtn = container.querySelector('button[aria-label="卸载 Skill"]') as HTMLButtonElement;
+      const externalCard = Array.from(
+        container.querySelectorAll('[class*="settings-resource-card"]'),
+      ).find((c) => c.textContent?.includes('ext-plugin'));
+      const uninstallBtn = externalCard?.querySelector(
+        'button[aria-label="卸载 Skill"]',
+      ) as HTMLButtonElement;
       await act(async () => {
         uninstallBtn.click();
       });
 
-      expect(mockHandleDisableSkill).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'ext-plugin', source: 'external' }),
-      );
+      expect(mockUnmountSkills).toHaveBeenCalledWith(['ext-plugin']);
     });
 
-    it('does not show uninstall button for cat-cafe managed skills', async () => {
+    it('cat-cafe managed skills are uninstallable via unmountSkills too', async () => {
       await act(async () => {
         root.render(React.createElement(SkillsContent));
       });
 
       const cards = container.querySelectorAll('[class*="settings-resource-card"]');
       const managedCard = Array.from(cards).find((c) => c.textContent?.includes('tdd'));
-      expect(managedCard?.querySelector('button[aria-label="卸载 Skill"]')).toBeNull();
+      const uninstallBtn = managedCard?.querySelector(
+        'button[aria-label="卸载 Skill"]',
+      ) as HTMLButtonElement;
+      expect(uninstallBtn).toBeTruthy();
+
+      await act(async () => {
+        uninstallBtn.click();
+      });
+
+      expect(mockUnmountSkills).toHaveBeenCalledWith(['tdd']);
     });
   });
 });
