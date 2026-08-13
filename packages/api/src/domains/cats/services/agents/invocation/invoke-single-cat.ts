@@ -13,7 +13,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { createInvocationLogger } from '../../../../../infrastructure/invocation-logger.js';
 import { type CatId, type ContextHealth, catRegistry, type MessageContent, type ToolPolicy } from '@cat-cafe/shared';
 import { context, SpanStatusCode, trace } from '@opentelemetry/api';
 import {
@@ -22,15 +21,13 @@ import {
   validateRuntimeProviderBinding,
 } from '../../../../../config/account-resolver.js';
 import { resolveBoundAccountRefForCat } from '../../../../../config/cat-account-binding.js';
-import {
-  getCliRuntimeProfile,
-  mergeCliRuntimeProfileEnv,
-} from '../../../../../config/cli-runtime-profile-store.js';
 import { isSessionChainEnabled } from '../../../../../config/cat-config-loader.js';
+import { getCliRuntimeProfile, mergeCliRuntimeProfileEnv } from '../../../../../config/cli-runtime-profile-store.js';
 import { getContextWindowFallback } from '../../../../../config/context-window-sizes.js';
 import { getSessionStrategy, shouldTakeAction } from '../../../../../config/session-strategy.js';
 import { assertSafeTestConfigRoot } from '../../../../../config/test-config-write-guard.js';
 import { capturePromptIfEnabled } from '../../../../../infrastructure/debug/prompt-capture-bridge.js';
+import { createInvocationLogger } from '../../../../../infrastructure/invocation-logger.js';
 import { createModuleLogger } from '../../../../../infrastructure/logger.js';
 import type { CallerTraceContext } from '../../../../../infrastructure/telemetry/genai-semconv.js';
 import {
@@ -114,15 +111,25 @@ export function getOpenCodeKnownModels(): Set<string> {
   return _openCodeKnownModels;
 }
 
-function resolveClowderCliEnv(hostProjectRoot: string): Record<string, string> {
+/** @internal Exposed for tests */
+export function resolveClowderCliEnv(
+  hostProjectRoot: string,
+  platform: NodeJS.Platform = process.platform,
+): Record<string, string> {
   const binDir = join(hostProjectRoot, 'bin');
-  const cliPath = join(binDir, 'clowder');
+  // Windows 上不能把无扩展名的 Node 脚本(bin/clowder,shebang 无效)交给猫执行:
+  // cmd 对「存在但不可执行」的文件转交 ShellExecute,无关联文件会在铲屎官桌面
+  // 弹出「选择应用以打开 clowder」系统对话框(2026-08-13 现场)。Windows 指向
+  // clowder.cmd 垫片;PATH 分隔符按平台——此前硬编码 ':',Windows 子进程的
+  // PATH 首项被拼成「binDir:原PATH」一坨,查找行为不可预期。
+  const cliPath = platform === 'win32' ? join(binDir, 'clowder.cmd') : join(binDir, 'clowder');
   if (!existsSync(cliPath)) return {};
 
+  const delimiter = platform === 'win32' ? ';' : ':';
   const existingPath = process.env.PATH ?? '';
   return {
     CLOWDER_CLI_PATH: cliPath,
-    PATH: [binDir, existingPath].filter(Boolean).join(':'),
+    PATH: [binDir, existingPath].filter(Boolean).join(delimiter),
   };
 }
 
@@ -143,6 +150,7 @@ import type { ResumeFailureKind } from './invoke-helpers.js';
 import {
   classifyResumeFailure,
   extractTaskProgress,
+  getTransientProviderRetryDelayMs,
   isCliTimeoutError,
   isContextWindowOverflowError,
   isMissingClaudeSessionError,
@@ -151,7 +159,6 @@ import {
   isTransientCliExitCode1,
   isTransientProviderError,
   preflightRace,
-  getTransientProviderRetryDelayMs,
 } from './invoke-helpers.js';
 import { SessionMutex } from './SessionMutex.js';
 import type { TaskProgressItem, TaskProgressStatus, TaskProgressStore } from './TaskProgressStore.js';
@@ -1013,7 +1020,9 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         );
       }
       if (!cliRuntimeProfile) {
-        throw new Error(`CLI runtime profile "${cliRuntimeProfileRef}" for member "${catId}" is missing on this machine`);
+        throw new Error(
+          `CLI runtime profile "${cliRuntimeProfileRef}" for member "${catId}" is missing on this machine`,
+        );
       }
     }
     const runtimeProfileEnv = cliRuntimeProfile?.envVars;
@@ -1490,9 +1499,8 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
       // 可用 CAT_CAFE_CLI_STALL_KILL_MS 调整（>0 生效）。
       livenessProbe: {
         softWarningMs: 30_000,
-        stallWarningMs: Number(process.env.CAT_CAFE_CLI_STALL_KILL_MS) > 0
-          ? Number(process.env.CAT_CAFE_CLI_STALL_KILL_MS)
-          : 180_000,
+        stallWarningMs:
+          Number(process.env.CAT_CAFE_CLI_STALL_KILL_MS) > 0 ? Number(process.env.CAT_CAFE_CLI_STALL_KILL_MS) : 180_000,
         stallAutoKill: true,
       },
       ...(catConfig?.cliConfigArgs?.length ? { cliConfigArgs: catConfig.cliConfigArgs } : {}),
@@ -2259,10 +2267,14 @@ export async function* invokeSingleCat(deps: InvocationDeps, params: InvocationP
         // Invocation logger: 记录每条 agent 消息
         invLogger.logEvent(
           msg.type === 'text' ? 'text' : msg.type === 'error' ? 'error' : 'event',
-          catId, invocationId, threadId,
-          msg.type === 'text' ? { length: msg.content?.length ?? 0 }
-            : msg.type === 'error' ? { error: msg.error?.slice(0, 200), errorCode: msg.errorCode }
-            : { type: msg.type },
+          catId,
+          invocationId,
+          threadId,
+          msg.type === 'text'
+            ? { length: msg.content?.length ?? 0 }
+            : msg.type === 'error'
+              ? { error: msg.error?.slice(0, 200), errorCode: msg.errorCode }
+              : { type: msg.type },
         );
         // F149: provider_signal / liveness_signal must NOT reset timeout — prevents "续命"
         if (msg.type !== 'provider_signal' && msg.type !== 'liveness_signal') resetInvocationTimeout();
