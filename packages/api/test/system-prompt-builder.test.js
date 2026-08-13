@@ -250,7 +250,8 @@ describe('SystemPromptBuilder', () => {
 
     assert.match(rulesText, /先判定当前阶段是讨论还是执行/);
     assert.match(rulesText, /陈述目标、发散讨论、征求意见/);
-    assert.match(rulesText, /不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单/);
+    // a4d2f96b 起任意位置 @ 即路由——讨论阶段的纪律从「不行首 @」收紧为「不 @」
+    assert.match(rulesText, /不认领、不发 ack、不建 task、不 @ 任何猫、不切工单/);
     assert.match(rulesText, /明确执行口令.*才进入行动流程/);
 
     const build = await getBuilder();
@@ -265,7 +266,7 @@ describe('SystemPromptBuilder', () => {
     const actionPosition = prompt.indexOf('## Clowder CLI 工作纪律');
     assert.ok(gatePosition >= 0, 'prompt should inject the discussion/execution gate');
     assert.ok(actionPosition > gatePosition, 'stage classification must appear before action discipline');
-    assert.ok(prompt.includes('不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单'));
+    assert.ok(prompt.includes('不认领、不发 ack、不建 task、不 @ 任何猫、不切工单'));
     assert.ok(prompt.includes('开工/按这个做/安排/执行'));
     assert.ok(prompt.includes('明确执行口令出现后才进入行动流程'));
     assert.ok(prompt.includes('行动任务先认领或复用任务'), 'explicit execution must still reach claim-first flow');
@@ -299,7 +300,7 @@ describe('SystemPromptBuilder', () => {
       runtimeActionPosition > runtimeGatePosition,
       'runtime task gate must classify stage before claim-first action',
     );
-    assert.ok(runtimePrompt.includes('不认领、不发 ack、不建 task、不行首 @ 任何猫、不切工单'));
+    assert.ok(runtimePrompt.includes('不认领、不发 ack、不建 task、不 @ 任何猫、不切工单'));
   });
 
   test('is deterministic (identical inputs produce identical output)', async () => {
@@ -1098,7 +1099,9 @@ describe('SystemPromptBuilder', () => {
       a2aEnabled: true,
     });
     assert.ok(ctx.includes('A2A 路由'), 'Should include A2A routing hint');
-    assert.ok(ctx.includes('行首 @ 才触发'), 'Should teach line-start @ routing');
+    // a4d2f96b: 「行首 @ 才触发」→「任意位置 @ 都会触发」,并教「纯提及用不带 @ 的名字」
+    assert.ok(ctx.includes('任意位置 @ 都会触发'), 'Should teach any-position @ routing');
+    assert.ok(ctx.includes('纯提及用不带 @ 的名字'), 'Should teach plain-text mention without routing');
   });
 
   test('F167-F AC-F1: teammate roster surfaces resolved model per cat (handle/model 解绑)', async () => {
