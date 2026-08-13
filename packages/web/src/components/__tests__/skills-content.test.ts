@@ -111,12 +111,10 @@ describe('SkillsContent', () => {
         root.render(React.createElement(SkillsContent));
       });
 
-      const externalCard = Array.from(
-        container.querySelectorAll('[class*="settings-resource-card"]'),
-      ).find((c) => c.textContent?.includes('ext-plugin'));
-      const uninstallBtn = externalCard?.querySelector(
-        'button[aria-label="卸载 Skill"]',
-      ) as HTMLButtonElement;
+      const externalCard = Array.from(container.querySelectorAll('[class*="settings-resource-card"]')).find((c) =>
+        c.textContent?.includes('ext-plugin'),
+      );
+      const uninstallBtn = externalCard?.querySelector('button[aria-label="卸载 Skill"]') as HTMLButtonElement;
       await act(async () => {
         uninstallBtn.click();
       });
@@ -131,9 +129,7 @@ describe('SkillsContent', () => {
 
       const cards = container.querySelectorAll('[class*="settings-resource-card"]');
       const managedCard = Array.from(cards).find((c) => c.textContent?.includes('tdd'));
-      const uninstallBtn = managedCard?.querySelector(
-        'button[aria-label="卸载 Skill"]',
-      ) as HTMLButtonElement;
+      const uninstallBtn = managedCard?.querySelector('button[aria-label="卸载 Skill"]') as HTMLButtonElement;
       expect(uninstallBtn).toBeTruthy();
 
       await act(async () => {

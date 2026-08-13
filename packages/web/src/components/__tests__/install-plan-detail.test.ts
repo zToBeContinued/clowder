@@ -87,9 +87,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     });
     await flushEffects();
 
-    const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.trim() === '安装',
-    );
+    const installBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === '安装');
     expect(installBtn).toBeTruthy();
     expect(installBtn?.disabled).toBe(false);
 
@@ -124,9 +122,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     });
     await flushEffects();
 
-    const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.trim() === '安装',
-    );
+    const installBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === '安装');
 
     await act(async () => {
       installBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -153,9 +149,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     });
     await flushEffects();
 
-    const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.trim() === '安装',
-    );
+    const installBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === '安装');
 
     await act(async () => {
       installBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -180,9 +174,7 @@ describe('InstallPlanDetail direct_mcp install', () => {
     });
     await flushEffects();
 
-    const installBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.trim() === '安装',
-    );
+    const installBtn = Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.trim() === '安装');
 
     await act(async () => {
       installBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
