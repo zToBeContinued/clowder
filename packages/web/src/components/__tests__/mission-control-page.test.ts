@@ -1132,17 +1132,21 @@ describe('MissionControlPage — Done lane + dependencies', () => {
     });
     await flush(act);
 
-    // Click the feature row to expand it and reveal dependency labels
-    const featureRow = container.querySelector('[data-testid="mc-feature-row-Untagged"]');
-    expect(featureRow).not.toBeNull();
-    const expandButton = featureRow?.querySelector('button');
-    expect(expandButton).not.toBeNull();
-    await act(async () => {
-      expandButton?.click();
-    });
-
+    // 05fd61d5(console 重构)起 Untagged 组默认展开:依赖标签渲染后直接可见
     expect(container.textContent).toContain('← F049');
     expect(container.textContent).toContain('↔ F037');
+
+    // 点击标题行折叠后,依赖标签隐藏(toggle 语义防回归)
+    const featureRow = container.querySelector('[data-testid="mc-feature-row-Untagged"]');
+    expect(featureRow).not.toBeNull();
+    const toggleButton = featureRow?.querySelector('button');
+    expect(toggleButton).not.toBeNull();
+    await act(async () => {
+      toggleButton?.click();
+    });
+
+    expect(container.textContent).not.toContain('← F049');
+    expect(container.textContent).not.toContain('↔ F037');
   });
 });
 

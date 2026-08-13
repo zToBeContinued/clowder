@@ -13,6 +13,7 @@ vi.mock('@/stores/chatStore', () => ({
       threads: [],
       currentThreadId: 'default',
       catStatuses: {},
+      messages: [],
     }),
   resolveBubbleExpanded: (override: string | undefined, globalDefault: string) => {
     if (override && override !== 'global') return override === 'expanded';

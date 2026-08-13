@@ -9,12 +9,14 @@ vi.mock('@/stores/chatStore', () => ({
       threads: { id: string; title: string }[];
       uiThinkingExpandedByDefault: boolean;
       catStatuses: Record<string, never>;
+      messages: never[];
     }) => unknown,
   ) =>
     selector({
       uiThinkingExpandedByDefault: false,
       threads: [{ id: 'thread_mm72eyvc12345678', title: 'F052 跨线程调度测试' }],
       catStatuses: {},
+      messages: [],
     }),
 }));
 

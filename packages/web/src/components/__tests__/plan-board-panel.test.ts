@@ -124,7 +124,10 @@ describe('F055: PlanBoardPanel (猫猫祟祟)', () => {
 
     // Only opus has real tasks; codex has no taskProgress; gemini has empty tasks
     // Opus is completed, so it's in the collapsed fold — count should be 1
-    expect(container.textContent).toContain('猫猫祟祟 (1)');
+    // 头部从「猫猫祟祟 (1)」演进为标题 + 独立计数徽章(h3 相邻 span)
+    const header = container.querySelector('section h3');
+    expect(header?.textContent).toBe('猫猫祟祟');
+    expect(header?.nextElementSibling?.textContent).toBe('1');
     expect(container.textContent).toContain('已完成 (1)');
     expect(container.textContent).not.toContain('Codex');
     expect(container.textContent).not.toContain('Gemini');
