@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { describe, test } from 'node:test';
@@ -286,7 +286,18 @@ triggers:
       assert.ok(context.matchedSkillNames.includes(externalName));
       assert.match(context.promptBlock, new RegExp(externalName));
     } finally {
-      rmSync(linkPath, { force: true });
+      // Windows 上目录符号链接不能按文件 unlink(EISDIR),要用 rmdir 删链接本身
+      // (不动目标)。此前 rmSync(force) 在 Windows 清理失败,每跑一次就往
+      // cat-cafe-skills/external/ 里漏一个 external-probe-* 死链。
+      try {
+        unlinkSync(linkPath);
+      } catch {
+        try {
+          rmdirSync(linkPath);
+        } catch {
+          /* 清理尽力而为,不影响断言结果 */
+        }
+      }
       rmSync(workDir, { recursive: true, force: true });
     }
   });

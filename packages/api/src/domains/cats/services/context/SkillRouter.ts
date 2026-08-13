@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
   DEFAULT_PERSONAL_SKILL_INDEX_PATH,
@@ -196,16 +196,21 @@ function resolveRepoSkillRoot(): string {
   return resolve(findMonorepoRoot(), 'cat-cafe-skills');
 }
 
+// Windows 暗礁:path.resolve 产出反斜杠路径,拼死 '/' 做前后缀判断会全军覆没
+// (isSafeCatCafeSkillPath 恒 false → 目录为空 → SkillRouter 在 Windows 整体失效,
+// 2026-08-13 skill-router-context 8 个失败的根因)。统一用 path.sep。
 function isSafeCatCafeSkillPath(path: string): boolean {
   const resolvedPath = resolve(path);
   const skillRoot = resolveRepoSkillRoot();
-  return resolvedPath.startsWith(`${skillRoot}/`) && resolvedPath.endsWith('/SKILL.md');
+  return resolvedPath.startsWith(`${skillRoot}${sep}`) && resolvedPath.endsWith(`${sep}SKILL.md`);
 }
 
 function toRelativeRepoPath(path: string): string {
   const root = findMonorepoRoot();
   const resolvedPath = resolve(path);
-  return resolvedPath.startsWith(`${root}/`) ? resolvedPath.slice(root.length + 1) : resolvedPath;
+  if (!resolvedPath.startsWith(`${root}${sep}`)) return resolvedPath;
+  // 展示用统一正斜杠,跨平台稳定(Windows 解析正斜杠路径也没问题)。
+  return relative(root, resolvedPath).split(sep).join('/');
 }
 
 function readSkillContent(sourcePath: string): string | null {
@@ -339,7 +344,7 @@ function normalizeExternalSkillEntry(sourcePath: string): SkillRouterCatalogEntr
   if (!content) return null;
 
   const frontmatter = parseSkillFrontmatter(content);
-  const dirName = dirname(sourcePath).split('/').pop() ?? '';
+  const dirName = basename(dirname(sourcePath));
   const skillName = frontmatterName(frontmatter, dirName);
 
   return makeCatalogEntry({
