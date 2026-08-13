@@ -183,13 +183,3 @@ export async function createInLobby(container: HTMLElement, flush: () => Promise
   });
   await flush();
 }
-
-export async function clickBootcampButton(container: HTMLElement, flush: () => Promise<void>) {
-  const bootcampButton = container.querySelector('[data-testid="sidebar-bootcamp"]') as HTMLButtonElement | null;
-  if (!bootcampButton) throw new Error('sidebar-bootcamp button not found');
-
-  await act(async () => {
-    bootcampButton.click();
-  });
-  await flush();
-}

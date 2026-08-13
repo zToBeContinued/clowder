@@ -77,7 +77,7 @@ const thinkingMessage = {
 const getCatById = () => undefined;
 
 describe('ThinkingContent default collapse', () => {
-  it('default: thinking is collapsed, CLI output block is collapsed', () => {
+  it('default: thinking is collapsed; toolEvents no longer render a CLI Output block', () => {
     act(() => {
       root.render(
         React.createElement(ChatMessage, {
@@ -92,7 +92,9 @@ describe('ThinkingContent default collapse', () => {
     const cliButton = Array.from(buttons).find((b) => b.textContent?.includes('CLI Output'));
 
     expect(thinkingButton).toBeTruthy();
-    expect(cliButton).toBeTruthy();
+    // eb5fe913(slock 大改)起气泡内只保留 Thinking 折叠块,
+    // toolEvents 不再渲染 CLI Output 块。
+    expect(cliButton).toBeUndefined();
 
     // Thinking expanded content should NOT be visible (collapsed)
     const markdownDivs = container.querySelectorAll('.cli-output-md');

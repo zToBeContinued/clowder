@@ -259,11 +259,11 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
     expect(container.textContent).toContain(THINKING_TEXT);
   });
 
-  it('stream-origin messages render via CliOutputBlock with text content default-expanded (stream-final-speech heuristic)', async () => {
+  it('stream-origin final message renders its content directly (CliOutputBlock retired from bubbles)', async () => {
     const { ChatMessage } = await import('@/components/ChatMessage');
 
-    // Stream + content + no callback companion → CLI Output is default-expanded so the
-    // 4.6/sonnet native final speech is immediately visible (no manual click required).
+    // eb5fe913(slock 大改)起 stream 最终正文直接作为消息体渲染,
+    // 不再包一层 CLI Output 块——「最终发言立即可见」由正文本身保证。
     const streamMsg = {
       id: 's1',
       type: 'assistant' as const,
@@ -284,8 +284,8 @@ describe('F045: ThinkingContent thinkingMode toggle', () => {
       );
     });
 
-    expect(container.textContent).toContain('CLI Output');
-    // No manual expand needed — the heuristic auto-expands stream-final-speech.
+    expect(container.textContent).not.toContain('CLI Output');
+    // Final speech is immediately visible without any expand interaction.
     expect(container.textContent).toContain('stream inner monologue content here');
   });
 

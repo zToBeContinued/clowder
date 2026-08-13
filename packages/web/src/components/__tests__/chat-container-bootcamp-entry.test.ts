@@ -1,20 +1,16 @@
+/**
+ * Bootcamp 入口(F106)现状测试。
+ *
+ * 入口演进:slock 大改(eb5fe913)移除了 ThreadSidebar 的
+ * data-testid="sidebar-bootcamp" 按钮,训练营入口迁移到 ChatContainer
+ * 空线程状态(empty-state-bootcamp / empty-state-bootcamp-list)。
+ * 本文件接替原 thread-sidebar-bootcamp-entry.test.tsx 守护「入口存在 +
+ * 点击打开训练营列表」的等价语义。
+ */
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatContainer } from '@/components/ChatContainer';
-
-const mockSetLoading = vi.fn();
-const mockSetHasActiveInvocation = vi.fn();
-const mockSetIntentMode = vi.fn();
-const mockSetTargetCats = vi.fn();
-const mockSetCurrentThread = vi.fn();
-const mockClearUnread = vi.fn();
-const mockHandleAgentMessage = vi.fn();
-
-let capturedSocketCallbacks: {
-  onIntentMode?: (data: { threadId: string; mode: string; targetCats: string[] }) => void;
-  onMessage?: (msg: unknown) => void;
-} | null = null;
 
 function createMockStoreState() {
   return {
@@ -28,19 +24,19 @@ function createMockStoreState() {
     activeInvocations: {},
     addMessage: vi.fn(),
     removeMessage: vi.fn(),
-    setLoading: mockSetLoading,
-    setHasActiveInvocation: mockSetHasActiveInvocation,
-    setIntentMode: mockSetIntentMode,
-    setTargetCats: mockSetTargetCats,
+    setLoading: vi.fn(),
+    setHasActiveInvocation: vi.fn(),
+    setIntentMode: vi.fn(),
+    setTargetCats: vi.fn(),
     clearCatStatuses: vi.fn(),
-    setCurrentThread: mockSetCurrentThread,
+    setCurrentThread: vi.fn(),
     updateThreadTitle: vi.fn(),
     setCurrentGame: vi.fn(),
     currentGame: null,
 
     viewMode: 'single' as const,
     setViewMode: vi.fn(),
-    clearUnread: mockClearUnread,
+    clearUnread: vi.fn(),
     confirmUnreadAck: vi.fn(),
     armUnreadSuppression: vi.fn(),
     splitPaneThreadIds: [],
@@ -73,18 +69,12 @@ vi.mock('@/stores/taskStore', () => ({
 }));
 
 vi.mock('@/hooks/useSocket', () => ({
-  useSocket: (callbacks: unknown) => {
-    capturedSocketCallbacks = callbacks as {
-      onIntentMode?: (data: { threadId: string; mode: string; targetCats: string[] }) => void;
-      onMessage?: (msg: unknown) => void;
-    };
-    return { cancelInvocation: vi.fn(), syncRooms: vi.fn() };
-  },
+  useSocket: () => ({ cancelInvocation: vi.fn(), syncRooms: vi.fn() }),
 }));
 
 vi.mock('@/hooks/useAgentMessages', () => ({
   useAgentMessages: () => ({
-    handleAgentMessage: mockHandleAgentMessage,
+    handleAgentMessage: vi.fn(),
     handleStop: vi.fn(),
     resetRefs: vi.fn(),
     resetTimeout: vi.fn(),
@@ -112,7 +102,11 @@ vi.mock('@/hooks/useAuthorization', () => ({
 vi.mock('@/hooks/useSplitPaneKeys', () => ({ useSplitPaneKeys: vi.fn() }));
 
 vi.mock('../AuthorizationCard', () => ({ AuthorizationCard: () => null }));
-vi.mock('../BootcampListModal', () => ({ BootcampListModal: () => null }));
+// 关键:BootcampListModal 用尊重 open 属性的 stub,断言入口点击后弹出。
+vi.mock('../BootcampListModal', () => ({
+  BootcampListModal: ({ open }: { open?: boolean }) =>
+    open ? React.createElement('div', { 'data-testid': 'bootcamp-list-modal' }) : null,
+}));
 vi.mock('../BootstrapOrchestrator', () => ({ BootstrapOrchestrator: () => null }));
 vi.mock('../CatCafeHub', () => ({ CatCafeHub: () => null }));
 vi.mock('../ChatContainerHeader', () => ({ ChatContainerHeader: () => null }));
@@ -139,7 +133,7 @@ vi.mock('../VoteConfigModal', () => ({ VoteConfigModal: () => null }));
 vi.mock('../WorkspacePanel', () => ({ WorkspacePanel: () => null }));
 vi.mock('../workspace/ResizeHandle', () => ({ ResizeHandle: () => null }));
 
-describe('ChatContainer intent_mode loading lock', () => {
+describe('ChatContainer bootcamp entry (empty state)', () => {
   let container: HTMLDivElement;
   let root: Root;
 
@@ -158,14 +152,6 @@ describe('ChatContainer intent_mode loading lock', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     storeState = createMockStoreState();
-    capturedSocketCallbacks = null;
-    mockSetLoading.mockClear();
-    mockSetHasActiveInvocation.mockClear();
-    mockSetIntentMode.mockClear();
-    mockSetTargetCats.mockClear();
-    mockSetCurrentThread.mockClear();
-    mockClearUnread.mockClear();
-    mockHandleAgentMessage.mockClear();
   });
 
   afterEach(() => {
@@ -175,104 +161,28 @@ describe('ChatContainer intent_mode loading lock', () => {
     container.remove();
   });
 
-  it('locks input when current thread receives intent_mode', () => {
+  it('empty thread shows the bootcamp entry (moved here from the sidebar)', () => {
     act(() => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
-    expect(capturedSocketCallbacks?.onIntentMode).toBeTruthy();
-
-    act(() => {
-      capturedSocketCallbacks?.onIntentMode?.({
-        threadId: 'thread-1',
-        mode: 'execute',
-        targetCats: ['codex'],
-      });
-    });
-
-    expect(mockSetLoading).toHaveBeenCalledWith(true);
-    expect(mockSetIntentMode).toHaveBeenCalledWith('execute');
-    expect(mockSetTargetCats).toHaveBeenCalledWith(['codex']);
+    const entry = container.querySelector('[data-testid="empty-state-bootcamp"]');
+    expect(entry).not.toBeNull();
+    expect(entry?.textContent).toContain('训练营');
   });
 
-  it('sets hasActiveInvocation when current thread receives intent_mode', () => {
+  it('clicking the bootcamp entry opens the bootcamp list', () => {
     act(() => {
       root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
     });
 
+    expect(container.querySelector('[data-testid="bootcamp-list-modal"]')).toBeNull();
+
+    const entry = container.querySelector('[data-testid="empty-state-bootcamp"]') as HTMLButtonElement;
     act(() => {
-      capturedSocketCallbacks?.onIntentMode?.({
-        threadId: 'thread-1',
-        mode: 'execute',
-        targetCats: ['codex'],
-      });
+      entry.click();
     });
 
-    expect(mockSetHasActiveInvocation).toHaveBeenCalledWith(true);
-  });
-
-  it('renders AgentStatusIndicator when a single active slot exists even if intentMode is missing', () => {
-    storeState.hasActiveInvocation = true;
-    storeState.activeInvocations = {
-      'inv-1': { catId: 'opencode', mode: 'execute', startedAt: Date.now() },
-    };
-    storeState.intentMode = null;
-    storeState.targetCats = [];
-
-    act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
-    });
-
-    // slock UX 起活动指示由 ThinkingIndicator 迁移为 AgentStatusIndicator,
-    // 仅依赖 activeInvocations(intentMode 缺失也要能显示活动)。
-    const indicator = container.querySelector('[data-testid="agent-status-indicator"]');
-    expect(indicator).not.toBeNull();
-    expect(indicator?.textContent).toContain('opencode');
-  });
-
-  // Cross-thread guard has moved to useSocket (dual-pointer guard).
-  // ChatContainer's onIntentMode callback only fires for the truly active thread.
-  // These tests verify that the callback unconditionally processes whatever it receives
-  // (since useSocket guarantees correctness).
-  it('processes intent_mode unconditionally (guard is in useSocket, not here)', () => {
-    act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-main' }));
-    });
-
-    act(() => {
-      capturedSocketCallbacks?.onIntentMode?.({
-        threadId: 'thread-main',
-        mode: 'ideate',
-        targetCats: [],
-      });
-    });
-
-    // Even with empty targetCats, setTargetCats is called to clear any previous value
-    expect(mockSetLoading).toHaveBeenCalledWith(true);
-    expect(mockSetHasActiveInvocation).toHaveBeenCalledWith(true);
-    expect(mockSetIntentMode).toHaveBeenCalledWith('ideate');
-    expect(mockSetTargetCats).toHaveBeenCalledWith([]);
-  });
-
-  it('does not drop onMessage during thread switch suppression window', () => {
-    act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-1' }));
-    });
-
-    act(() => {
-      root.render(React.createElement(ChatContainer, { threadId: 'thread-2' }));
-    });
-
-    expect(capturedSocketCallbacks?.onMessage).toBeTruthy();
-
-    capturedSocketCallbacks?.onMessage?.({
-      type: 'text',
-      catId: 'codex',
-      threadId: 'thread-2',
-      content: 'hello',
-      timestamp: Date.now(),
-    });
-
-    expect(mockHandleAgentMessage).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[data-testid="bootcamp-list-modal"]')).not.toBeNull();
   });
 });

@@ -91,9 +91,13 @@ describe('MarkdownContent workspace link rendering', () => {
     expect(html).toContain('https://github.com');
   });
 
-  it('renders relative md link as external when no basePath', () => {
+  it('renders relative md link as styled text (not an anchor) when no basePath', () => {
+    // eb5fe913(slock 大改)起:无 basePath 的相对链接在 Next.js 下会 404,
+    // 不再渲染为 target="_blank" 外链,改为强调色纯文本。
     const html = render('[Feature spec](features/F046.md)');
-    expect(html).toContain('target="_blank"');
+    expect(html).not.toContain('target="_blank"');
+    expect(html).not.toContain('<a ');
+    expect(html).toContain('Feature spec');
     expect(html).not.toContain('在工作区中打开');
   });
 });

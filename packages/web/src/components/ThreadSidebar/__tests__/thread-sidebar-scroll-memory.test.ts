@@ -157,20 +157,13 @@ describe('ThreadSidebar scroll memory', () => {
     });
   }
 
-  function expandAll(rootEl: HTMLElement) {
-    const expandBtn = rootEl.querySelector('[data-testid="expand-all-btn"]') as HTMLButtonElement | null;
-    if (!expandBtn) throw new Error('expand-all button not found');
-    act(() => {
-      expandBtn.click();
-    });
-  }
-
+  // slock 侧栏(eb5fe913)后分组默认全展开,不再有 expand-all 按钮;
+  // 线程行渲染后即可直接驱动滚动。
   it('keeps sidebar scroll position when switching to a thread far below', async () => {
     act(() => {
       root.render(React.createElement(ThreadSidebar));
     });
     await flush();
-    expandAll(container);
 
     const scroller = findScrollContainer(container);
     scroller.scrollTop = 280;
@@ -191,7 +184,6 @@ describe('ThreadSidebar scroll memory', () => {
       root.render(React.createElement(ThreadSidebar));
     });
     await flush();
-    expandAll(container);
 
     const nextScroller = findScrollContainer(container);
     expect(nextScroller.scrollTop).toBe(280);
@@ -202,7 +194,6 @@ describe('ThreadSidebar scroll memory', () => {
       root.render(React.createElement(ThreadSidebar));
     });
     await flush();
-    expandAll(container);
 
     const scroller = findScrollContainer(container);
     scroller.scrollTop = 350;
