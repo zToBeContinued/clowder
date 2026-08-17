@@ -14,6 +14,7 @@ import {
   spawnCli,
 } from '../../../../../utils/cli-spawn.js';
 import type { SpawnFn } from '../../../../../utils/cli-types.js';
+import { getSystemProxyEnv } from '../../../../../utils/system-proxy.js';
 import type { AgentMessage, AgentService, AgentServiceOptions, MessageMetadata } from '../../types.js';
 import { resolveDefaultClaudeMcpServerPath } from './ClaudeAgentService.js';
 import { transformGrokEvent } from './grok-event-transform.js';
@@ -196,20 +197,16 @@ export class GrokAgentService implements AgentService {
       'streaming-json',
       '--model',
       this.model,
-      // Keep unlisted side-effect tools behind the permission gate; explicit allow rules below stay headless-safe.
-      '--permission-mode',
-      'default',
-      // The isolated GROK_HOME exposes only Cat Cafe's MCP server; approve that namespace explicitly.
-      '--allow',
-      'MCPTool(cat-cafe-clowder-runtime__*)',
-      // Grok names the runtime tool `run_terminal_command`, but permission rules use the Bash alias.
-      '--allow',
-      'Bash',
-      // Structured workspace edits are core engineering actions. Keep them explicit so unknown tools stay gated.
-      '--allow',
-      'Write',
-      '--allow',
-      'Edit',
+      // 本部署显式把 Grok 猫设为「全权限 + 不进沙盒」（铲屎官 2026-08-17 明令，
+      // 与本机 PowerShell profile 里 grok 的用法保持一致）。此前是白名单模式
+      //（--permission-mode default + 四条 --allow），已按该指令整体替换。
+      // --always-approve 跳过所有工具调用确认；deny 规则与 hooks 仍然生效，
+      // 因此这不是「完全无闸」，而是「默认放行、仅保留显式拒绝」。
+      '--always-approve',
+      // 沙盒在 Grok 官方是默认关闭的，这里显式写死，避免 GROK_SANDBOX 环境变量
+      // 或项目级配置文件把它悄悄打开（项目级配置可改行为，见 grok-build 已知问题）。
+      '--sandbox',
+      'off',
     ];
     if (options?.sessionId) {
       args.push('--resume', options.sessionId);
@@ -252,6 +249,11 @@ export class GrokAgentService implements AgentService {
       }
     }
     const env: Record<string, string | null> = {
+      // 系统代理放在最前 = 最低优先级：grok 只认 HTTP_PROXY 环境变量、不读 Windows
+      // 系统代理，而它要拉 storage.googleapis.com（直连极慢）。这里把「Clash 已开
+      // 系统代理」翻译成环境变量，铲屎官无需为 grok 猫单独配 runtime profile。
+      // 只读注册表，不修改任何系统代理设置；父进程或 accountEnv 已显式配代理时不覆盖。
+      ...getSystemProxyEnv(),
       ...(options?.callbackEnv ?? {}),
       ...(options?.accountEnv ?? {}),
       ...(profileMode === 'subscription' ? { XAI_API_KEY: null } : {}),

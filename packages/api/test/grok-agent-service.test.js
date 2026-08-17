@@ -65,15 +65,18 @@ test('streams thought, text, session_init and done from grok streaming-json', as
   assert.ok(spawnOptions.args.includes('streaming-json'));
   assert.ok(spawnOptions.args.includes('--model'));
   assert.ok(spawnOptions.args.includes('grok-4.5'));
-  const permissionModeIndex = spawnOptions.args.indexOf('--permission-mode');
-  assert.ok(permissionModeIndex >= 0);
-  assert.equal(spawnOptions.args[permissionModeIndex + 1], 'default');
+  // 2026-08-17 铲屎官明令：Grok 猫改为「全权限 + 不进沙盒」，替换原白名单模式。
+  // 本断言组随之反转——原来守的是「不得出现 --always-approve」，现在守的是
+  // 「必须全权限、必须关沙盒、且不得残留白名单」，防止日后被无声改回去。
+  assert.equal(spawnOptions.args.includes('--always-approve'), true);
+  const sandboxIndex = spawnOptions.args.indexOf('--sandbox');
+  assert.ok(sandboxIndex >= 0);
+  assert.equal(spawnOptions.args[sandboxIndex + 1], 'off');
+  assert.equal(spawnOptions.args.includes('--permission-mode'), false);
   const allowedTools = spawnOptions.args.flatMap((value, index, args) =>
     value === '--allow' && args[index + 1] ? [args[index + 1]] : [],
   );
-  assert.deepEqual(allowedTools, ['MCPTool(cat-cafe-clowder-runtime__*)', 'Bash', 'Write', 'Edit']);
-  assert.equal(spawnOptions.args.includes('--always-approve'), false);
-  assert.equal(spawnOptions.args.includes('bypassPermissions'), false);
+  assert.deepEqual(allowedTools, []);
   assert.equal(spawnOptions.env.XAI_API_KEY, 'test-key');
   assert.equal(spawnOptions.env.CUSTOM_ENV, 'enabled');
 });
