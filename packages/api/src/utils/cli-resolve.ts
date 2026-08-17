@@ -22,6 +22,8 @@ const UNIX_SEARCH_DIRS = [
   '.claude/local/bin',
   '.fnm/aliases/default/bin',
   '.volta/bin',
+  // xAI Grok Build 官方安装器的落点（install.sh / install.ps1 都用 ~/.grok/bin）
+  '.grok/bin',
   '.nix-profile/bin',
 ];
 
@@ -37,6 +39,31 @@ function collectNvmBinDirs(): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Windows 上厂商自带安装器的固定落点。
+ *
+ * 这些 CLI 不经 npm，安装器把目录写进 **User PATH**；但安装之前就已启动的进程
+ * （含长驻的 clowder API）继承的是旧 PATH，`where <cmd>` 会扑空。实测踩过一次：
+ * grok 装好后 9 个单测全在拿到参数前就短路成「CLI 未找到」。直接命中落点即可
+ * 绕开「PATH 需要重开进程才刷新」这个坑。
+ */
+const WINDOWS_VENDOR_INSTALLS: readonly { command: string; envVar: string; segments: readonly string[] }[] = [
+  { command: 'kiro-cli', envVar: 'LOCALAPPDATA', segments: ['Kiro-Cli', 'kiro-cli.exe'] },
+  // xAI Grok Build：install.ps1 装到 %USERPROFILE%\.grok\bin
+  { command: 'grok', envVar: 'USERPROFILE', segments: ['.grok', 'bin', 'grok.exe'] },
+];
+
+function resolveWindowsVendorInstall(command: string): string | null {
+  for (const entry of WINDOWS_VENDOR_INSTALLS) {
+    if (entry.command !== command) continue;
+    const base = process.env[entry.envVar];
+    if (!base) continue;
+    const candidate = resolve(base, ...entry.segments);
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
 }
 
 const resolvedCache = new Map<string, string>();
@@ -117,12 +144,10 @@ export function resolveCliCommand(command: string): string | null {
     // were installed by the bundled npm during post-install.
     const appData = process.env.APPDATA;
     const localAppData = process.env.LOCALAPPDATA;
-    if (command === 'kiro-cli' && localAppData) {
-      const kiroCandidate = resolve(localAppData, 'Kiro-Cli', 'kiro-cli.exe');
-      if (existsSync(kiroCandidate)) {
-        resolvedCache.set(command, kiroCandidate);
-        return kiroCandidate;
-      }
+    const wellKnown = resolveWindowsVendorInstall(command);
+    if (wellKnown) {
+      resolvedCache.set(command, wellKnown);
+      return wellKnown;
     }
     const winDirs: string[] = [];
     if (appData) winDirs.push(resolve(appData, 'npm'));
@@ -179,7 +204,9 @@ export function formatCliNotFoundError(command: string): string {
     gemini: 'npm install -g @google/gemini-cli',
     'kiro-cli': '按 Kiro CLI 官方安装文档完成安装',
     kimi: 'uv tool install --python 3.13 kimi-cli',
-    grok: 'follow the official xAI Grok CLI installation guide',
+    grok: IS_WINDOWS
+      ? 'irm https://x.ai/cli/install.ps1 | iex（或 npm install -g @xai-official/grok）'
+      : 'curl -fsSL https://x.ai/cli/install.sh | bash（或 npm install -g @xai-official/grok）',
     opencode: 'npm install -g opencode',
   };
   const hint = installHints[command] ?? `install the "${command}" CLI`;
