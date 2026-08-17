@@ -75,7 +75,22 @@ try {
     Write-Warn "Clowder will still start (in-memory). Re-run once proxy/network is available to get Redis."
 }
 
-# --- 3) Keep kiro-cli current (breaks the installer re-download loop) --------
+# --- 3) Keep vendor CLIs current: kiro-cli / grok / cursor-agent -------------
+#
+# These three ship their own updaters (not npm), so `pnpm install` never touches
+# them. Updating here -- in a short-lived foreground process, after the proxy
+# block -- is the only place where the download and the install step can both
+# finish. Every CLI is optional and never fatal: missing binary, dead network or
+# a hung updater only warns and lets Clowder start.
+#
+# grok needs the proxy block above to have run: it fetches from
+# storage.googleapis.com, which is the slow/blocked leg on this machine
+# (measured: 69s direct vs 2s through 7890). kiro-cli and cursor-agent reach
+# their endpoints directly and ignore HTTP_PROXY entirely.
+#
+# Only kiro-cli uses the two-phase check-then-apply path; the root cause below
+# is specific to it. grok and cursor-agent decide for themselves and just print
+# "already up to date", so a single call is enough.
 #
 # Root cause of the kiro-installer-*.msi pile in .cat-cafe\runtime\tmp: whenever the
 # installed kiro-cli is behind the published release, its updater starts a full ~238MB
@@ -89,10 +104,10 @@ try {
 #
 # Runs after the proxy block on purpose (the updater needs network). Never fatal: a missing
 # kiro-cli, a network failure or a hung updater only warns and lets Clowder start.
-function Invoke-KiroCliCommand {
+function Invoke-CliUpdaterCommand {
     param(
         [Parameter(Mandatory = $true)][string]$Exe,
-        [Parameter(Mandatory = $true)][string[]]$KiroArgs,
+        [Parameter(Mandatory = $true)][string[]]$CliArgs,
         [Parameter(Mandatory = $true)][int]$TimeoutSec
     )
 
@@ -106,10 +121,10 @@ function Invoke-KiroCliCommand {
     if ($Exe -match "\.(cmd|bat)$") {
         # CreateProcess cannot launch a batch shim directly -- route it through cmd.exe.
         $psi.FileName = "$env:SystemRoot\System32\cmd.exe"
-        $psi.Arguments = "/d /c `"$Exe`" " + ($KiroArgs -join " ")
+        $psi.Arguments = "/d /c `"$Exe`" " + ($CliArgs -join " ")
     } else {
         $psi.FileName = $Exe
-        $psi.Arguments = ($KiroArgs -join " ")
+        $psi.Arguments = ($CliArgs -join " ")
     }
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
@@ -136,48 +151,120 @@ function Invoke-KiroCliCommand {
     return [pscustomobject]@{ TimedOut = $false; ExitCode = $proc.ExitCode; Output = ($out + "`n" + $err) }
 }
 
-function Resolve-KiroCliPath {
-    $found = Get-Command "kiro-cli" -CommandType Application -ErrorAction SilentlyContinue |
+function Resolve-VendorCliPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$Command,
+        [string]$FallbackPath
+    )
+
+    # -CommandType Application on purpose: it skips .ps1 shims (ExternalScript) and
+    # picks the .cmd/.exe, which is what CreateProcess can actually launch. Matters
+    # for cursor-agent, which ships both.
+    $found = Get-Command $Command -CommandType Application -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($found) { return $found.Source }
-    # Same fallback the API uses (see packages/api/src/utils/cli-resolve.ts): the official
-    # Windows installer drops the binary here and does not always land on PATH.
-    if ($env:LOCALAPPDATA) {
-        $candidate = Join-Path $env:LOCALAPPDATA "Kiro-Cli\kiro-cli.exe"
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    # Same fallbacks the API uses (see packages/api/src/utils/cli-resolve.ts): these
+    # installers drop the binary in a fixed place and write PATH into the registry,
+    # which an already-running process never sees.
+    if ($FallbackPath -and (Test-Path -LiteralPath $FallbackPath -PathType Leaf)) {
+        return $FallbackPath
     }
     return $null
 }
 
-Write-Step "Checking kiro-cli for updates"
-try {
-    $kiroExe = Resolve-KiroCliPath
-    if (-not $kiroExe) {
-        Write-Ok "kiro-cli not installed - nothing to check"
-    } else {
-        $check = Invoke-KiroCliCommand -Exe $kiroExe -KiroArgs @("update", "--check") -TimeoutSec 90
-        if ($check.TimedOut) {
-            Write-Warn "kiro-cli update --check timed out - continuing without updating"
-        } elseif ($check.Output -match "Update available") {
-            $line = ($check.Output -split "`r?`n" | Where-Object { $_ -match "Update available" } | Select-Object -First 1).Trim()
-            Write-Warn "$line - installing now (one download instead of one per cold start)"
-            $apply = Invoke-KiroCliCommand -Exe $kiroExe -KiroArgs @("update") -TimeoutSec 1800
-            if ($apply.TimedOut) {
-                Write-Warn "kiro-cli update timed out - continuing; it will be retried next launch"
-            } elseif ($apply.ExitCode -ne 0) {
-                Write-Warn "kiro-cli update failed (exit $($apply.ExitCode)) - continuing; it will be retried next launch"
-            } else {
-                $version = Invoke-KiroCliCommand -Exe $kiroExe -KiroArgs @("--version") -TimeoutSec 60
-                $shown = if ($version.TimedOut) { "unknown" } else { ($version.Output).Trim() }
-                Write-Ok "kiro-cli updated - now $shown"
-            }
-        } else {
-            Write-Ok "kiro-cli is already on the current version"
-        }
+function Get-VendorCliTargets {
+    $targets = @()
+
+    $kiroFallback = $null
+    if ($env:LOCALAPPDATA) { $kiroFallback = Join-Path $env:LOCALAPPDATA "Kiro-Cli\kiro-cli.exe" }
+    $targets += [pscustomobject]@{
+        Name         = "kiro-cli"
+        Command      = "kiro-cli"
+        FallbackPath = $kiroFallback
+        CheckArgs    = @("update", "--check")
+        CheckPattern = "Update available"
+        StaleNote    = "a stale kiro-cli only costs bandwidth"
     }
-} catch {
-    Write-Warn "kiro-cli update check failed: $($_.Exception.Message)"
-    Write-Warn "Continuing - a stale kiro-cli only costs bandwidth, it does not block Clowder."
+
+    # xAI Grok Build: install.ps1 drops it here and prepends the dir to User PATH.
+    $grokFallback = $null
+    if ($env:USERPROFILE) { $grokFallback = Join-Path $env:USERPROFILE ".grok\bin\grok.exe" }
+    $targets += [pscustomobject]@{
+        Name         = "grok"
+        Command      = "grok"
+        FallbackPath = $grokFallback
+        CheckArgs    = $null
+        CheckPattern = $null
+        StaleNote    = "a stale grok only costs bandwidth"
+    }
+
+    $cursorFallback = $null
+    if ($env:LOCALAPPDATA) { $cursorFallback = Join-Path $env:LOCALAPPDATA "cursor-agent\cursor-agent.cmd" }
+    $targets += [pscustomobject]@{
+        Name         = "cursor-agent"
+        Command      = "cursor-agent"
+        FallbackPath = $cursorFallback
+        CheckArgs    = $null
+        CheckPattern = $null
+        StaleNote    = "a stale cursor-agent only costs bandwidth"
+    }
+
+    return $targets
+}
+
+function Update-VendorCli {
+    param([Parameter(Mandatory = $true)][pscustomobject]$Target)
+
+    $exe = Resolve-VendorCliPath -Command $Target.Command -FallbackPath $Target.FallbackPath
+    if (-not $exe) {
+        Write-Ok "$($Target.Name) not installed - nothing to check"
+        return
+    }
+
+    if ($Target.CheckArgs) {
+        $check = Invoke-CliUpdaterCommand -Exe $exe -CliArgs $Target.CheckArgs -TimeoutSec 90
+        if ($check.TimedOut) {
+            Write-Warn "$($Target.Name) update --check timed out - continuing without updating"
+            return
+        }
+        if ($check.Output -notmatch $Target.CheckPattern) {
+            Write-Ok "$($Target.Name) is already on the current version"
+            return
+        }
+        $line = ($check.Output -split "`r?`n" |
+            Where-Object { $_ -match $Target.CheckPattern } |
+            Select-Object -First 1).Trim()
+        Write-Warn "$line - installing now (one download instead of one per cold start)"
+    }
+
+    # 1800s: grok pulls a ~135MB payload, kiro-cli a ~238MB installer.
+    $apply = Invoke-CliUpdaterCommand -Exe $exe -CliArgs @("update") -TimeoutSec 1800
+    if ($apply.TimedOut) {
+        Write-Warn "$($Target.Name) update timed out - continuing; it will be retried next launch"
+        return
+    }
+    if ($apply.ExitCode -ne 0) {
+        Write-Warn "$($Target.Name) update failed (exit $($apply.ExitCode)) - continuing; it will be retried next launch"
+        return
+    }
+    if ($apply.Output -match "(?i)already up to date") {
+        Write-Ok "$($Target.Name) is already on the current version"
+        return
+    }
+    $version = Invoke-CliUpdaterCommand -Exe $exe -CliArgs @("--version") -TimeoutSec 60
+    $shown = "unknown"
+    if (-not $version.TimedOut) { $shown = ($version.Output).Trim() }
+    Write-Ok "$($Target.Name) updated - now $shown"
+}
+
+foreach ($target in Get-VendorCliTargets) {
+    Write-Step "Checking $($target.Name) for updates"
+    try {
+        Update-VendorCli -Target $target
+    } catch {
+        Write-Warn "$($target.Name) update check failed: $($_.Exception.Message)"
+        Write-Warn "Continuing - $($target.StaleNote), it does not block Clowder."
+    }
 }
 
 # --- 4) Sweep expired Kiro artifacts outside the repo ------------------------
