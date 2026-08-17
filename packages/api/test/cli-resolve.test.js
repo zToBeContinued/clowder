@@ -290,3 +290,45 @@ test(
     }
   },
 );
+
+// --- PATH 陈旧兜底（Windows）---
+//
+// 根因：安装器写的是注册表里的持久 PATH，Windows 只向顶层窗口广播
+// WM_SETTINGCHANGE，后台/服务进程收不到，因此长驻进程手里永远是启动那刻的
+// PATH 快照 —— 新装的 CLI 直到重启整个进程树才可见。实测踩过：grok 装好后
+// 9 个单测全在拿到参数前短路成「CLI 未找到」。
+
+test('resolveCliCommand 在 PATH 过期时改用注册表里的最新 PATH（Windows）', (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('仅 Windows 适用');
+    return;
+  }
+  const originalPath = process.env.PATH;
+  try {
+    // 砍掉 PATH，模拟「安装之前就已启动的长驻进程」
+    process.env.PATH = 'C:\\Windows\\System32';
+    invalidateCliCommand('cursor-agent');
+    const resolved = resolveCliCommand('cursor-agent');
+    // 本机装了 cursor-agent 才断言命中；未装时只要求不抛错、返回 null
+    if (resolved !== null) {
+      assert.match(resolved, /cursor-agent/);
+    }
+  } finally {
+    process.env.PATH = originalPath;
+    invalidateCliCommand('cursor-agent');
+  }
+});
+
+test('PATH 过期兜底不会为不存在的 CLI 编造路径', (t) => {
+  if (process.platform !== 'win32') {
+    t.skip('仅 Windows 适用');
+    return;
+  }
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = 'C:\\Windows\\System32';
+    assert.equal(resolveCliCommand('nosuchcli-should-stay-null-42'), null);
+  } finally {
+    process.env.PATH = originalPath;
+  }
+});

@@ -66,6 +66,62 @@ function resolveWindowsVendorInstall(command: string): string | null {
   return null;
 }
 
+/** Windows 上可执行文件的后缀候选（PATHEXT 的常用子集，按可靠性排序）。 */
+const WINDOWS_EXEC_SUFFIXES = ['.cmd', '.exe', '.bat', ''] as const;
+
+/** 注册表里持久化 PATH 的两个位置：机器级与用户级。 */
+const PATH_REGISTRY_KEYS = [
+  'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+  'HKCU\\Environment',
+] as const;
+
+/**
+ * 从注册表读「当前最新」的 PATH 条目。
+ *
+ * 为什么必须绕过 process.env.PATH：安装器（grok 的 install.ps1、各类 npm 全局包）
+ * 写的是注册表里的持久 PATH，Windows 只向顶层窗口广播 WM_SETTINGCHANGE，
+ * 后台/服务进程收不到。于是长驻进程手里永远是启动那一刻的 PATH 快照，
+ * 新装的 CLI 直到重启整个进程树才可见。
+ */
+function readRegistryPathDirs(): string[] {
+  if (!IS_WINDOWS) return [];
+  const dirs: string[] = [];
+  for (const key of PATH_REGISTRY_KEYS) {
+    try {
+      const stdout = execSync(`reg query "${key}" /v Path`, {
+        timeout: 3000,
+        encoding: 'utf-8',
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+      const match = stdout.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+)/i);
+      if (!match?.[1]) continue;
+      for (const raw of match[1].split(';')) {
+        // %SystemRoot% 之类的占位符按当前环境展开；展不开的整条丢弃
+        const expanded = raw.trim().replace(/%([^%]+)%/g, (_m, name: string) => process.env[name] ?? `%${name}%`);
+        if (expanded && !expanded.includes('%')) dirs.push(expanded);
+      }
+    } catch {
+      // 读不到就跳过这个键
+    }
+  }
+  return dirs;
+}
+
+/** 用注册表里的最新 PATH 再搜一遍指定命令。 */
+function searchRefreshedPath(command: string): string | null {
+  const currentPath = (process.env.PATH ?? '').toLowerCase();
+  for (const dir of readRegistryPathDirs()) {
+    // 已经在本进程 PATH 里的目录不必重试——前面的 `where` 已经覆盖过
+    if (currentPath.includes(dir.toLowerCase())) continue;
+    for (const suffix of WINDOWS_EXEC_SUFFIXES) {
+      const candidate = resolve(dir, `${command}${suffix}`);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return null;
+}
+
 const resolvedCache = new Map<string, string>();
 
 /**
@@ -180,6 +236,17 @@ export function resolveCliCommand(command: string): string | null {
         }
       }
     }
+  }
+
+  // 最后一招：本进程的 PATH 可能已经过期。安装器改的是注册表里的持久 PATH，
+  // 已运行的进程不会感知（Windows 只向顶层窗口广播 WM_SETTINGCHANGE，
+  // 服务/后台进程收不到），因此长驻的 clowder API 会一直用启动时那份快照。
+  // 这里直接读注册表里的最新 PATH 再找一遍 —— 这是通用修复，任何「刚装好的
+  // CLI」都能被认出来，不必为每个厂商单独登记落点。
+  const fromFreshPath = searchRefreshedPath(command);
+  if (fromFreshPath) {
+    resolvedCache.set(command, fromFreshPath);
+    return fromFreshPath;
   }
 
   return null;

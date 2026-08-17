@@ -59,7 +59,8 @@ test('streams thought, text, session_init and done from grok streaming-json', as
   assert.equal(messages[3].sessionId, 'grok-session-1');
   assert.equal(messages[4].metadata.sessionId, 'grok-session-1');
 
-  assert.equal(spawnOptions.command.endsWith('/grok'), true);
+  // 跨平台：Unix 解析成 .../grok，Windows 解析成 ...\grok.exe（厂商落点兜底命中）
+  assert.match(spawnOptions.command, /[\\/]grok(\.exe)?$/);
   assert.deepEqual(spawnOptions.args.slice(0, 2), ['-p', 'Be precise.\n\nReply briefly']);
   assert.ok(spawnOptions.args.includes('--output-format'));
   assert.ok(spawnOptions.args.includes('streaming-json'));
@@ -256,7 +257,13 @@ test('injects an isolated native MCP config without persisting callback or accou
 
     assert.ok(runtimeHome, 'native MCP invocation should receive an isolated GROK_HOME');
     assert.match(config, /cat-cafe-clowder-runtime/);
-    assert.match(config, new RegExp(mcpServerPath.replaceAll('\\', '\\\\')));
+    // config.toml 里反斜杠是 TOML 转义后的（C:\\Users\\...），所以拿「TOML 编码后的
+    // 路径」做子串比较。此前用 new RegExp(path.replaceAll('\\','\\\\')) 只转了一层，
+    // 在 Unix 上因路径无反斜杠而空转、看起来是绿的，Windows 上必然失败。
+    assert.ok(
+      config.includes(mcpServerPath.replaceAll('\\', '\\\\')),
+      `config.toml 应包含 MCP server 路径，实际：${config}`,
+    );
     assert.doesNotMatch(config, /callback-secret/);
     assert.doesNotMatch(config, /xai-account-secret/);
     assert.match(bridge, /CAT_CAFE_CALLBACK_TOKEN/);
@@ -264,8 +271,12 @@ test('injects an isolated native MCP config without persisting callback or accou
     assert.doesNotMatch(config, /api-bearer-secret/);
     assert.match(bridge, /ALLOWED_WORKSPACE_DIRS/);
     assert.doesNotMatch(bridge, /XAI_API_KEY/);
-    assert.equal(configMode, 0o600);
-    assert.equal(bridgeMode, 0o600);
+    // Windows 不实现 Unix 权限位：fs 写出的文件恒为 0o666，mode 只反映「只读」属性。
+    // 产品侧 writeFileSync(..., { mode: 0o600 }) 收紧权限是对的，但只在 Unix 可验证。
+    if (process.platform !== 'win32') {
+      assert.equal(configMode, 0o600);
+      assert.equal(bridgeMode, 0o600);
+    }
     assert.equal(authPath, join(runtimeHome, 'auth.json'));
     assert.equal(runtimeSessions, realpathSync(join(sourceGrokHome, 'sessions')));
     assert.equal(existsSync(runtimeHome), false, 'ephemeral Grok home should be removed after invocation');
